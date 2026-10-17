@@ -52,6 +52,17 @@ assert.notEqual(a.last.state.r, y0, 'alice should see bob\'s paddle move');
 assert.equal(a.last.state.r, b.last.state.r, 'both clients agree on the paddle');
 console.log('input syncs to the other player');
 
+// Nobody defends, so someone concedes and earns a skill point to spend.
+await a.until((c) => c.last.skills && (c.last.skills.left.points || c.last.skills.right.points), 'a skill point', 10000);
+const loser = a.last.skills.left.points ? 'left' : 'right';
+const buyer = loser === 'left' ? a : b;
+buyer.send({ t: 'skill', id: 'reach2' }); // locked: needs reach1 first
+buyer.send({ t: 'skill', id: 'reach1' });
+await a.until((c) => c.last.skills[loser].owned.includes('reach1'), 'skill bought');
+assert.deepEqual(a.last.skills[loser].owned, ['reach1']);
+await a.until((c) => c.last.state[loser === 'left' ? 'lh' : 'rh'] > a.last.welcome.paddle.height, 'taller paddle');
+console.log(`${loser} conceded, earned a point and bought a taller paddle`);
+
 const spectator = join(code, 'Eve', 'token-eve-1');
 await spectator.until((c) => c.last.welcome, 'spectator welcome');
 assert.equal(spectator.last.welcome.side, null);
