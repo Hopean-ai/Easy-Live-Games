@@ -47,25 +47,40 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+// A side's paddle and hitting numbers after skill upgrades (src/game.js sideStats). Without
+// upgrades they come from the base config.
+export function statsFor(cfg, side) {
+  return cfg.sides?.[side] ?? {
+    height: cfg.paddle.height,
+    speed: cfg.paddle.speed,
+    maxAngle: Math.PI / 4,
+    spinAngle: 0,
+    bendLimit: Math.PI / 4,
+    speedup: cfg.ball.speedup,
+  };
+}
+
 // Where my paddle will be at local time `until`, replaying inputs the server has not applied yet.
 // `y`/`dir` are the server's paddle position and direction at local time `from` (the snapshot).
 // Each pending input ({ dir, at }) is assumed to land `lead` ms after it was sent.
-export function replayPaddle(y, dir, from, pending, until, lead, cfg) {
-  const max = cfg.field.height - cfg.paddle.height;
+export function replayPaddle(y, dir, from, pending, until, lead, cfg, side) {
+  const { height, speed } = statsFor(cfg, side);
+  const max = cfg.field.height - height;
   let t = from;
   for (const input of pending) {
     const lands = clamp(input.at + lead, t, until);
-    y = clamp(y + (dir * cfg.paddle.speed * (lands - t)) / 1000, 0, max);
+    y = clamp(y + (dir * speed * (lands - t)) / 1000, 0, max);
     t = lands;
     dir = input.dir;
   }
-  return clamp(y + (dir * cfg.paddle.speed * Math.max(0, until - t)) / 1000, 0, max);
+  return clamp(y + (dir * speed * Math.max(0, until - t)) / 1000, 0, max);
 }
 
 // Advances a snapshot `seconds` forward with the same rules as src/game.js `step`, minus scoring:
 // a ball that leaves the court just keeps going until the server says who scored.
-// paddleY(side, t) gives each paddle's y at t seconds after the snapshot.
-export function predictBall(snap, seconds, paddleY, cfg) {
+// paddleY(side, t) gives each paddle's y at t seconds after the snapshot, and paddleDir(side, t)
+// its direction then (spin depends on it); by default each paddle keeps the snapshot's direction.
+export function predictBall(snap, seconds, paddleY, cfg, paddleDir = (side) => (side === 'left' ? snap.il : snap.ir) ?? 0) {
   const { field, paddle, ball } = cfg;
   const b = { x: snap.bx, y: snap.by, vx: snap.bvx, vy: snap.bvy };
   let serveIn = snap.si ?? (snap.serve ? 1 : 0);
@@ -89,25 +104,29 @@ export function predictBall(snap, seconds, paddleY, cfg) {
     }
     const leftFace = paddle.inset + paddle.width;
     const rightFace = field.width - paddle.inset - paddle.width;
-    if (b.vx < 0 && prevX >= leftFace && b.x < leftFace && covers(paddleY('left', t), b, cfg)) {
-      bounce(b, paddleY('left', t), 1, leftFace, cfg);
+    const left = statsFor(cfg, 'left');
+    const right = statsFor(cfg, 'right');
+    if (b.vx < 0 && prevX >= leftFace && b.x < leftFace && covers(paddleY('left', t), left, b, cfg)) {
+      bounce(b, paddleY('left', t), paddleDir('left', t), left, 1, leftFace, cfg);
     } else if (b.vx > 0 && prevX + ball.size <= rightFace && b.x + ball.size > rightFace
-      && covers(paddleY('right', t), b, cfg)) {
-      bounce(b, paddleY('right', t), -1, rightFace - ball.size, cfg);
+      && covers(paddleY('right', t), right, b, cfg)) {
+      bounce(b, paddleY('right', t), paddleDir('right', t), right, -1, rightFace - ball.size, cfg);
     }
   }
   return { bx: b.x, by: b.y, serving: serveIn > 0 };
 }
 
-function covers(py, b, cfg) {
-  return b.y + cfg.ball.size >= py && b.y <= py + cfg.paddle.height;
+function covers(py, st, b, cfg) {
+  return b.y + cfg.ball.size >= py && b.y <= py + st.height;
 }
 
-function bounce(b, py, dir, x, cfg) {
-  const { paddle, ball } = cfg;
-  const offset = (b.y + ball.size / 2 - (py + paddle.height / 2)) / (paddle.height / 2);
-  const angle = clamp(offset, -1, 1) * (Math.PI / 4);
-  const speed = Math.min(Math.hypot(b.vx, b.vy) * ball.speedup, ball.maxSpeed);
+// Same as bounce() in src/game.js, with the hitter's upgrades in `st`.
+function bounce(b, py, input, st, dir, x, cfg) {
+  const { ball } = cfg;
+  const offset = (b.y + ball.size / 2 - (py + st.height / 2)) / (st.height / 2);
+  let angle = clamp(offset, -1, 1) * st.maxAngle;
+  if (st.spinAngle) angle = clamp(angle + input * st.spinAngle, -st.bendLimit, st.bendLimit);
+  const speed = Math.min(Math.hypot(b.vx, b.vy) * st.speedup, ball.maxSpeed);
   b.x = x;
   b.vx = dir * speed * Math.cos(angle);
   b.vy = speed * Math.sin(angle);

@@ -2,7 +2,7 @@
 // predicts ahead of the snapshots it receives (see netcode.js), and draws them. Player names are
 // only ever put on the page with textContent, never innerHTML, so a name like <img onerror=...>
 // renders as text.
-import { Clock, Smoothed, predictBall, replayPaddle } from './netcode.js';
+import { Clock, Smoothed, predictBall, replayPaddle, statsFor } from './netcode.js';
 
 const PING_EVERY_MS = 2000;
 const MAX_PREDICT_S = 0.5; // past this, a silent server means trouble, not lag: stop guessing
@@ -16,7 +16,8 @@ const ctx = canvas.getContext('2d');
 let ws = null;
 let room = null;
 let me = { side: null, token: sessionStorage.getItem('pong-token') || randomToken() };
-let config = null; // field/paddle/ball sizes from the server
+let config = null; // field/paddle/ball sizes and the skill tree from the server
+let skills = null; // { left: { points, owned, stats }, right: ... } from the server
 let lobby = null;
 let latest = null; // newest state snapshot
 let myY = null; // where my paddle is drawn, used by touch controls
@@ -150,15 +151,21 @@ function onMessage(msg) {
   switch (msg.t) {
     case 'welcome':
       me.side = msg.side;
-      config = { field: msg.field, paddle: msg.paddle, ball: msg.ball, winScore: msg.winScore };
+      config = { field: msg.field, paddle: msg.paddle, ball: msg.ball, winScore: msg.winScore, skills: msg.skills };
       latest = null;
       pending = [];
       myY = null;
       for (const v of Object.values(shown)) v.correct(0, 0, true);
+      buildTree();
+      break;
+    case 'skills':
+      skills = msg;
+      renderTree();
       break;
     case 'lobby':
       lobby = msg;
       if (msg.status !== 'over') hideOverlay();
+      renderTree();
       // The server zeroes input while paused; re-send a key that is still held.
       if (msg.status === 'playing' && dir) sendInput();
       renderLobby();
@@ -234,6 +241,64 @@ function hideOverlay() {
   $('overlay').hidden = true;
 }
 
+// ---- Skill tree ----
+// The server owns skill points and applies every effect; this only shows the tree and asks to buy.
+
+const treeButtons = new Map(); // skill id -> button
+
+function buildTree() {
+  const root = $('tree');
+  root.replaceChildren();
+  treeButtons.clear();
+  const branches = [...new Set(config.skills.map((s) => s.branch))];
+  for (const branch of branches) {
+    const col = document.createElement('div');
+    col.className = 'branch';
+    for (const skill of config.skills.filter((s) => s.branch === branch)) {
+      const key = config.skills.indexOf(skill) + 1;
+      const btn = document.createElement('button');
+      btn.className = 'skill';
+      btn.title = `${skill.desc} (key ${key})`;
+      const name = document.createElement('span');
+      name.className = 'skill-name';
+      name.textContent = `${key}. ${skill.name}`;
+      const meta = document.createElement('span');
+      meta.className = 'skill-meta';
+      meta.textContent = `${skill.cost} pt · ${skill.desc}`;
+      btn.append(name, meta);
+      btn.addEventListener('click', () => buySkill(skill.id));
+      col.append(btn);
+      treeButtons.set(skill.id, btn);
+    }
+    root.append(col);
+  }
+  renderTree();
+}
+
+function buySkill(id) {
+  if (me.side) send({ t: 'skill', id });
+}
+
+function renderTree() {
+  const panel = $('skills');
+  panel.hidden = !config || !me.side;
+  if (panel.hidden) return;
+  const mine = skills?.[me.side] ?? { points: 0, owned: [] };
+  const theirs = skills?.[me.side === 'left' ? 'right' : 'left'];
+  $('skill-points').textContent = `${mine.points} skill point${mine.points === 1 ? '' : 's'}`;
+  const named = (ids) => ids.map((id) => config.skills.find((s) => s.id === id)?.name).filter(Boolean);
+  $('their-skills').textContent = theirs?.owned.length ? `Opponent has: ${named(theirs.owned).join(', ')}` : '';
+  const playing = lobby?.status === 'playing';
+  for (const skill of config.skills) {
+    const btn = treeButtons.get(skill.id);
+    const owned = mine.owned.includes(skill.id);
+    const locked = skill.requires && !mine.owned.includes(skill.requires);
+    btn.classList.toggle('owned', owned);
+    btn.classList.toggle('locked', Boolean(locked));
+    btn.disabled = owned || locked || mine.points < skill.cost || !playing;
+  }
+}
+
 // ---- Input ----
 
 const held = new Set();
@@ -253,6 +318,12 @@ function setDir(d) {
 }
 
 addEventListener('keydown', (e) => {
+  const digit = /^Digit([1-9])$/.exec(e.code);
+  if (digit && config?.skills && document.activeElement?.tagName !== 'INPUT') {
+    const skill = config.skills[Number(digit[1]) - 1];
+    if (skill) buySkill(skill.id);
+    return;
+  }
   if (!UP.has(e.code) && !DOWN.has(e.code)) return;
   if (document.activeElement?.tagName === 'INPUT') return;
   e.preventDefault();
@@ -288,9 +359,20 @@ canvas.addEventListener('touchcancel', onTouch, { passive: false });
 
 // ---- Prediction ----
 
+// The config with each side's skill upgrades, so prediction plays by the server's numbers. The
+// paddle height comes from the snapshot itself, so it always matches that snapshot's positions.
+function courtFor(snap) {
+  const side = (s) => ({
+    ...(skills?.[s]?.stats ?? statsFor(config, s)),
+    height: snap[s === 'left' ? 'lh' : 'rh'] ?? config.paddle.height,
+  });
+  return { ...config, sides: { left: side('left'), right: side('right') } };
+}
+
 // The court as it will be when an input sent now reaches the server (for spectators: as it is
 // on the server now), worked out from one snapshot.
 function predict(snap, now) {
+  const court = courtFor(snap);
   const at = clock.toLocal(snap.now);
   const lead = me.side ? clock.lead() : 0;
   const until = now + lead;
@@ -302,13 +384,23 @@ function predict(snap, now) {
     const key = side === 'left' ? 'l' : 'r';
     const d = side === 'left' ? snap.il : snap.ir;
     if (side === me.side && seconds > 0) {
-      return replayPaddle(snap[key], d, at, unacked, at + t * 1000, lead, config);
+      return replayPaddle(snap[key], d, at, unacked, at + t * 1000, lead, court, side);
     }
     // The other player: assume they keep doing what they were doing.
-    const max = config.field.height - config.paddle.height;
-    return Math.max(0, Math.min(max, snap[key] + d * config.paddle.speed * t));
+    const { height, speed } = statsFor(court, side);
+    const max = config.field.height - height;
+    return Math.max(0, Math.min(max, snap[key] + d * speed * t));
   };
-  const ball = predictBall(snap, seconds, paddleY, config);
+  // Spin depends on which way a paddle is moving as it hits; for mine, that's my latest input
+  // to have landed by then.
+  const paddleDir = (side, t) => {
+    let d = side === 'left' ? snap.il : snap.ir;
+    if (side === me.side) {
+      for (const input of unacked) if (input.at + lead <= at + t * 1000) d = input.dir;
+    }
+    return d ?? 0;
+  };
+  const ball = predictBall(snap, seconds, paddleY, court, paddleDir);
   return { l: paddleY('left', seconds), r: paddleY('right', seconds), bx: ball.bx, by: ball.by, serving: ball.serving };
 }
 
@@ -357,7 +449,7 @@ function draw(now, dt) {
   const s = latest;
 
   if (me.side && touchY !== null && myY !== null) {
-    const centre = myY + paddle.height / 2;
+    const centre = myY + statsFor(courtFor(s), me.side).height / 2;
     setDir(Math.abs(touchY - centre) < 8 ? 0 : touchY < centre ? -1 : 1);
   }
 
@@ -370,8 +462,10 @@ function draw(now, dt) {
   if (me.side) myY = me.side === 'left' ? leftY : rightY;
 
   ctx.fillStyle = '#e8ecf1';
-  ctx.fillRect(paddle.inset * sx, leftY * sy, paddle.width * sx, paddle.height * sy);
-  ctx.fillRect((field.width - paddle.inset - paddle.width) * sx, rightY * sy, paddle.width * sx, paddle.height * sy);
+  const leftH = statsFor(courtFor(s), 'left').height;
+  const rightH = statsFor(courtFor(s), 'right').height;
+  ctx.fillRect(paddle.inset * sx, leftY * sy, paddle.width * sx, leftH * sy);
+  ctx.fillRect((field.width - paddle.inset - paddle.width) * sx, rightY * sy, paddle.width * sx, rightH * sy);
 
   if (!s.winner) {
     ctx.fillStyle = p.serving ? '#5ad1a5' : '#e8ecf1';

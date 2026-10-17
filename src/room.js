@@ -1,7 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
-  createGame, setInput, step, snapshot, SIDES, FIELD, PADDLE, BALL, WIN_SCORE, SERVE_DELAY,
+  createGame, setInput, step, snapshot, buy, sideStats, SIDES, FIELD, PADDLE, BALL, WIN_SCORE, SERVE_DELAY,
 } from './game.js';
+import { SKILLS } from './skills.js';
 import { sanitizeName } from './names.js';
 
 export const TICK_MS = 1000 / 60;
@@ -60,9 +61,10 @@ export class PongRoom extends DurableObject {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ side, token, name });
     send(server, {
-      t: 'welcome', side, token, field: FIELD, paddle: PADDLE, ball: BALL, winScore: WIN_SCORE,
+      t: 'welcome', side, token, field: FIELD, paddle: PADDLE, ball: BALL, winScore: WIN_SCORE, skills: SKILLS,
     });
     if (this.game) send(server, this.stateMessage());
+    if (this.game) send(server, this.skillsMessage());
     if (this.status === 'over') send(server, { t: 'over', winner: this.game.winner, reason: this.overReason });
 
     this.seatsChanged();
@@ -106,6 +108,13 @@ export class PongRoom extends DurableObject {
         if (side && this.game && this.status === 'playing') {
           setInput(this.game, side, msg.dir);
           if (Number.isSafeInteger(msg.seq)) this.acks[side] = msg.seq;
+        }
+        break;
+      case 'skill':
+        // Upgrades are validated and applied here; the client only names the one it wants.
+        if (side && this.game && this.status === 'playing' && typeof msg.id === 'string' && buy(this.game, side, msg.id)) {
+          this.broadcast(this.skillsMessage());
+          this.broadcast(this.stateMessage());
         }
         break;
       case 'rematch':
@@ -166,6 +175,7 @@ export class PongRoom extends DurableObject {
     this.game = createGame();
     this.rematch.clear();
     this.status = 'playing';
+    this.broadcast(this.skillsMessage());
     this.startLoop();
   }
 
@@ -225,6 +235,7 @@ export class PongRoom extends DurableObject {
       return;
     }
     this.tick += 1;
+    if (scorer) this.broadcast(this.skillsMessage());
     if (scorer || this.tick % BROADCAST_EVERY === 0) this.broadcast(this.stateMessage());
   }
 
@@ -234,6 +245,11 @@ export class PongRoom extends DurableObject {
       t: 'state', seq: this.seq, now: Date.now(), status: this.status,
       al: this.acks.left, ar: this.acks.right, ...snapshot(this.game),
     };
+  }
+
+  skillsMessage() {
+    const side = (s) => ({ ...this.game.skills[s], stats: sideStats(this.game, s) });
+    return { t: 'skills', left: side('left'), right: side('right') };
   }
 
   lobbyMessage() {
