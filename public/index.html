@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Live Pong</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <section id="lobby">
+      <h1>Live Pong</h1>
+      <p class="sub">Two players, one ball, first to 7.</p>
+      <label>Your name <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player"></label>
+      <button id="create">Create a room</button>
+      <form id="join-form">
+        <input id="code" maxlength="12" placeholder="Room code" autocapitalize="characters">
+        <button type="submit">Join</button>
+      </form>
+      <p id="lobby-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="play" hidden>
+      <header class="bar">
+        <span id="left-name" class="pname"></span>
+        <span class="score"><span id="left-score">0</span> : <span id="right-score">0</span></span>
+        <span id="right-name" class="pname"></span>
+      </header>
+      <div class="stage">
+        <canvas id="canvas" width="800" height="500"></canvas>
+        <div id="overlay" class="overlay" hidden>
+          <p id="overlay-title"></p>
+          <p id="overlay-sub" class="sub"></p>
+          <button id="rematch" hidden>Rematch</button>
+        </div>
+      </div>
+      <footer class="bar small">
+        <span>Room <strong id="room-code"></strong> <button id="copy" class="link">Copy invite link</button></span>
+        <span id="status"></span>
+        <span id="ping"></span>
+      </footer>
+      <p class="hint">Move with W/S or the arrow keys. On a phone, touch above or below your paddle.</p>
+    </section>
+  </main>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>

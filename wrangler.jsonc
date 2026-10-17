@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "easy-live-games",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "PongRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PongRoom"] }],
+  "observability": { "enabled": true }
+}
