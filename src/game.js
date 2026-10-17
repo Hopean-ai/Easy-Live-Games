@@ -132,6 +132,9 @@ export function snapshot(game) {
     bvy: round(game.ball.vy),
     sl: game.score.left,
     sr: game.score.right,
+    il: game.paddles.left.input,
+    ir: game.paddles.right.input,
+    si: Math.round(game.serveIn * 1000) / 1000,
     serve: game.serveIn > 0,
     winner: game.winner,
   };
