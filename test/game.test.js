@@ -117,5 +117,5 @@ test('snapshot is compact and rounded', () => {
   g.ball.x = 1.23456;
   const s = snapshot(g);
   assert.equal(s.bx, 1.2);
-  assert.deepEqual(Object.keys(s).sort(), ['bvx', 'bvy', 'bx', 'by', 'l', 'r', 'serve', 'sl', 'sr', 'winner']);
+  assert.deepEqual(Object.keys(s).sort(), ['bvx', 'bvy', 'bx', 'by', 'il', 'ir', 'l', 'r', 'serve', 'si', 'sl', 'sr', 'winner']);
 });

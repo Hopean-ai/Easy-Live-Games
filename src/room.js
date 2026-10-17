@@ -25,6 +25,7 @@ export class PongRoom extends DurableObject {
     this.lastTick = 0;
     this.tick = 0;
     this.seq = 0;
+    this.acks = { left: 0, right: 0 }; // last input seq applied per side, for client reconciliation
     this.overReason = null;
 
     // Sockets survive hibernation but memory does not, so rebuild the seats from them.
@@ -99,10 +100,13 @@ export class PongRoom extends DurableObject {
 
     switch (msg?.t) {
       case 'ping':
-        send(ws, { t: 'pong', id: msg.id });
+        send(ws, { t: 'pong', id: msg.id, now: Date.now() });
         break;
       case 'input':
-        if (side && this.game && this.status === 'playing') setInput(this.game, side, msg.dir);
+        if (side && this.game && this.status === 'playing') {
+          setInput(this.game, side, msg.dir);
+          if (Number.isSafeInteger(msg.seq)) this.acks[side] = msg.seq;
+        }
         break;
       case 'rematch':
         // After hibernation the room wakes as 'waiting'; seatsChanged then simply starts a game.
@@ -226,7 +230,10 @@ export class PongRoom extends DurableObject {
 
   stateMessage() {
     this.seq += 1;
-    return { t: 'state', seq: this.seq, now: Date.now(), status: this.status, ...snapshot(this.game) };
+    return {
+      t: 'state', seq: this.seq, now: Date.now(), status: this.status,
+      al: this.acks.left, ar: this.acks.right, ...snapshot(this.game),
+    };
   }
 
   lobbyMessage() {

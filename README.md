@@ -13,7 +13,7 @@ One player creates a room and shares the link; the second player joins and the g
   - Uses the WebSocket Hibernation API, so an idle room costs nothing.
 - **`src/game.js`**: the pure simulation (paddles, ball, scoring), shared by the room and the tests.
 - **`src/names.js`**: player-name cleanup. Names are also only ever rendered with `textContent` in the client.
-- **`public/`**: the browser client. It interpolates between snapshots and predicts your own paddle so input feels immediate.
+- **`public/`**: the browser client. `public/netcode.js` hides lag: the client draws the court as it will be when your input reaches the server (half a round trip ahead of the newest snapshot), so your paddle moves the instant you press and the ball is where your paddle will meet it. Unacknowledged inputs are replayed on top of each snapshot, the other paddle and the ball are predicted forward with the same rules as `src/game.js`, and corrections glide instead of jumping. The server stays authoritative.
 
 ## Develop
 
@@ -23,6 +23,8 @@ npm run dev          # http://localhost:8787, open it in two tabs
 npm test             # unit tests
 node scripts/smoke.mjs   # end-to-end multiplayer check against the running dev server
 ```
+
+Add `?lag=200` to the URL (before joining a room) to add 200 ms of round trip in that tab and feel how the game plays from far away.
 
 ## Deploy
 
