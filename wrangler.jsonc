@@ -11,5 +11,12 @@
     "bindings": [{ "name": "ROOMS", "class_name": "PongRoom" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PongRoom"] }],
+  // Pull request builds run `wrangler preview`. Binding the class with no script_name gives each
+  // Preview its own Durable Object namespace, so preview rooms never touch production rooms.
+  "previews": {
+    "durable_objects": {
+      "bindings": [{ "name": "ROOMS", "class_name": "PongRoom" }]
+    }
+  },
   "observability": { "enabled": true }
 }
