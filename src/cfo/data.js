@@ -17,8 +17,10 @@ export const CONFIG = {
   portfolioGoal: 100000, // spreadsheet: $100k personal asset portfolio (~93 draws)
   valueTarget: 50000, // PLACEHOLDER: company value that wins the "company value" game
   maxYears: 0, // optional room setting: end once every company has closed this many years (0 = no limit)
-  fraudFine: 1000, // PLACEHOLDER: per fraud found at an Interim Review
-  fyeFraudChance: 0.25, // PLACEHOLDER: chance each unfound fraud is caught when its owner passes FYE
+  // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
+  // adds to the chance. Each check, every fraud so far has this chance of being found (PLACEHOLDER).
+  auditFraudChance: 0.2, // at an Interim Review (or island Customs)
+  fyeFraudChance: 0.05, // at each fiscal year end
   misstatementFine: 100, // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
   cleanBooksBonus: 200, // PLACEHOLDER: for filing a fiscal year with no misstatements
   ipoYears: 2, // PLACEHOLDER: fiscal years a company needs before it can go public

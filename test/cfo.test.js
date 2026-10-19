@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -277,8 +277,8 @@ test('loans add a liability and charge interest at year end', () => {
   assert.equal(balanceSheet(p).liabilities.loan, 1500);
 });
 
-test('frauds are found at the Interim Review: fined and sent to CPE', () => {
-  const g = createGame(['A', 'B'], 5);
+test('fraud: more of it means likelier to be caught, and being caught is an immediate loss', () => {
+  const g = createGame(['A', 'B', 'C'], 5);
   const p = g.players[0];
   p.hand = ['cook'];
   g.phase = 'act';
@@ -286,23 +286,21 @@ test('frauds are found at the Interim Review: fined and sent to CPE', () => {
   assert.equal(p.frauds, 1);
   assert.equal(viewFor(g, 1).players[0].frauds, undefined, 'others cannot see frauds');
   assert.equal(viewFor(g, 1).players[0].hand, undefined, 'others cannot see the hand');
-  act(g, 0, { a: 'end' });
-  act(g, 1, { a: 'roll' });
-  act(g, 1, { a: 'pass' });
-  act(g, 1, { a: 'end' });
-  // Walk A onto the Interim Review square.
-  while (true) {
-    g.turn = 0;
-    g.phase = 'roll';
+  const one = fraudRisk(p, CONFIG.auditFraudChance);
+  assert.ok(Math.abs(one - CONFIG.auditFraudChance) < 1e-9);
+  p.frauds = 3;
+  assert.ok(fraudRisk(p, CONFIG.auditFraudChance) > one, 'more fraud, more risk');
+  p.isPublic = true;
+  assert.ok(fraudRisk(p, CONFIG.auditFraudChance) > fraudRisk({ ...p, isPublic: false }, CONFIG.auditFraudChance), 'public companies are watched harder');
+  p.isPublic = false;
+  // Keep landing on the Interim Review until the frauds are found: the player is out at once.
+  for (let i = 0; i < 200 && !p.out; i++) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
     p.pos = 52 - 7;
-    const cash = p.ledger.cash;
     act(g, 0, { a: 'roll' });
-    if (p.pos === 31 && p.skip) {
-      assert.equal(p.frauds, 0);
-      assert.ok(p.ledger.cash <= cash - CONFIG.fraudFine);
-      break;
-    }
   }
+  assert.ok(p.out, 'caught sooner or later');
+  assert.match(g.log.join(' '), /convicted/);
 });
 
 test('the turn timer plays an absent player\'s turn through', () => {
@@ -345,15 +343,16 @@ test('each Banking building shows its owner one more private PP&E option', () =>
 
 test('frauds can also be found when passing FYE', () => {
   let caught = 0;
-  for (let seed = 1; seed <= 40; seed++) {
-    const g = createGame(['A', 'B'], seed, { easyBooks: true });
+  for (let seed = 1; seed <= 200; seed++) {
+    const g = createGame(['A', 'B', 'C'], seed, { easyBooks: true });
     const p = g.players[0];
-    p.frauds = 2;
+    p.frauds = 4;
     p.pos = BOARD_SIZE - 2;
     act(g, 0, { a: 'roll' });
-    caught += 2 - p.frauds;
+    if (p.out) caught += 1;
   }
-  assert.ok(caught > 5 && caught < 40, `about a quarter of 80 frauds found, got ${caught}`);
+  const expected = 200 * (1 - (1 - CONFIG.fyeFraudChance) ** 4);
+  assert.ok(caught > expected / 3 && caught < expected * 2, `about ${Math.round(expected)} of 200 caught, got ${caught}`);
 });
 
 test('going public raises cash, prices the company above its books, and doubles scrutiny', () => {

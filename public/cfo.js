@@ -562,7 +562,7 @@ function renderTile() {
       fye: 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
-      review: `An audit. Every fraud you have played since your last review costs ${money(rules.config.fraudFine)} and sends you to CPE.`,
+      review: `An audit. Misstatements in your books are fined. Every fraud you have ever committed gives auditors a ${Math.round(rules.config.auditFraudChance * 100)}% chance of finding you out, and being caught is an immediate loss.`,
       terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year, and that turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
@@ -622,12 +622,15 @@ function renderHand() {
     const fraud = Boolean(rules.fraud[id]);
     const node = el('div', { class: `card ${fraud ? 'fraud' : 'market'}` },
       el('strong', {}, card.name),
-      el('span', { class: 'small' }, `${fraud ? 'Fraud' : 'Market Forces'}${card.placeholder ? ' · placeholder' : ''}`),
+      el('span', { class: 'small' }, `${fraud ? 'Fraud: if you are ever caught, you are out of the game' : 'Market Forces'}${card.placeholder ? ' · placeholder' : ''}`),
       el('p', {}, card.text));
     if (myTurn() && g.phase === 'act') node.append(playControls(id, i));
     return node;
   });
-  if (me.frauds) cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed since your last Interim Review.`));
+  if (me.frauds) {
+    const pct = (x) => `${Math.round(x * 100)}%`;
+    cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed. Chance of being caught: ${pct(me.fraudRisk.audit)} at an Interim Review or Customs, ${pct(me.fraudRisk.fye)} at each fiscal year end. Getting caught puts you out of the game.`));
+  }
   $('hand').replaceChildren(...(cards.length ? cards : [el('p', { class: 'small' }, 'No cards.')]));
 
   const assets = me.assets.map((id) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' }, `${rules.personal[id].name} ${money(rules.personal[id].value)}`));
@@ -930,6 +933,6 @@ function renderMarket() {
     return row;
   }).filter(Boolean);
   rows.push(el('p', { class: 'small' }, `You can buy a rival independent company outright for ${Math.round((rules.config.acquirePremium - 1) * 100)}% over its market value, taking its owner out of the game. Public companies are valued higher, so they cost more.`));
-  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but its frauds and misstatements are ${rules.config.publicScrutiny}× as likely to be caught and fined. Distributions are shared among all shareholders.`));
+  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but auditors look ${rules.config.publicScrutiny}× as hard: frauds are likelier to be caught and misstatements are fined more. Distributions are shared among all shareholders.`));
   $('market').replaceChildren(...rows);
 }
