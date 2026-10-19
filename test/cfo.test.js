@@ -57,7 +57,7 @@ function playOut(seed, players = 4, options = {}) {
 
 test('whole games finish with balanced books, from 2 to 6 players', () => {
   for (let seed = 1; seed <= 30; seed++) {
-    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0, maxYears: 8 });
+    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0, autoStatements: seed % 4 === 1, maxYears: 8 });
     assert.ok(g.winner !== null);
     assert.ok(g.endReason);
     if (!g.easyBooks) assert.ok(g.players.every((p) => p.misstatements === 0), 'perfect books have no misstatements');
@@ -572,4 +572,38 @@ test('statements not filed by the next year end are filed blank', () => {
   assert.equal(p.fyePending.year, 2);
   assert.equal(p.filed.year, 1);
   assert.ok(p.misstatements > 0);
+});
+
+test('auto statements are built from the entries players record', () => {
+  for (const mistake of [false, true]) {
+    const g = createGame(['A', 'B'], 23, { autoStatements: true });
+    const p = g.players[0];
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = BOARD_SIZE - 2;
+    act(g, 0, { a: 'roll' });
+    assert.ok(p.fyePending);
+    for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
+    if (mistake) {
+      // Book the starting capital as revenue instead.
+      const first = p.docs[0];
+      act(g, 0, { a: 'record', doc: first.id, lines: [['cash', 3000], ['revOps', -3000]] });
+    }
+    assert.equal(act(g, 0, { a: 'statements', income: { revOps: 999999 } }), null, 'typed numbers are ignored');
+    if (mistake) {
+      assert.ok(p.lastCheck.wrongFields.includes('capital'));
+      assert.ok(p.lastCheck.wrongFields.includes('revOps'));
+      assert.equal(p.lastCheck.corrections.length, 1);
+    } else {
+      assert.equal(p.lastCheck.errors, 0);
+      assert.equal(p.filed.balance.cash, p.lastCheck.truth.balance.cash);
+      // A second year carries the books forward.
+      Object.assign(g, { turn: 0, phase: 'roll' });
+      p.pos = BOARD_SIZE - 2;
+      act(g, 0, { a: 'roll' });
+      for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
+      assert.equal(act(g, 0, { a: 'statements' }), null);
+      assert.equal(p.lastCheck.year, 2);
+      assert.equal(p.lastCheck.errors, 0);
+    }
+  }
 });

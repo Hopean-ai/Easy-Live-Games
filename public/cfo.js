@@ -159,7 +159,7 @@ $('copy').addEventListener('click', async () => {
 });
 
 $('start').addEventListener('click', () => send({ t: 'start' }));
-$('easy-books').addEventListener('change', (e) => send({ t: 'option', easyBooks: e.target.checked }));
+$('auto-statements').addEventListener('change', (e) => send({ t: 'option', autoStatements: e.target.checked }));
 $('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
 $('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
 $('resign').addEventListener('click', () => {
@@ -284,8 +284,8 @@ function renderWaiting() {
   else if (mySeat === 0) text = n < 2 ? 'Share the invite link. You need at least one more player.' : `Start when everyone is here (up to ${max}).`;
   else text = 'Waiting for the host to start.';
   $('wait-text').textContent = text;
-  $('easy-books').checked = Boolean(state.options?.easyBooks);
-  $('easy-books').disabled = mySeat !== 0;
+  $('auto-statements').checked = Boolean(state.options?.autoStatements);
+  $('auto-statements').disabled = mySeat !== 0;
   renderWinOptions();
   $('start').hidden = mySeat !== 0;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
@@ -863,6 +863,16 @@ function renderFye() {
   if (!due) {
     fyeForm = null;
     return;
+  }
+  if (g.autoStatements && fyeForm?.year !== due) {
+    const todo = el('p', { class: 'small warn' });
+    const node = el('div', {},
+      el('h2', {}, `Fiscal year ${due} is over`),
+      el('p', { class: 'small' }, 'Your statements are built from the journal entries you recorded, so any mistakes there carry into them. Record the rest of this year\'s documents, then file. Anything not filed by your next fiscal year end is filed as it stands.'),
+      todo,
+      el('button', { onclick: () => actNow({ a: 'statements' }) }, 'File statements from my entries'));
+    fyeForm = { year: due, node, todo, sending: false };
+    $('fye').replaceChildren(node);
   }
   if (fyeForm?.year !== due) {
     const inputs = {};

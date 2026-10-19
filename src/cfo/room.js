@@ -14,7 +14,7 @@ export const ABSENT_TURN_MS = 30_000;
 export class CfoRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { easyBooks: false, valueTarget: CONFIG.valueTarget, maxYears: 0 } };
+    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: 0 } };
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get('room')) ?? this.room;
@@ -90,10 +90,10 @@ export class CfoRoom extends DurableObject {
       // The host chooses the room's options before the game starts.
       if (this.room.status !== 'waiting' || seat !== 0) return;
       const o = { ...this.room.options };
-      if ('easyBooks' in msg) o.easyBooks = Boolean(msg.easyBooks);
+      if ('autoStatements' in msg) o.autoStatements = Boolean(msg.autoStatements);
       for (const k of ['valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
       const w = winOptions(o);
-      this.room.options = { easyBooks: Boolean(o.easyBooks), valueTarget: w.valueTarget, maxYears: w.maxYears };
+      this.room.options = { autoStatements: Boolean(o.autoStatements), valueTarget: w.valueTarget, maxYears: w.maxYears };
     } else if (msg?.t === 'act') {
       if (this.room.status !== 'playing') return;
       const err = act(this.room.game, seat, msg);
