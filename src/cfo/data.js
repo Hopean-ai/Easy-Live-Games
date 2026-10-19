@@ -137,6 +137,7 @@ export const RETAIL = {
     premium: { name: 'Premium launch', volume: 1, price: 1.5 },
   },
   commission: 0.25, // landing on someone else's Retail: sell through their store, they keep this share
+  freight: 0.1, // per widget shipped on someone else's transport tile, paid to its owner
 };
 
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
 
@@ -41,6 +41,8 @@ function playOut(seed, players = 4) {
       const b = balanceSheet(q);
       assert.ok(Math.abs(b.totalAssets - b.totalLiabilitiesAndEquity) < 0.01, 'assets = liabilities + equity');
       assert.equal(b.assets.cash, q.ledger.cash);
+      const held = q.carried + g.tiles.reduce((n, t) => n + (t && t.owner === g.players.indexOf(q) ? t.stock : 0), 0);
+      if (!q.out) assert.equal(held, q.ledger.inventory, 'every widget is somewhere');
     }
   }
   return g;
@@ -98,37 +100,47 @@ test('a fiscal year end makes widgets, depreciates, taxes and closes the books',
   assert.equal(-p.ledger.retained, r.netIncome);
 });
 
-test('stores sell widgets every turn; more stores raise the price', () => {
+// Gives player i `n` widgets on their token, keeping the books balanced.
+function give(p, n) {
+  p.ledger.inventory += n;
+  p.ledger.capital -= n;
+  p.carried += n;
+}
+
+const store = (g, owner, n, rarity, cost, stock = 0) =>
+  Object.assign(g.tiles[posOfSpace(n)], { owner, zone: 'retail', building: { rarity, cost, dep: 0 }, stock });
+
+test('stores sell from their own shelves every turn; more stores raise the price', () => {
   const g = createGame(['A', 'B'], 3);
   const p = g.players[0];
-  p.ledger.inventory = 1000;
-  p.ledger.capital -= 1000; // keep the books balanced for the test's stock
-  const store = (n, rarity, cost) => Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'retail', building: { rarity, cost, dep: 0 } });
-  store(1, 'rare', 1000);
+  give(p, 1000);
+  p.carried = 0;
+  store(g, 0, 1, 'rare', 1000, 900);
   assert.deepEqual(retailTerms(g, 0), { units: 150, price: 2, stores: 1 });
-  store(2, 'uncommon', 200);
+  store(g, 0, 2, 'uncommon', 200, 100);
   assert.deepEqual(retailTerms(g, 0), { units: 180, price: 2.25, stores: 2 });
   g.phase = 'act';
   act(g, 0, { a: 'end' });
   assert.equal(p.ledger.inventory, 820);
-  assert.equal(incomeStatement(p).revenue.revSales, 405);
+  assert.equal(g.tiles[posOfSpace(1)].stock, 750);
+  assert.equal(g.tiles[posOfSpace(2)].stock, 70);
+  assert.equal(incomeStatement(p).revenue.revSales, 406); // $337.50 + $67.50, each rounded
   assert.equal(incomeStatement(p).expenses.cogs, 180);
 });
 
 test('landing on a store: your own runs a special sale, someone else\'s sells through theirs', () => {
   const g = createGame(['A', 'B'], 3);
   const [a, b] = g.players;
-  for (const p of g.players) {
-    p.ledger.inventory = 1000;
-    p.ledger.capital -= 1000;
-  }
+  give(a, 1000);
+  a.carried = 0;
+  give(b, 1000);
   const pos = posOfSpace(1);
-  Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: { rarity: 'rare', cost: 1000, dep: 0 } });
+  store(g, 0, 1, 'rare', 1000, 1000);
   g.phase = 'act';
   assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), 'There is no sale to make here.');
   a.sale = { pos };
   assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), null);
-  assert.equal(a.ledger.inventory, 550); // 3 x 150 widgets at 75% of $2
+  assert.equal(g.tiles[pos].stock, 550); // 3 x 150 widgets at 75% of $2
   assert.equal(incomeStatement(a).revenue.revSales, 675);
   assert.equal(a.sale, null, 'one sale per landing');
 
@@ -136,13 +148,45 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
   b.sale = { pos };
   const before = a.ledger.cash;
   assert.equal(act(g, 1, { a: 'sell' }), null);
-  assert.equal(b.ledger.inventory, 850);
+  assert.equal(b.carried, 850);
   assert.equal(incomeStatement(b).revenue.revSales, 300);
   assert.equal(a.ledger.cash, before + 75, 'the store owner keeps a 25% commission');
   for (const p of g.players) {
     const s = balanceSheet(p);
     assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
   }
+});
+
+test('tokens carry widgets from factories to stores, and transport tiles ship along a side', () => {
+  const g = createGame(['A', 'B'], 3);
+  const [a, b] = g.players;
+  const factory = posOfSpace(2);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
+  give(a, 300);
+  a.carried = 0;
+  g.tiles[factory].stock = 300;
+  const shop = posOfSpace(30); // bottom side, like the airport at space 34
+  store(g, 0, 30, 'common', 100);
+  const airport = posOfSpace(34);
+  g.tiles[airport].owner = 1;
+
+  // Walking past the factory picks its widgets up.
+  a.pos = factory - 1;
+  g.phase = 'roll';
+  act(g, 0, { a: 'roll' });
+  assert.equal(g.tiles[factory].stock, 0);
+  assert.equal(a.carried, 300);
+  assert.equal(sideOf(airport), 'bottom');
+
+  // Passing B's airport on the bottom side ships them to A's store there, for a freight fee.
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  a.pos = airport - 1;
+  const bCash = b.ledger.cash;
+  act(g, 0, { a: 'roll' });
+  assert.equal(a.carried, 0);
+  assert.equal(g.tiles[shop].stock, 300);
+  assert.equal(b.ledger.cash, bCash + 30);
+  assert.equal(incomeStatement(a).expenses.expFreight, 30);
 });
 
 test('loans add a liability and charge interest at year end', () => {
