@@ -41,7 +41,10 @@ const JOURNAL_SIZE = 60;
 
 // ---- Setup ----
 
-export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0) {
+// options.easyBooks: the game records every journal entry and prepares the statements itself.
+// Otherwise (the default, as Miles wants) players record their own entries and fill in their own
+// statements at each fiscal year end, checked against the true books kept here.
+export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, options = {}) {
   if (names.length < CONFIG.minPlayers || names.length > CONFIG.maxPlayers) throw new Error('bad player count');
   const g = {
     seed: seed >>> 0,
@@ -61,6 +64,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0) {
     log: [],
     winner: null,
     endReason: null,
+    easyBooks: Boolean(options.easyBooks),
   };
   g.zoningDeck = shuffle(g, Object.entries(ZONES).flatMap(([id, z]) => Array(z.count).fill(id)));
   g.ppeDeck = shuffle(g, Object.entries(RARITIES).flatMap(([id, r]) => Array(r.count).fill(id)));
@@ -76,6 +80,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0) {
       carried: 0, // widgets on the player's token; the rest sit in their factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
+      manual: !g.easyBooks, docs: [], docSeq: 0, fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
     post(p, 'Owner invests starting capital', { cash: CONFIG.startCompanyCash, capital: -CONFIG.startCompanyCash });
@@ -113,8 +118,9 @@ function drawFrom(g, deckKey, discardKey) {
 
 // ---- Books ----
 
-// Posts a balanced journal entry; positive amounts are debits, negative are credits.
-export function post(p, text, lines) {
+// Posts a balanced journal entry; positive amounts are debits, negative are credits. With manual
+// books it also hands the player a source document to record the entry from themselves.
+export function post(p, text, lines, { doc = true } = {}) {
   let sum = 0;
   for (const [acct, amt] of Object.entries(lines)) {
     if (!(acct in ACCOUNTS) || !Number.isFinite(amt)) throw new Error(`bad journal line ${acct}`);
@@ -122,8 +128,22 @@ export function post(p, text, lines) {
   }
   if (Math.abs(sum) > 1e-6) throw new Error(`unbalanced entry: ${text}`);
   for (const [acct, amt] of Object.entries(lines)) p.ledger[acct] = round(p.ledger[acct] + amt);
-  p.journal.push({ text, lines: Object.entries(lines).map(([a, v]) => [a, round(v)]) });
+  const entry = Object.entries(lines).map(([a, v]) => [a, round(v)]).filter(([, v]) => v !== 0);
+  p.journal.push({ text, lines: entry });
   if (p.journal.length > JOURNAL_SIZE) p.journal.shift();
+  if (p.manual && doc) {
+    p.docSeq += 1;
+    p.docs.push({ id: p.docSeq, text: describe(text, entry), year: p.years + 1, lines: entry, recorded: null });
+  }
+}
+
+// A source document says what happened and how much cash moved, not which accounts to use.
+function describe(text, entry) {
+  const cash = entry.find(([a]) => a === 'cash')?.[1];
+  if (cash > 0) return `${text}: ${money(cash)} received`;
+  if (cash < 0) return `${text}: ${money(-cash)} paid`;
+  const amount = entry.filter(([, v]) => v > 0).reduce((n, [, v]) => n + v, 0);
+  return `${text}: ${money(amount)}`;
 }
 
 const round = (n) => Math.round(n * 100) / 100;
@@ -183,6 +203,7 @@ export function act(g, who, action) {
     afterAction(g);
     return null;
   }
+  if (BOOKS[action?.a]) return BOOKS[action.a](g, p, action) ?? null;
   if (g.turn !== who) return 'It is not your turn.';
   const handler = ACTIONS[action?.a];
   if (!handler) return 'Unknown action.';
@@ -197,7 +218,10 @@ export function timeout(g) {
   const p = current(g);
   if (g.phase === 'roll') ACTIONS.roll(g, p);
   if (g.phase === 'buy') ACTIONS.pass(g, p);
-  if (g.phase === 'act') ACTIONS.end(g, p);
+  if (g.phase === 'act') {
+    if (p.fyePending) BOOKS.statements(g, p, {});
+    ACTIONS.end(g, p);
+  }
   afterAction(g);
 }
 
@@ -271,9 +295,15 @@ const ACTIONS = {
     if (g.phase === 'buy') return 'Buy or pass first.';
     amount = Math.floor(Number(amount));
     if (!(amount > 0)) return 'Enter an amount.';
+    // Miles: personal cash is less granular than company cash.
+    if (amount % CONFIG.personalUnit) return `Pay yourself in multiples of ${money(CONFIG.personalUnit)}.`;
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     post(p, 'Owner distribution', { draws: amount, cash: -amount });
-    let tax = Math.round(amount * CONFIG.personalTax);
+    // Tax is worked out on the year's total, so splitting a payout into small ones saves nothing.
+    p.yearDraws = (p.yearDraws ?? 0) + amount;
+    const due = Math.round((p.yearDraws * CONFIG.personalTax) / CONFIG.personalUnit) * CONFIG.personalUnit;
+    let tax = due - (p.yearTax ?? 0);
+    p.yearTax = due;
     const relief = Math.min(tax, p.deduction);
     p.deduction -= relief;
     tax -= relief;
@@ -356,6 +386,7 @@ const ACTIONS = {
 
   end(g, p) {
     if (g.phase === 'roll') return 'Roll first.';
+    if (p.fyePending) return `File your statements for fiscal year ${p.fyePending.year} first.`;
     if (g.phase === 'buy') ACTIONS.pass(g, p);
     p.sale = null;
     // Every store sells from its own shelves.
@@ -636,7 +667,6 @@ function bankrupt(g, p, text) {
 // ---- Fiscal year end ----
 
 function fiscalYearEnd(g, p) {
-  p.years += 1;
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
@@ -678,10 +708,22 @@ function fiscalYearEnd(g, p) {
   }
   p.taxWaived = false;
 
+  // Miles: fraud can also be caught at FYE. Each fraud not yet found has a chance of turning up.
+  let found = 0;
+  for (let i = 0; i < p.frauds; i++) if (rand(g) < CONFIG.fyeFraudChance) found += 1;
+  if (found) {
+    p.frauds -= found;
+    charge(g, p, found * CONFIG.fraudFine, 'expOther', 'Fraud penalties');
+    log(g, `Year-end testing finds ${found} fraud${found > 1 ? 's' : ''} at ${p.name}'s company: ${money(found * CONFIG.fraudFine)} in fines.`);
+    if (p.out) return;
+  }
+
   personalYearEnd(g, p);
 
+  p.years += 1;
   const statement = incomeStatement(p);
   p.report = { year: p.years, income: statement, balance: balanceSheet(p) };
+  const truth = { income: incomeFields(p) };
   // Close the year: revenues, expenses and distributions roll into retained earnings.
   const closing = {};
   let total = 0;
@@ -691,11 +733,17 @@ function fiscalYearEnd(g, p) {
       total += p.ledger[a];
     }
   }
-  if (total || Object.keys(closing).length) post(p, `Close fiscal year ${p.years}`, { ...closing, retained: total });
+  if (total || Object.keys(closing).length) post(p, `Close fiscal year ${p.years}`, { ...closing, retained: total }, { doc: false });
+  if (p.manual) {
+    truth.balance = balanceFields(p);
+    p.fyePending = { year: p.years, truth };
+  }
   log(g, `${p.name} closes fiscal year ${p.years} with net income of ${money(statement.netIncome)}.`);
 }
 
 function personalYearEnd(g, p) {
+  p.yearDraws = 0;
+  p.yearTax = 0;
   const count = (id) => p.assets.filter((a) => a === id).length;
   p.deduction = count('intelligent') ? 100 : 0;
   const wealthy = count('wealthy');
@@ -827,6 +875,13 @@ const PLAYS = {
 };
 
 function audit(g, p) {
+  if (p.misstatements) {
+    const n = p.misstatements;
+    p.misstatements = 0;
+    charge(g, p, n * CONFIG.misstatementFine, 'expOther', 'Audit adjustments');
+    log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(n * CONFIG.misstatementFine)} in fines.`);
+    if (p.out) return;
+  }
   if (!p.frauds) {
     log(g, `Interim Review: ${p.name}'s books are clean.`);
     return;
@@ -839,6 +894,97 @@ function audit(g, p) {
   p.skip = true;
   log(g, `Interim Review finds ${n} fraud${n > 1 ? 's' : ''} at ${p.name}'s company: ${money(n * CONFIG.fraudFine)} in fines and off to CPE.`);
 }
+
+// ---- Players' own books ----
+// The statement lines a player fills in. Amounts are as they'd be written: accumulated
+// depreciation, the loan and equity as positive numbers, net income signed.
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revOps', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
+const TOLERANCE = 1;
+
+function incomeFields(p) {
+  const out = {};
+  for (const f of INCOME_FIELDS) out[f] = f === 'netIncome' ? incomeStatement(p).netIncome : round(CREDIT_NORMAL.has(f) ? -p.ledger[f] : p.ledger[f]);
+  return out;
+}
+
+function balanceFields(p) {
+  const b = balanceSheet(p);
+  const out = {};
+  for (const f of BALANCE_FIELDS) {
+    if (f === 'totalAssets') out[f] = b.totalAssets;
+    else if (f === 'totalLiabilitiesAndEquity') out[f] = b.totalLiabilitiesAndEquity;
+    else out[f] = round(CREDIT_NORMAL.has(f) ? -p.ledger[f] : p.ledger[f]);
+  }
+  return out;
+}
+
+function sameEntry(a, b) {
+  const net = (lines) => {
+    const m = {};
+    for (const [acct, v] of lines) m[acct] = (m[acct] ?? 0) + v;
+    return m;
+  };
+  const x = net(a);
+  const y = net(b);
+  for (const acct of new Set([...Object.keys(x), ...Object.keys(y)])) {
+    if (Math.abs((x[acct] ?? 0) - (y[acct] ?? 0)) > TOLERANCE) return false;
+  }
+  return true;
+}
+
+// These may be done at any time, not only on your own turn.
+const BOOKS = {
+  record(g, p, { doc, lines } = {}) {
+    if (!p.manual) return 'This game keeps the books for you.';
+    const d = p.docs.find((x) => x.id === doc);
+    if (!d) return 'Pick a document to record.';
+    if (!Array.isArray(lines) || !lines.length || lines.length > 8) return 'An entry needs one to eight lines.';
+    const clean = [];
+    let sum = 0;
+    for (const line of lines) {
+      const [acct, amt] = Array.isArray(line) ? line : [];
+      const v = round(Number(amt));
+      if (!(acct in ACCOUNTS)) return 'Pick an account for every line.';
+      if (!Number.isFinite(v) || v === 0 || Math.abs(v) > 1e9) return 'Every line needs a debit or a credit.';
+      clean.push([acct, v]);
+      sum += v;
+    }
+    if (Math.abs(sum) > 0.005) return 'Debits must equal credits.';
+    d.recorded = clean;
+    return null;
+  },
+
+  statements(g, p, { income = {}, balance = {} } = {}) {
+    const pending = p.fyePending;
+    if (!pending) return 'You have no statements due.';
+    const read = (src, fields) => Object.fromEntries(fields.map((f) => [f, round(Number(src?.[f]) || 0)]));
+    const filed = { year: pending.year, income: read(income, INCOME_FIELDS), balance: read(balance, BALANCE_FIELDS) };
+    const wrongFields = [];
+    for (const [kind, fields] of [['income', INCOME_FIELDS], ['balance', BALANCE_FIELDS]]) {
+      for (const f of fields) if (Math.abs(filed[kind][f] - pending.truth[kind][f]) > TOLERANCE) wrongFields.push(f);
+    }
+    const yearDocs = p.docs.filter((d) => d.year <= pending.year);
+    const wrongDocs = yearDocs.filter((d) => !d.recorded || !sameEntry(d.recorded, d.lines));
+    p.docs = p.docs.filter((d) => d.year > pending.year);
+    const errors = wrongFields.length + wrongDocs.length;
+    p.misstatements += errors;
+    p.filed = filed;
+    p.fyePending = null;
+    p.lastCheck = {
+      year: pending.year,
+      errors,
+      truth: pending.truth,
+      wrongFields,
+      corrections: wrongDocs.map((d) => ({ text: d.text, lines: d.lines, recorded: d.recorded })),
+      entries: yearDocs.length,
+    };
+    if (!errors) post(p, 'Bonus for clean books', { cash: CONFIG.cleanBooksBonus, revOther: -CONFIG.cleanBooksBonus });
+    log(g, `${p.name} files statements for fiscal year ${pending.year}.`);
+    return null;
+  },
+};
 
 function log(g, text) {
   g.log.push(text);
@@ -855,6 +1001,7 @@ export function viewFor(g, who) {
     dice: g.dice,
     winner: g.winner,
     endReason: g.endReason,
+    easyBooks: g.easyBooks,
     log: g.log,
     tiles: g.tiles.map((t, pos) => (t ? { ...t, rent: rentFor(g, pos) } : null)),
     zoningRow: g.zoningRow,
@@ -874,15 +1021,20 @@ export function viewFor(g, who) {
       portfolio: portfolio(p),
       netWorth: netWorth(p),
       handCount: p.hand.length,
-      income: incomeStatement(p),
-      balance: balanceSheet(p),
-      report: p.report,
+      // With manual books everyone sees only the statements a player filed; the truth stays hidden.
+      ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: -p.ledger.loan }),
+      fyeDue: p.fyePending?.year ?? null,
       atBank: Boolean(p.atBank),
       sale: p.sale ?? null,
       inventory: p.ledger.inventory,
       carried: p.carried,
       retail: retailTerms(g, i),
-      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: p.journal, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
+      ...(i === who && !g.easyBooks ? {
+        docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),
+        lastCheck: p.lastCheck,
+        misstatements: p.misstatements,
+      } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
     })),
   };
 }

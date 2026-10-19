@@ -52,6 +52,7 @@ for (let i = 0; i < 9; i++) {
   cur.send({ t: 'act', a: 'roll' });
   await cur.until((c) => c.msgs.length > before && c.last.state.game.phase !== 'roll', 'roll result');
   if (cur.last.state.game.phase === 'buy') cur.send({ t: 'act', a: 'pass' });
+  if (cur.last.state.game.players[g.turn].fyeDue) cur.send({ t: 'act', a: 'statements' });
   cur.send({ t: 'act', a: 'end' });
   await players[0].until((c) => c.last.state.game.turn !== g.turn || c.last.state.game.phase === 'over', 'next turn');
 }

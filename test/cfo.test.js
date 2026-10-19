@@ -19,8 +19,8 @@ test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transp
 });
 
 // Plays a whole game with a simple greedy strategy, checking the books balance after every step.
-function playOut(seed, players = 4) {
-  const g = createGame(Array.from({ length: players }, (_, i) => `P${i}`), seed);
+function playOut(seed, players = 4, options = {}) {
+  const g = createGame(Array.from({ length: players }, (_, i) => `P${i}`), seed, options);
   for (let steps = 0; g.phase !== 'over'; steps++) {
     assert.ok(steps < 5000, 'game should end');
     const w = g.turn;
@@ -35,7 +35,10 @@ function playOut(seed, players = 4) {
       if (p.sale) act(g, w, { a: 'sell', option: 'premium' });
       if (p.ledger.cash > 3000) act(g, w, { a: 'pay', amount: 1000 });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
-      act(g, w, { a: 'end' });
+      // A diligent bookkeeper: records every document correctly and files the true statements.
+      for (const d of p.docs) act(g, w, { a: 'record', doc: d.id, lines: d.lines });
+      if (p.fyePending) assert.equal(act(g, w, { a: 'statements', ...p.fyePending.truth }), null);
+      assert.equal(act(g, w, { a: 'end' }), null);
     }
     for (const q of g.players) {
       const b = balanceSheet(q);
@@ -50,10 +53,78 @@ function playOut(seed, players = 4) {
 
 test('whole games finish with balanced books, from 2 to 6 players', () => {
   for (let seed = 1; seed <= 30; seed++) {
-    const g = playOut(seed, 2 + (seed % 5));
+    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0 });
     assert.ok(g.winner !== null);
     assert.ok(g.endReason);
+    if (!g.easyBooks) assert.ok(g.players.every((p) => p.misstatements === 0), 'perfect books have no misstatements');
   }
+});
+
+test('players record their own entries and file their own statements', () => {
+  const g = createGame(['A', 'B'], 21);
+  const p = g.players[0];
+  // The starting capital is the first document to record.
+  assert.equal(p.docs.length, 1);
+  const [doc] = p.docs;
+  assert.equal(doc.text, 'Owner invests starting capital: $3,000 received');
+  const view = viewFor(g, 0).players[0];
+  assert.equal(view.docs[0].lines, undefined, 'the right answer is not sent');
+  assert.equal(view.income, undefined, 'true statements are hidden');
+  assert.equal(viewFor(g, 1).players[0].docs, undefined, 'others cannot see your documents');
+
+  assert.equal(act(g, 0, { a: 'record', doc: 99, lines: [['cash', 3000]] }), 'Pick a document to record.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['capital', -2000]] }), 'Debits must equal credits.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['nonsense', -3000]] }), 'Pick an account for every line.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['revOps', -3000]] }), null);
+
+  // Pass FYE: the turn can't end until statements are filed.
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  if (g.phase === 'buy') act(g, 0, { a: 'pass' });
+  assert.ok(p.fyePending);
+  assert.match(act(g, 0, { a: 'end' }), /File your statements/);
+  const truth = p.fyePending.truth;
+  assert.equal(truth.balance.capital, 3000);
+  assert.equal(truth.balance.cash, p.ledger.cash);
+  // File with one wrong line; the miscoded capital entry counts too, as do unrecorded year-end documents.
+  const unrecorded = p.docs.filter((d) => d.year === 1 && !d.recorded).length;
+  assert.equal(act(g, 0, { a: 'statements', income: truth.income, balance: { ...truth.balance, cash: truth.balance.cash + 50 } }), null);
+  assert.deepEqual(p.lastCheck.wrongFields, ['cash']);
+  assert.equal(p.lastCheck.corrections.length, 1 + unrecorded);
+  assert.equal(p.misstatements, 2 + unrecorded);
+  assert.equal(viewFor(g, 1).players[0].filed.balance.cash, truth.balance.cash + 50, 'others see what was filed');
+  assert.equal(act(g, 0, { a: 'end' }), null);
+
+  // The Interim Review fines misstatements.
+  const cash = p.ledger.cash;
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  while (p.pos !== 52) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = 52 - 7;
+    act(g, 0, { a: 'roll' });
+  }
+  assert.equal(p.misstatements, 0);
+  assert.ok(p.ledger.cash < cash);
+});
+
+test('easy books record everything automatically', () => {
+  const g = createGame(['A', 'B'], 21, { easyBooks: true });
+  const p = g.players[0];
+  assert.equal(p.docs.length, 0);
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.fyePending, null);
+  assert.ok(viewFor(g, 0).players[0].income);
+});
+
+test('personal cash moves in $100s and is taxed on the year\'s total', () => {
+  const g = createGame(['A', 'B'], 21);
+  const p = g.players[0];
+  g.phase = 'act';
+  assert.match(act(g, 0, { a: 'pay', amount: 150 }), /multiples of \$100/);
+  const start = p.personalCash;
+  for (let i = 0; i < 5; i++) assert.equal(act(g, 0, { a: 'pay', amount: 100 }), null);
+  assert.equal(p.personalCash - start, 400, '20% of $500, however it is split');
 });
 
 test('only the player whose turn it is may act, and only in order', () => {
@@ -266,4 +337,17 @@ test('each Banking building shows its owner one more private PP&E option', () =>
   assert.equal(g.ppeDeck.length, left - 1);
   assert.deepEqual(g.ppeRow, row, 'the face-up row is untouched');
   assert.equal(act(g, 0, { a: 'build', pos: empty, card: 9 }), 'That land already has a building.');
+});
+
+test('frauds can also be found when passing FYE', () => {
+  let caught = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const g = createGame(['A', 'B'], seed, { easyBooks: true });
+    const p = g.players[0];
+    p.frauds = 2;
+    p.pos = BOARD_SIZE - 2;
+    act(g, 0, { a: 'roll' });
+    caught += 2 - p.frauds;
+  }
+  assert.ok(caught > 5 && caught < 40, `about a quarter of 80 frauds found, got ${caught}`);
 });
