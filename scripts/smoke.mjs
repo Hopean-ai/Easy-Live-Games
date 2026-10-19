@@ -1,13 +1,18 @@
 // End-to-end check against a running server: `npm run dev`, then `node scripts/smoke.mjs [base-url]`.
-// Plays the multiplayer flow with real WebSockets: join, sync, input, disconnect, rejoin, spectate.
+// Plays the multiplayer flow with real WebSockets: join, sync, input, disconnect, rejoin, spectate,
+// then signs up, logs in and pairs players through quick match.
 import assert from 'node:assert/strict';
 
 const base = process.argv[2] ?? 'http://localhost:8787';
 const wsBase = base.replace(/^http/, 'ws');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function join(code, name, token) {
-  const ws = new WebSocket(`${wsBase}/api/rooms/${code}/ws?${new URLSearchParams({ name, token })}`);
+function join(code, name, token, cookie) {
+  return open(`/api/rooms/${code}/ws?${new URLSearchParams({ name, token })}`, cookie);
+}
+
+function open(path, cookie) {
+  const ws = new WebSocket(`${wsBase}${path}`, cookie ? { headers: { Cookie: cookie } } : undefined);
   const client = { ws, msgs: [], last: {} };
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
@@ -86,5 +91,60 @@ assert.equal(a.last.lobby.status, 'playing', 'replacing a tab does not pause');
 console.log('a second tab replaces the first without pausing');
 
 for (const c of [a, b3, spectator]) c.ws.close();
+console.log('room flow passed');
+
+// ---- Accounts ----
+const post = (path, body, cookie) => fetch(`${base}${path}`, {
+  method: 'POST', body: JSON.stringify(body), headers: cookie ? { Cookie: cookie } : {},
+});
+const user = `smoke${Date.now().toString(36).slice(-8)}`;
+const reg = await post('/api/register', { username: user, password: 'smoke-password' });
+assert.equal(reg.status, 200, await reg.clone().text());
+assert.equal((await post('/api/register', { username: user.toUpperCase(), password: 'smoke-password' })).status, 400, 'names are unique ignoring case');
+assert.equal((await post('/api/login', { username: user, password: 'wrong-password' })).status, 401);
+const login = await post('/api/login', { username: user.toUpperCase(), password: 'smoke-password' });
+assert.equal(login.status, 200);
+const cookie = login.headers.get('set-cookie').split(';')[0];
+assert.match(login.headers.get('set-cookie'), /HttpOnly/);
+const me = await (await fetch(`${base}/api/me`, { headers: { Cookie: cookie } })).json();
+assert.equal(me.name, user);
+console.log('sign up, wrong password, log in and session lookup work');
+
+// ---- Quick match ----
+const q1 = open(`/api/match/pong/ws?token=token-q1-aaaa`, cookie);
+await q1.until((c) => c.last.queued, 'queued');
+const q2 = open(`/api/match/pong/ws?token=token-q2-aaaa`);
+await q1.until((c) => c.last.matched, 'match for first player');
+await q2.until((c) => c.last.matched, 'match for second player');
+assert.equal(q1.last.matched.room, q2.last.matched.room);
+for (const c of [q1, q2]) c.ws.close();
+console.log('two players in the queue are paired into room', q1.last.matched.room);
+
+const room2 = q1.last.matched.room;
+const p1 = join(room2, 'Imposter', 'token-q1-aaaa', cookie);
+const p2 = join(room2, 'Guest', 'token-q2-aaaa');
+await p1.until((c) => c.last.lobby?.status === 'playing', 'matched game starts');
+const players = p1.last.lobby.players;
+const [mine, theirs] = p1.last.welcome.side === 'left' ? [players.left, players.right] : [players.right, players.left];
+assert.equal(mine.name, user, 'signed-in player plays under their account name');
+assert.equal(mine.guest, false);
+assert.deepEqual([theirs.name, theirs.guest], ['Guest', true]);
+console.log('matched players meet in the room; accounts and guests are told apart');
+
+// The same player queueing from two tabs is never matched with themselves.
+const t1 = open(`/api/match/pong/ws?token=token-t1-aaaa`, cookie);
+await t1.until((c) => c.last.queued, 'tab one queued');
+const t2 = open(`/api/match/pong/ws?token=token-t2-aaaa`, cookie);
+await t2.until((c) => c.last.queued, 'tab two queued');
+await t1.until((c) => c.last.replaced, 'older tab leaves the queue');
+assert.equal(t2.last.matched, undefined);
+t2.ws.close();
+console.log('a second tab replaces the first in the queue');
+
+assert.equal((await post('/api/logout', {}, cookie)).status, 200);
+assert.equal((await (await fetch(`${base}/api/me`, { headers: { Cookie: cookie } })).json()).name, null);
+console.log('logout ends the session');
+
+for (const c of [p1, p2]) c.ws.close();
 console.log('smoke test passed');
 process.exit(0);

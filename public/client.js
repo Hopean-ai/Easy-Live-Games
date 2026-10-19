@@ -32,14 +32,97 @@ let pingTimer = null;
 let over = null;
 let replaced = false;
 
+let myName = '';
+let fromMatch = false; // entered the room through quick match
+let matchWs = null;
+let matchPing = null;
+
 sessionStorage.setItem('pong-token', me.token);
-$('name').value = localStorage.getItem('pong-name') || '';
 
 function randomToken() {
   return crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now();
 }
 
+function wsBase() {
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+}
+
 // ---- Lobby ----
+
+// Signed-in players play under their account name (the server enforces it); guests pick a name
+// on the home page. Anyone who has done neither is sent there first and comes straight back.
+async function init() {
+  let account = null;
+  try {
+    account = (await (await fetch('/api/me')).json()).name;
+  } catch {
+    // Treat as signed out.
+  }
+  const guest = localStorage.getItem('guest-name');
+  if (!account && !guest) {
+    location.replace(`/?next=${encodeURIComponent(location.pathname + location.search)}`);
+    return;
+  }
+  myName = account || guest;
+  $('me-name').textContent = myName;
+  $('me-guest').hidden = Boolean(account);
+
+  const params = new URLSearchParams(location.search);
+  const fromLink = params.get('room');
+  if (fromLink && /^[A-Za-z0-9]{4,12}$/.test(fromLink)) {
+    enterRoom(fromLink.toUpperCase());
+    return;
+  }
+  $('lobby').hidden = false;
+  if (params.has('quick')) {
+    history.replaceState(null, '', location.pathname);
+    findMatch();
+  }
+}
+
+$('quick').addEventListener('click', () => findMatch());
+$('cancel').addEventListener('click', () => stopMatch());
+
+// Waits in the matchmaking queue until the server pairs us with someone and names a room.
+function findMatch() {
+  stopMatch();
+  $('lobby-error').textContent = '';
+  $('searching').hidden = false;
+  $('quick').disabled = true;
+  const sock = (matchWs = new WebSocket(`${wsBase()}/api/match/pong/ws?${new URLSearchParams({ token: me.token })}`));
+  // Keeps the connection from idling out; the server answers without waking up.
+  sock.addEventListener('open', () => (matchPing = setInterval(() => sock.send('ping'), 30_000)));
+  sock.addEventListener('message', (e) => {
+    let msg;
+    try {
+      msg = JSON.parse(e.data);
+    } catch {
+      return; // 'pong'
+    }
+    if (msg.t === 'matched' && /^[A-Z0-9]{4,12}$/.test(msg.room)) {
+      stopMatch();
+      fromMatch = true;
+      enterRoom(msg.room);
+    } else if (msg.t === 'replaced') {
+      stopMatch();
+      $('lobby-error').textContent = 'You are searching in another tab.';
+    }
+  });
+  sock.addEventListener('close', () => {
+    if (matchWs !== sock) return;
+    stopMatch();
+    $('lobby-error').textContent = 'Lost the connection to matchmaking. Try again.';
+  });
+}
+
+function stopMatch() {
+  const sock = matchWs;
+  matchWs = null;
+  clearInterval(matchPing);
+  sock?.close();
+  $('searching').hidden = true;
+  $('quick').disabled = false;
+}
 
 $('create').addEventListener('click', async () => {
   try {
@@ -62,7 +145,7 @@ $('join-form').addEventListener('submit', (e) => {
 });
 
 $('copy').addEventListener('click', async () => {
-  const link = `${location.origin}/?room=${room}`;
+  const link = `${location.origin}/pong?room=${room}`;
   try {
     await navigator.clipboard.writeText(link);
     $('copy').textContent = 'Copied';
@@ -78,28 +161,30 @@ $('rematch').addEventListener('click', () => {
   $('overlay-sub').textContent = 'Waiting for the other player…';
 });
 
+// A matched opponent who never shows up shouldn't strand you: offer to queue again.
+$('requeue').addEventListener('click', () => location.replace('/pong?quick=1'));
+
 function enterRoom(code) {
   room = code;
-  localStorage.setItem('pong-name', $('name').value.trim());
-  history.replaceState(null, '', `/?room=${code}`);
+  history.replaceState(null, '', `/pong?room=${code}`);
   $('room-code').textContent = code;
   $('lobby').hidden = true;
   $('play').hidden = false;
+  if (fromMatch) {
+    setTimeout(() => {
+      if (lobby?.status === 'waiting' && me.side) $('requeue').hidden = false;
+    }, 20_000);
+  }
   connect();
 }
 
-const fromLink = new URLSearchParams(location.search).get('room');
-if (fromLink && /^[A-Za-z0-9]{4,12}$/.test(fromLink)) {
-  $('code').value = fromLink.toUpperCase();
-  if (localStorage.getItem('pong-name')) enterRoom(fromLink.toUpperCase());
-}
+init();
 
 // ---- Connection ----
 
 function connect() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const params = new URLSearchParams({ token: me.token, name: $('name').value.trim() });
-  ws = new WebSocket(`${proto}://${location.host}/api/rooms/${room}/ws?${params}`);
+  const params = new URLSearchParams({ token: me.token, name: myName });
+  ws = new WebSocket(`${wsBase()}/api/rooms/${room}/ws?${params}`);
   setStatus('Connecting…');
 
   ws.addEventListener('open', () => {
@@ -198,13 +283,14 @@ function renderLobby() {
   for (const side of ['left', 'right']) {
     const el = $(`${side}-name`);
     const p = lobby.players[side];
-    el.textContent = p ? p.name : 'Waiting for player…';
+    el.textContent = p ? p.name + (p.guest ? ' (guest)' : '') : 'Waiting for player…';
     el.classList.toggle('away', !p || !p.connected);
     el.classList.toggle('you', side === me.side);
   }
   const away = ['left', 'right'].find((s) => lobby.players[s] && !lobby.players[s].connected);
   if (lobby.status === 'waiting') {
-    setStatus(me.side ? 'Waiting for an opponent. Share the invite link.' : 'Waiting for players.');
+    if (!me.side) setStatus('Waiting for players.');
+    else setStatus(fromMatch ? 'Waiting for your opponent to join…' : 'Waiting for an opponent. Share the invite link.');
   } else if (lobby.status === 'paused' && away) {
     setStatus(`${playerName(away)} disconnected. Waiting for them to come back…`);
   } else if (lobby.status === 'playing') {
@@ -212,6 +298,7 @@ function renderLobby() {
   } else if (lobby.status === 'over') {
     setStatus('Game over.');
   }
+  if (lobby.status !== 'waiting') $('requeue').hidden = true;
   if (lobby.status === 'over' && over) showOverlay();
 }
 

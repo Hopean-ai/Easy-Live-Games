@@ -19,7 +19,7 @@ export class PongRoom extends DurableObject {
     super(ctx, env);
     this.status = 'waiting'; // waiting | playing | paused | over
     this.game = null;
-    this.seats = { left: null, right: null }; // { token, name }
+    this.seats = { left: null, right: null }; // { token, name, guest }
     this.graceTimers = { left: null, right: null };
     this.rematch = new Set();
     this.loop = null;
@@ -32,7 +32,7 @@ export class PongRoom extends DurableObject {
     // Sockets survive hibernation but memory does not, so rebuild the seats from them.
     for (const ws of ctx.getWebSockets()) {
       const a = ws.deserializeAttachment();
-      if (a?.side) this.seats[a.side] = { token: a.token, name: a.name };
+      if (a?.side) this.seats[a.side] = { token: a.token, name: a.name, guest: a.guest };
     }
   }
 
@@ -45,9 +45,10 @@ export class PongRoom extends DurableObject {
       ? url.searchParams.get('token')
       : crypto.randomUUID();
     const name = sanitizeName(url.searchParams.get('name'));
+    const guest = !request.headers.get('X-Player-Account'); // set by the router for signed-in players
 
     const { 0: client, 1: server } = new WebSocketPair();
-    const side = this.claimSeat(token, name);
+    const side = this.claimSeat(token, name, guest);
 
     // A player reconnecting (new tab, flaky network) replaces their old socket. The message comes
     // first because some stacks are slow to deliver the close event for a server-initiated close.
@@ -59,7 +60,7 @@ export class PongRoom extends DurableObject {
     }
 
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ side, token, name });
+    server.serializeAttachment({ side, token, name, guest });
     send(server, {
       t: 'welcome', side, token, field: FIELD, paddle: PADDLE, ball: BALL, winScore: WIN_SCORE, skills: SKILLS,
     });
@@ -71,10 +72,10 @@ export class PongRoom extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  claimSeat(token, name) {
+  claimSeat(token, name, guest) {
     for (const side of SIDES) {
       if (this.seats[side]?.token === token) {
-        this.seats[side].name = name;
+        Object.assign(this.seats[side], { name, guest });
         clearTimeout(this.graceTimers[side]);
         this.graceTimers[side] = null;
         return side;
@@ -82,7 +83,7 @@ export class PongRoom extends DurableObject {
     }
     for (const side of SIDES) {
       if (!this.seats[side]) {
-        this.seats[side] = { token, name };
+        this.seats[side] = { token, name, guest };
         if (this.status === 'over') this.status = 'waiting'; // new opponent: start a fresh game
         return side;
       }
@@ -254,7 +255,9 @@ export class PongRoom extends DurableObject {
 
   lobbyMessage() {
     const player = (side) =>
-      this.seats[side] ? { name: this.seats[side].name, connected: this.connected(side) } : null;
+      this.seats[side]
+        ? { name: this.seats[side].name, guest: this.seats[side].guest, connected: this.connected(side) }
+        : null;
     return {
       t: 'lobby',
       status: this.status,
