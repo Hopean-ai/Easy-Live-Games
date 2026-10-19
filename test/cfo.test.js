@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
 
@@ -32,6 +32,7 @@ function playOut(seed, players = 4) {
       for (let pos = 0; pos < BOARD_SIZE; pos++) if (!canBuild(g, pos)) act(g, w, { a: 'build', pos, card: 0 });
       if (p.hand.length) act(g, w, { a: 'play', card: 0, target: (w + 1) % players, pos: 0, rarity: 'common' });
       if (p.atBank) act(g, w, { a: 'borrow', amount: 1000 });
+      if (p.sale) act(g, w, { a: 'sell', option: 'premium' });
       if (p.ledger.cash > 3000) act(g, w, { a: 'pay', amount: 1000 });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
       act(g, w, { a: 'end' });
@@ -81,24 +82,67 @@ test('buying land takes a zoning card and posts a journal entry', () => {
   assert.equal(p.ledger.land, sq.price); // transport routes are carried with land
 });
 
-test('a fiscal year end makes and sells widgets, depreciates, taxes and closes the books', () => {
+test('a fiscal year end makes widgets, depreciates, taxes and closes the books', () => {
   const g = createGame(['A', 'B'], 3);
   const p = g.players[0];
   Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'industrial', building: { rarity: 'rare', cost: 1000, dep: 0 } });
-  Object.assign(g.tiles[posOfSpace(2)], { owner: 0, zone: 'retail', building: { rarity: 'uncommon', cost: 200, dep: 0 } });
   p.pos = BOARD_SIZE - 2; // any roll passes FYE
   act(g, 0, { a: 'roll' });
   assert.equal(p.years, 1);
   const r = p.report.income;
-  // Industrial spends $300 on widgets; Retail sells up to $240 of them, i.e. $120 at cost.
-  assert.equal(p.ledger.inventory, 180);
-  assert.equal(r.revenue.revSales, 240);
-  assert.equal(r.expenses.cogs, 120);
+  assert.equal(p.ledger.inventory, 300); // Industrial spends 30% of its cost making widgets
   assert.equal(r.revenue.revOps, CONFIG.baseRevenue);
-  assert.equal(r.expenses.expDep, 120);
+  assert.equal(r.expenses.expDep, 100);
   assert.equal(r.tax, Math.round(r.preTax * CONFIG.corporateTax));
   assert.equal(incomeStatement(p).netIncome, 0, 'income accounts start the new year at zero');
   assert.equal(-p.ledger.retained, r.netIncome);
+});
+
+test('stores sell widgets every turn; more stores raise the price', () => {
+  const g = createGame(['A', 'B'], 3);
+  const p = g.players[0];
+  p.ledger.inventory = 1000;
+  p.ledger.capital -= 1000; // keep the books balanced for the test's stock
+  const store = (n, rarity, cost) => Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'retail', building: { rarity, cost, dep: 0 } });
+  store(1, 'rare', 1000);
+  assert.deepEqual(retailTerms(g, 0), { units: 150, price: 2, stores: 1 });
+  store(2, 'uncommon', 200);
+  assert.deepEqual(retailTerms(g, 0), { units: 180, price: 2.25, stores: 2 });
+  g.phase = 'act';
+  act(g, 0, { a: 'end' });
+  assert.equal(p.ledger.inventory, 820);
+  assert.equal(incomeStatement(p).revenue.revSales, 405);
+  assert.equal(incomeStatement(p).expenses.cogs, 180);
+});
+
+test('landing on a store: your own runs a special sale, someone else\'s sells through theirs', () => {
+  const g = createGame(['A', 'B'], 3);
+  const [a, b] = g.players;
+  for (const p of g.players) {
+    p.ledger.inventory = 1000;
+    p.ledger.capital -= 1000;
+  }
+  const pos = posOfSpace(1);
+  Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: { rarity: 'rare', cost: 1000, dep: 0 } });
+  g.phase = 'act';
+  assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), 'There is no sale to make here.');
+  a.sale = { pos };
+  assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), null);
+  assert.equal(a.ledger.inventory, 550); // 3 x 150 widgets at 75% of $2
+  assert.equal(incomeStatement(a).revenue.revSales, 675);
+  assert.equal(a.sale, null, 'one sale per landing');
+
+  g.turn = 1;
+  b.sale = { pos };
+  const before = a.ledger.cash;
+  assert.equal(act(g, 1, { a: 'sell' }), null);
+  assert.equal(b.ledger.inventory, 850);
+  assert.equal(incomeStatement(b).revenue.revSales, 300);
+  assert.equal(a.ledger.cash, before + 75, 'the store owner keeps a 25% commission');
+  for (const p of g.players) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
 });
 
 test('loans add a liability and charge interest at year end', () => {

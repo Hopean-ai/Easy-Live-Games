@@ -87,3 +87,5 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .journal .fs td:nth-child(2), .journal .fs th:nth-child(2) { text-align: right; }
 .journal tr.entry td { text-align: left; font-weight: 600; border-top: 1px solid #2a313c; padding-top: 6px; }
 #statement-tabs button { padding: 6px 10px; font-size: 0.85rem; flex: none; }
+.sale { display: grid; gap: 6px; border: 1px dashed var(--accent); border-radius: 8px; padding: 8px; }
+.sale p { margin: 0; }

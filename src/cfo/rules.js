@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, WIDGET_MARKUP,
+  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -202,6 +202,7 @@ const ACTIONS = {
   roll(g, p) {
     if (g.phase !== 'roll') return 'You have already rolled.';
     p.atBank = false;
+    p.sale = null;
     const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
     g.dice = d;
     const from = p.pos;
@@ -321,13 +322,60 @@ const ACTIONS = {
     return null;
   },
 
+  // A one-off sale offered by landing on a Retail square.
+  sell(g, p, { option } = {}) {
+    if (g.phase !== 'act' || !p.sale) return 'There is no sale to make here.';
+    if (!p.ledger.inventory) return 'You have no widgets to sell.';
+    const { pos } = p.sale;
+    const owner = g.tiles[pos].owner;
+    if (owner === g.turn) {
+      const s = RETAIL.sales[option];
+      if (!s) return 'Pick a kind of sale.';
+      const { units, price } = retailTerms(g, owner);
+      sellWidgets(g, p, units * s.volume, price * s.price, `${s.name} at ${SQUARES[pos].name}`);
+    } else {
+      const units = Math.round(g.tiles[pos].building.cost * RETAIL.perTurn);
+      const { price } = retailTerms(g, owner);
+      const sold = sellWidgets(g, p, units, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
+      const cut = Math.round(sold * RETAIL.commission);
+      if (cut) {
+        post(p, `Commission to ${g.players[owner].name}`, { expOther: cut, cash: -cut });
+        post(g.players[owner], `Commission from ${p.name}`, { cash: cut, revOther: -cut });
+      }
+    }
+    p.sale = null;
+    return null;
+  },
+
   end(g, p) {
     if (g.phase === 'roll') return 'Roll first.';
     if (g.phase === 'buy') ACTIONS.pass(g, p);
+    p.sale = null;
+    const { units, price } = retailTerms(g, g.turn);
+    if (units) sellWidgets(g, p, units, price, 'Widget sales');
     nextTurn(g);
     return null;
   },
 };
+
+// How many widgets a company's stores sell in a normal turn, and at what price each.
+export function retailTerms(g, idx) {
+  const stores = g.tiles.filter((t) => t?.owner === idx && t.zone === 'retail' && t.building);
+  const units = Math.round(stores.reduce((n, t) => n + t.building.cost * RETAIL.perTurn, 0));
+  const price = Math.min(RETAIL.maxMarkup, RETAIL.markup + RETAIL.markupPerExtra * Math.max(0, stores.length - 1));
+  return { units, price, stores: stores.length };
+}
+
+// Sells up to `units` widgets (each cost $1 to make) at `price` each; returns the sale revenue.
+function sellWidgets(g, p, units, price, text) {
+  const n = Math.min(Math.floor(p.ledger.inventory), Math.round(units));
+  if (n <= 0) return 0;
+  const revenue = Math.round(n * price);
+  post(p, text, { cash: revenue, revSales: -revenue });
+  post(p, `Cost of widgets sold (${n.toLocaleString('en-US')})`, { cogs: n, inventory: -n });
+  log(g, `${p.name} sells ${n.toLocaleString('en-US')} widgets for ${money(revenue)}.`);
+  return revenue;
+}
 
 // Miles: bank control gives another card option. Each Banking building a company owns lets it
 // see one more card off the top of the PP&E deck, privately, up to CONFIG.maxBankOptions.
@@ -404,6 +452,7 @@ function land(g, p) {
       return;
     }
     if (tile.owner !== g.turn) payRent(g, p, g.players[tile.owner], rentFor(g, p.pos));
+    if (!p.out && tile.zone === 'retail' && tile.building) p.sale = { pos: p.pos };
     return;
   }
   switch (sq.kind) {
@@ -530,13 +579,6 @@ function fiscalYearEnd(g, p) {
   each('industrial', (b, name, z) => {
     const spend = Math.min(Math.round(b.cost * z.produce), Math.max(0, Math.floor(companyCash(p))));
     if (spend) post(p, `Widgets made at ${name}`, { inventory: spend, cash: -spend });
-  });
-  each('retail', (b, name, z) => {
-    const atCost = Math.min(p.ledger.inventory, Math.round((b.cost * z.sell) / WIDGET_MARKUP));
-    if (atCost <= 0) return;
-    const price = atCost * WIDGET_MARKUP;
-    post(p, `Widgets sold at ${name}`, { cash: price, revSales: -price });
-    post(p, `Cost of widgets sold at ${name}`, { cogs: atCost, inventory: -atCost });
   });
   for (const { t, pos } of mine) {
     const dep = Math.min(Math.round(t.building.cost * CONFIG.depreciation), t.building.cost - t.building.dep);
@@ -757,6 +799,9 @@ export function viewFor(g, who) {
       balance: balanceSheet(p),
       report: p.report,
       atBank: Boolean(p.atBank),
+      sale: p.sale ?? null,
+      inventory: p.ledger.inventory,
+      retail: retailTerms(g, i),
       ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: p.journal, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
     })),
   };

@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CONFIG, SQUARES, SETS, MODES, ZONES, WIDGET_MARKUP, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
+import { CONFIG, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
 import { createGame, act, timeout, viewFor, ACCOUNTS } from './rules.js';
 import { sanitizeName } from '../names.js';
 
@@ -193,7 +193,7 @@ export class CfoRoom extends DurableObject {
 
 // The fixed parts of the game the browser needs to draw it, sent once per connection.
 const RULES = {
-  config: CONFIG, size: BOARD_SIZE, widgetMarkup: WIDGET_MARKUP, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
+  config: CONFIG, size: BOARD_SIZE, retail: RETAIL, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
 };
 

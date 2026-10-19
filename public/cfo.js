@@ -374,10 +374,46 @@ function renderTurn() {
       `Buy a personal asset (${money(rules.config.personalAssetPrice)})`));
     box.append(row);
     box.append(amountForm('Pay yourself', `Moves company cash to your personal cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    if (me.sale && me.inventory > 0) box.append(saleControls(me));
     if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total at ${Math.round(rules.config.loanInterest * 100)}% a year.`, (amount) => actNow({ a: 'borrow', amount })));
     if (me.balance.liabilities.loan > 0) box.append(amountForm('Repay loan', `You owe ${money(me.balance.liabilities.loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
   }
+}
+
+// Landing on a Retail square: your own offers special sales; someone else's lets you sell through it.
+function saleControls(me) {
+  const g = state.game;
+  const tile = g.tiles[me.sale.pos];
+  const owner = g.players[tile.owner];
+  const box = el('div', { class: 'sale' });
+  if (tile.owner === mySeat) {
+    const { units, price } = me.retail;
+    box.append(el('p', {}, `Your store at ${rules.squares[me.sale.pos].name}: run a sale this turn?`));
+    const row = el('div', { class: 'row' });
+    for (const [id, s] of Object.entries(rules.retail.sales)) {
+      row.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'sell', option: id }) },
+        `${s.name}: up to ${Math.round(units * s.volume).toLocaleString('en-US')} widgets at $${(price * s.price).toFixed(2)}`));
+    }
+    box.append(row);
+  } else {
+    const units = Math.round(tile.building.cost * rules.retail.perTurn);
+    box.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'sell' }) },
+      `Sell up to ${units.toLocaleString('en-US')} widgets through ${owner.name}'s store at $${owner.retail.price.toFixed(2)} (they keep ${Math.round(rules.retail.commission * 100)}%)`));
+  }
+  return box;
+}
+
+function widgetText(n) {
+  n = Math.floor(n);
+  if (!n) return 'No widgets.';
+  const parts = [];
+  for (const [name, size] of rules.widgetTiers) {
+    const k = Math.floor(n / size);
+    if (k) parts.push(`${k} ${name}`);
+    n -= k * size;
+  }
+  return parts.join(', ');
 }
 
 function amountForm(label, hint, onSubmit) {
@@ -460,7 +496,7 @@ function zoneText(id) {
   const pct = (x) => `${Math.round(x * 100)}%`;
   const yearly = {
     industrial: `each fiscal year spends ${pct(z.produce)} of its cost making widgets`,
-    retail: `each fiscal year sells your widgets, up to ${pct(z.sell)} of its cost, at ${rules.widgetMarkup}× what they cost to make`,
+    retail: `at the end of each of your turns sells your widgets, up to ${pct(rules.retail.perTurn)} of its cost in widgets. More stores raise your price per widget. Landing on it lets you run a special sale`,
     residential: `each fiscal year collects tenant rent of ${pct(z.yearly)} of its cost`,
     banking: `each fiscal year earns ${pct(z.interest)} interest on your company's cash plus fees of ${pct(z.yearly)} of its cost`,
   }[id];
@@ -473,6 +509,7 @@ function renderHand() {
   if (!me) {
     $('hand').replaceChildren(el('p', { class: 'small' }, 'You are watching.'));
     $('assets').replaceChildren();
+    $('widgets').replaceChildren();
     return;
   }
   const cards = (me.hand ?? []).map((id, i) => {
@@ -489,6 +526,13 @@ function renderHand() {
   $('hand').replaceChildren(...(cards.length ? cards : [el('p', { class: 'small' }, 'No cards.')]));
 
   const assets = me.assets.map((id) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' }, `${rules.personal[id].name} ${money(rules.personal[id].value)}`));
+  const r = me.retail;
+  $('widgets').replaceChildren(
+    el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets: ${widgetText(me.inventory)}.`),
+    el('p', { class: 'small' }, r.stores
+      ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at $${r.price.toFixed(2)} each.`
+      : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
+  );
   $('assets').replaceChildren(
     el('p', { class: 'small' }, `Portfolio ${money(me.portfolio)} of the ${money(rules.config.portfolioGoal)} goal.`),
     el('div', { class: 'chips' }, assets),
