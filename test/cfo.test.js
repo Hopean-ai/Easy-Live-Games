@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES } from '../src/cfo/data.js';
+import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
 import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
@@ -406,5 +406,47 @@ test('a knocked-out player can be hired to run a subsidiary', () => {
   for (const p of [a, b, c]) {
     const s = balanceSheet(p);
     assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
+});
+
+test('every Fraud and Market Forces card can be played or drawn and keeps the books balanced', () => {
+  for (const id of [...Object.keys(FRAUD_CARDS), ...Object.keys(MARKET_CARDS)]) {
+    const g = createGame(['A', 'B', 'C'], 41, { easyBooks: true });
+    const [a, b] = g.players;
+    // Set the table up so every card has something to act on.
+    a.years = 2;
+    g.phase = 'act';
+    act(g, 0, { a: 'ipo' });
+    const land = posOfSpace(1);
+    Object.assign(g.tiles[land], { owner: 0, zone: 'industrial', building: null });
+    Object.assign(g.tiles[posOfSpace(2)], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 50 });
+    Object.assign(g.tiles[posOfSpace(3)], { owner: 1, zone: 'residential', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
+    a.ledger.inventory += 50;
+    a.ledger.capital -= 50;
+    b.assets.push('wealthy');
+    a.personalCash = 2000;
+    a.atBank = true;
+    act(g, 0, { a: 'borrow', amount: 500 });
+    const keep = (FRAUD_CARDS[id] ?? MARKET_CARDS[id]).keep;
+    if (keep) {
+      a.hand = [id];
+      const err = act(g, 0, { a: 'play', card: 0, target: id === 'insider' ? 0 : 1, pos: land, row: 1, rarity: 'common', amount: 500 });
+      assert.equal(err, null, `${id}: ${err}`);
+      assert.equal(a.hand.length, 0, id);
+    } else {
+      g.marketDeck = [id];
+      a.pos = posOfSpace(8) - 2; // the Market Forces square
+      g.phase = 'roll';
+      while (a.pos !== posOfSpace(8)) {
+        Object.assign(g, { turn: 0, phase: 'roll' });
+        a.pos = posOfSpace(8) - 2;
+        g.marketDeck = [id];
+        act(g, 0, { a: 'roll' });
+      }
+    }
+    for (const p of g.players) {
+      const s = balanceSheet(p);
+      assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01, id);
+    }
   }
 });
