@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CFO · Live Multiplayer Games</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/cfo.css">
+</head>
+<body class="cfo">
+  <main>
+    <section id="lobby" class="narrow stack" hidden>
+      <p class="small"><a href="/">All games</a></p>
+      <h1>CFO</h1>
+      <p class="sub">Buy land, build PP&amp;E, keep real books, and pay yourself well. 2 to 6 players.</p>
+      <p class="small">Playing as <strong id="me-name"></strong><span id="me-guest"> (guest)</span>. <a href="/">Change</a></p>
+      <button id="quick">Quick match</button>
+      <div id="searching" class="searching" hidden>
+        <span id="search-text">Looking for players…</span>
+        <button id="cancel" class="link">Cancel</button>
+      </div>
+      <button id="create" class="secondary">Create a private room</button>
+      <form id="join-form" class="inline">
+        <input id="code" maxlength="12" placeholder="Room code" autocapitalize="characters">
+        <button type="submit" class="secondary">Join</button>
+      </form>
+      <p id="lobby-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="waiting" class="narrow stack" hidden>
+      <h1>CFO</h1>
+      <p class="small">Room <strong id="room-code"></strong> <button id="copy" class="link">Copy invite link</button></p>
+      <h2>Players</h2>
+      <ol id="seat-list" class="seats"></ol>
+      <p id="wait-text" class="small"></p>
+      <button id="start" hidden>Start the game</button>
+    </section>
+
+    <section id="play" hidden>
+      <div class="board-wrap">
+        <div id="board" class="board">
+          <div id="centre" class="centre">
+            <div class="turn-line">
+              <strong id="turn-text"></strong>
+              <span id="dice" class="dice"></span>
+            </div>
+            <div id="actions" class="actions"></div>
+            <p id="error" class="error" role="alert"></p>
+            <ul id="log" class="log"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="panels">
+        <section class="panel">
+          <h2>Players</h2>
+          <table id="players" class="players"></table>
+        </section>
+        <section class="panel">
+          <h2 id="tile-title">Board</h2>
+          <div id="tile"><p class="small">Tap a square to see it. Tap your own zoned land to build on it.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Your hand</h2>
+          <div id="hand"></div>
+          <h2>Personal assets</h2>
+          <div id="assets"></div>
+        </section>
+        <section class="panel">
+          <h2>Available cards</h2>
+          <p class="small">Zoning <span id="zoning-left"></span></p>
+          <div id="zoning-row" class="cards"></div>
+          <p class="small">PP&amp;E <span id="ppe-left"></span></p>
+          <div id="ppe-row" class="cards"></div>
+        </section>
+        <section class="panel wide-panel">
+          <h2>Financial statements</h2>
+          <div class="row" id="statement-tabs"></div>
+          <div id="statements" class="statements"></div>
+        </section>
+      </div>
+      <footer class="bar small">
+        <span>Room <strong id="room-code-2"></strong></span>
+        <span id="status"></span>
+        <button id="resign" class="link">Resign</button>
+      </footer>
+    </section>
+  </main>
+  <script type="module" src="/cfo.js"></script>
+</body>
+</html>
