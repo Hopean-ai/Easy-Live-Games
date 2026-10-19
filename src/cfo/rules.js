@@ -242,12 +242,19 @@ const ACTIONS = {
     if (g.phase !== 'act') return 'Roll first.';
     const err = canBuild(g, pos);
     if (err) return err;
-    const rarity = g.ppeRow[card];
-    if (!rarity) return 'Pick a PP&E card.';
+    // Cards past the face-up row are the private extras that Banking buildings show you.
+    const extras = bankOptions(g, g.turn);
+    const fromRow = card < g.ppeRow.length;
+    const rarity = fromRow ? g.ppeRow[card] : extras[card - g.ppeRow.length];
+    if (!Number.isInteger(card) || card < 0 || !rarity) return 'Pick a PP&E card.';
     const price = RARITIES[rarity].price;
     if (companyCash(p) < price) return 'Your company cannot afford it.';
-    g.ppeRow.splice(card, 1);
-    refill(g.ppeRow, g.ppeDeck);
+    if (fromRow) {
+      g.ppeRow.splice(card, 1);
+      refill(g.ppeRow, g.ppeDeck);
+    } else {
+      g.ppeDeck.splice(g.ppeDeck.length - 1 - (card - g.ppeRow.length), 1);
+    }
     putBuilding(g, p, pos, rarity, price);
     return null;
   },
@@ -321,6 +328,14 @@ const ACTIONS = {
     return null;
   },
 };
+
+// Miles: bank control gives another card option. Each Banking building a company owns lets it
+// see one more card off the top of the PP&E deck, privately, up to CONFIG.maxBankOptions.
+export function bankOptions(g, idx) {
+  const banks = g.tiles.filter((t) => t?.owner === idx && t.zone === 'banking' && t.building).length;
+  const n = Math.min(banks, CONFIG.maxBankOptions, g.ppeDeck.length);
+  return n ? g.ppeDeck.slice(-n).reverse() : [];
+}
 
 export function canBuild(g, pos) {
   const tile = g.tiles[pos];
@@ -742,7 +757,7 @@ export function viewFor(g, who) {
       balance: balanceSheet(p),
       report: p.report,
       atBank: Boolean(p.atBank),
-      ...(i === who ? { hand: p.hand, journal: p.journal, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: p.journal, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
     })),
   };
 }

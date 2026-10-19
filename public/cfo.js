@@ -445,8 +445,10 @@ function renderTile() {
       const z = rules.zones[tile.zone];
       box.push(el('p', { class: 'small' }, zoneText(tile.zone)));
       const row = el('div', { class: 'row' });
-      g.ppeRow.forEach((r, i) => row.append(el('button', { onclick: () => actNow({ a: 'build', pos: selected, card: i }) }, `Build ${rules.rarities[r].name} (${money(rules.rarities[r].price)})`)));
-      if (!g.ppeRow.length) row.append(el('span', { class: 'small' }, 'The PP&E deck is empty.'));
+      const extras = g.players[mySeat].bankOptions ?? [];
+      [...g.ppeRow, ...extras].forEach((r, i) => row.append(el('button', { class: i >= g.ppeRow.length ? 'secondary' : '', onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
+        `Build ${rules.rarities[r].name} (${money(rules.rarities[r].price)})${i >= g.ppeRow.length ? ' · bank option' : ''}`)));
+      if (!g.ppeRow.length && !extras.length) row.append(el('span', { class: 'small' }, 'The PP&E deck is empty.'));
       box.push(row);
     }
   }
@@ -517,7 +519,11 @@ function renderRows() {
   $('zoning-left').textContent = `(${g.zoningLeft} left in the deck)`;
   $('ppe-left').textContent = `(${g.ppeLeft} left in the deck)`;
   $('zoning-row').replaceChildren(...g.zoningRow.map((z) => el('span', { class: 'chip' }, rules.zones[z].name)));
-  $('ppe-row').replaceChildren(...g.ppeRow.map((r) => el('span', { class: 'chip' }, `${rules.rarities[r].name} ${money(rules.rarities[r].price)}`)));
+  const extras = g.players[mySeat]?.bankOptions ?? [];
+  $('ppe-row').replaceChildren(
+    ...g.ppeRow.map((r) => el('span', { class: 'chip' }, `${rules.rarities[r].name} ${money(rules.rarities[r].price)}`)),
+    ...extras.map((r) => el('span', { class: 'chip private', title: 'Only you can see this: a Banking building shows it to you.' }, `${rules.rarities[r].name} ${money(rules.rarities[r].price)} · bank option`)),
+  );
 }
 
 function renderStatements() {

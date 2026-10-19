@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
 
@@ -155,4 +155,27 @@ test('resigning leaves the last company standing as the winner', () => {
   assert.equal(g.phase, 'over');
   assert.equal(g.winner, 0);
   assert.ok(netWorth(g.players[0]) > 0);
+});
+
+test('each Banking building shows its owner one more private PP&E option', () => {
+  const g = createGame(['A', 'B'], 11);
+  const p = g.players[0];
+  g.phase = 'act';
+  p.ledger.cash = 1e6;
+  const bank = posOfSpace(1);
+  const empty = posOfSpace(2);
+  Object.assign(g.tiles[bank], { owner: 0, zone: 'banking', building: { rarity: 'common', cost: 100, dep: 0 } });
+  Object.assign(g.tiles[empty], { owner: 0, zone: 'industrial', building: null });
+  assert.equal(bankOptions(g, 0).length, 1);
+  assert.equal(bankOptions(g, 1).length, 0);
+  assert.deepEqual(viewFor(g, 0).players[0].bankOptions, [g.ppeDeck.at(-1)]);
+  assert.equal(viewFor(g, 1).players[0].bankOptions, undefined, 'others cannot see it');
+  const extra = g.ppeDeck.at(-1);
+  const left = g.ppeDeck.length;
+  const row = [...g.ppeRow];
+  assert.equal(act(g, 0, { a: 'build', pos: empty, card: g.ppeRow.length }), null);
+  assert.equal(g.tiles[empty].building.rarity, extra);
+  assert.equal(g.ppeDeck.length, left - 1);
+  assert.deepEqual(g.ppeRow, row, 'the face-up row is untouched');
+  assert.equal(act(g, 0, { a: 'build', pos: empty, card: 9 }), 'That land already has a building.');
 });
