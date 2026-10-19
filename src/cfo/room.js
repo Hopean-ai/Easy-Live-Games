@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { CONFIG, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
-import { createGame, act, timeout, viewFor, ACCOUNTS } from './rules.js';
+import { createGame, act, timeout, viewFor, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
 import { sanitizeName } from '../names.js';
 
 const MAX_MESSAGE_BYTES = 512;
@@ -14,7 +14,7 @@ export const ABSENT_TURN_MS = 30_000;
 export class CfoRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.room = { status: 'waiting', seats: [], expect: 0, game: null };
+    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { easyBooks: false } };
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get('room')) ?? this.room;
@@ -84,8 +84,12 @@ export class CfoRoom extends DurableObject {
       this.start();
     } else if (msg?.t === 'again') {
       if (this.room.status !== 'over') return;
-      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null };
+      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options };
       this.reseat();
+    } else if (msg?.t === 'option') {
+      // The host chooses the room's options before the game starts.
+      if (this.room.status !== 'waiting' || seat !== 0) return;
+      this.room.options = { ...this.room.options, easyBooks: Boolean(msg.easyBooks) };
     } else if (msg?.t === 'act') {
       if (this.room.status !== 'playing') return;
       const err = act(this.room.game, seat, msg);
@@ -132,7 +136,7 @@ export class CfoRoom extends DurableObject {
 
   start() {
     this.room.status = 'playing';
-    this.room.game = createGame(this.room.seats.map((s) => s.name));
+    this.room.game = createGame(this.room.seats.map((s) => s.name), undefined, this.room.options ?? {});
   }
 
   async alarm() {
@@ -182,7 +186,7 @@ export class CfoRoom extends DurableObject {
 
   broadcast() {
     const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, connected: this.socketsFor(i).length > 0 }));
-    const base = { t: 'state', status: this.room.status, seats, expect: this.room.expect, deadline: this.room.deadline ?? null };
+    const base = { t: 'state', status: this.room.status, seats, expect: this.room.expect, options: this.room.options ?? {}, deadline: this.room.deadline ?? null };
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const seat = ws.deserializeAttachment()?.seat ?? null;
@@ -195,6 +199,7 @@ export class CfoRoom extends DurableObject {
 const RULES = {
   config: CONFIG, size: BOARD_SIZE, retail: RETAIL, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
+  incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS,
 };
 
 function send(ws, msg) {

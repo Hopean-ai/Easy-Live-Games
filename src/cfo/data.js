@@ -17,6 +17,10 @@ export const CONFIG = {
   portfolioGoal: 100000, // spreadsheet: $100k personal asset portfolio (~93 draws)
   maxYears: 8, // PLACEHOLDER: game ends once every company has closed this many fiscal years
   fraudFine: 1000, // PLACEHOLDER: per fraud found at an Interim Review
+  fyeFraudChance: 0.25, // PLACEHOLDER: chance each unfound fraud is caught when its owner passes FYE
+  misstatementFine: 100, // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
+  cleanBooksBonus: 200, // PLACEHOLDER: for filing a fiscal year with no misstatements
+  personalUnit: 100, // Miles: personal cash is less granular; it moves in whole $100s
   loanLimit: 2000, // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
   rowSize: 3,

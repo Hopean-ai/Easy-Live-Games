@@ -159,6 +159,7 @@ $('copy').addEventListener('click', async () => {
 });
 
 $('start').addEventListener('click', () => send({ t: 'start' }));
+$('easy-books').addEventListener('change', (e) => send({ t: 'option', easyBooks: e.target.checked }));
 $('resign').addEventListener('click', () => {
   if (confirm('Resign? Your company will be wound up and you will be out of the game.')) actNow({ a: 'resign' });
 });
@@ -230,6 +231,14 @@ function onMessage(msg) {
       break;
     case 'error':
       $('error').textContent = msg.text;
+      if (editing?.saving) {
+        editing.saving = false;
+        editing.node.querySelector('.error').textContent = msg.text;
+      }
+      if (fyeForm?.sending) {
+        fyeForm.sending = false;
+        fyeForm.node.querySelector('.error').textContent = msg.text;
+      }
       if (state?.status === 'waiting') $('wait-text').textContent = msg.text;
       break;
     case 'replaced':
@@ -252,6 +261,8 @@ function render() {
   renderHand();
   renderRows();
   renderStatements();
+  renderBooks();
+  renderFye();
   $('log').replaceChildren(...[...state.game.log].reverse().map((line) => el('li', {}, line))); // newest first
 }
 
@@ -270,6 +281,8 @@ function renderWaiting() {
   else if (mySeat === 0) text = n < 2 ? 'Share the invite link. You need at least one more player.' : `Start when everyone is here (up to ${max}).`;
   else text = 'Waiting for the host to start.';
   $('wait-text').textContent = text;
+  $('easy-books').checked = Boolean(state.options?.easyBooks);
+  $('easy-books').disabled = mySeat !== 0;
   $('start').hidden = mySeat !== 0;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
 }
@@ -373,10 +386,11 @@ function renderTurn() {
     row.append(el('button', { class: 'secondary', disabled: me.personalCash < rules.config.personalAssetPrice, onclick: () => actNow({ a: 'personal' }) },
       `Buy a personal asset (${money(rules.config.personalAssetPrice)})`));
     box.append(row);
-    box.append(amountForm('Pay yourself', `Moves company cash to your personal cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in $${rules.config.personalUnit}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && me.inventory > 0) box.append(saleControls(me));
     if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total at ${Math.round(rules.config.loanInterest * 100)}% a year.`, (amount) => actNow({ a: 'borrow', amount })));
-    if (me.balance.liabilities.loan > 0) box.append(amountForm('Repay loan', `You owe ${money(me.balance.liabilities.loan)}.`, (amount) => actNow({ a: 'repay', amount })));
+    const loan = me.loan ?? me.balance?.liabilities.loan ?? 0;
+    if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
   }
 }
@@ -535,7 +549,7 @@ function renderHand() {
   const assets = me.assets.map((id) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' }, `${rules.personal[id].name} ${money(rules.personal[id].value)}`));
   const r = me.retail;
   $('widgets').replaceChildren(
-    el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets: ${widgetText(me.inventory)}.`),
+    el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
     el('p', { class: 'small' }, `${me.carried.toLocaleString('en-US')} on your token. ${placesText(me)}`),
     el('p', { class: 'small' }, 'Your token picks widgets up at your factories and drops them at your stores as it passes. Passing a transport tile ships them to your stores on that side of the board (freight is charged on other players\' lines).'),
     el('p', { class: 'small' }, r.stores
@@ -586,6 +600,10 @@ function renderStatements() {
     el('button', { class: i === statementSeat ? '' : 'secondary', onclick: () => ((statementSeat = i), renderStatements()) }, p.name)));
   const p = g.players[statementSeat];
   const A = rules.accounts;
+  if (!g.easyBooks) {
+    $('statements').replaceChildren(...filedTables(p));
+    return;
+  }
   const line = (label, value, cls = '') => el('tr', { class: cls }, el('td', {}, label), el('td', {}, money(value)));
   const income = (s, title) => el('table', { class: 'fs' },
     el('caption', {}, title),
@@ -627,3 +645,153 @@ function renderStatements() {
 }
 
 init();
+
+// ---- Players' own books ----
+
+let editing = null; // { id, node, saving, sent } for the journal entry being written
+let fyeForm = null; // { year, node, sending } for the statements being filled in
+
+function fieldLabel(f) {
+  return {
+    netIncome: 'Net income (loss)',
+    totalAssets: 'Total assets',
+    totalLiabilitiesAndEquity: 'Total liabilities and equity',
+    accDep: 'Less accumulated depreciation',
+    retained: 'Retained earnings',
+  }[f] ?? rules.accounts[f];
+}
+
+function filedTables(p) {
+  if (!p.filed) return [el('p', { class: 'small' }, `${p.name} has not filed any statements yet.`)];
+  const table = (title, fields, values) => el('table', { class: 'fs' }, el('caption', {}, title),
+    el('tbody', {}, fields.filter((f) => values[f] || /^total|netIncome/.test(f)).map((f) =>
+      el('tr', { class: /^total|netIncome/.test(f) ? 'total' : '' }, el('td', {}, fieldLabel(f)), el('td', {}, money(values[f]))))));
+  return [
+    table(`Income statement, fiscal year ${p.filed.year} (as filed)`, rules.incomeFields, p.filed.income),
+    table(`Balance sheet, end of year ${p.filed.year} (as filed)`, rules.balanceFields, p.filed.balance),
+  ];
+}
+
+function renderBooks() {
+  const g = state.game;
+  const me = g.players[mySeat];
+  const manual = !g.easyBooks && me?.docs;
+  $('books-panel').hidden = !manual;
+  if (!manual) return;
+  renderCheck(me);
+  const docs = [...me.docs].reverse();
+  if (editing && !docs.some((d) => d.id === editing.id)) editing = null;
+  if (editing?.saving) {
+    const d = docs.find((x) => x.id === editing.id);
+    if (d?.recorded && JSON.stringify(d.recorded) === editing.sent) editing = null;
+  }
+  // Rebuilding the list would pull the cursor out of an entry being typed.
+  if (editing && editing.node.contains(document.activeElement)) return;
+  const open = docs.filter((d) => !d.recorded).length;
+  const rows = [el('p', { class: 'small' }, open ? `${open} document${open > 1 ? 's' : ''} still to record.` : 'Everything is recorded.')];
+  for (const d of docs) {
+    rows.push(el('div', { class: `doc ${d.recorded ? 'done' : 'todo'}` },
+      el('span', { class: 'doc-text' }, d.text),
+      el('span', { class: 'small' }, `Year ${d.year} · ${d.recorded ? entryText(d.recorded) : 'not recorded'}`),
+      el('button', { class: d.recorded ? 'link' : 'secondary', onclick: () => startEditing(d) }, d.recorded ? 'Edit' : 'Record')));
+    if (editing?.id === d.id) rows.push(editing.node);
+  }
+  $('docs').replaceChildren(...rows);
+}
+
+function entryText(lines) {
+  return lines.map(([a, v]) => `${v > 0 ? 'Dr' : 'Cr'} ${rules.accounts[a]} ${money(Math.abs(v))}`).join(', ');
+}
+
+function startEditing(doc) {
+  if (editing?.id === doc.id) {
+    editing = null;
+    return renderBooks();
+  }
+  const body = el('tbody');
+  const addLine = (acct = '', v = 0) => {
+    const select = el('select', {}, el('option', { value: '' }, 'Account…'),
+      Object.entries(rules.accounts).map(([id, name]) => el('option', { value: id, selected: id === acct }, name)));
+    const dr = el('input', { type: 'number', min: 0, step: 'any', placeholder: 'Debit', value: v > 0 ? v : '' });
+    const cr = el('input', { type: 'number', min: 0, step: 'any', placeholder: 'Credit', value: v < 0 ? -v : '' });
+    const row = el('tr', {}, el('td', {}, select), el('td', {}, dr), el('td', {}, cr),
+      el('td', {}, el('button', { type: 'button', class: 'link', title: 'Remove line', onclick: () => row.remove() }, '×')));
+    body.append(row);
+  };
+  for (const [a, v] of doc.recorded ?? [['', 0], ['', 0]]) addLine(a, v);
+  const err = el('p', { class: 'error' });
+  const node = el('form', { class: 'entry-editor', onsubmit: (e) => {
+    e.preventDefault();
+    const lines = [...body.children].map((row) => {
+      const [select, dr, cr] = row.querySelectorAll('select, input');
+      return [select.value, (Number(dr.value) || 0) - (Number(cr.value) || 0)];
+    }).filter(([a, v]) => a || v);
+    err.textContent = '';
+    editing.saving = true;
+    editing.sent = JSON.stringify(lines.map(([a, v]) => [a, Math.round(v * 100) / 100]));
+    actNow({ a: 'record', doc: doc.id, lines });
+  } },
+  el('p', { class: 'small' }, doc.text),
+  el('table', { class: 'entry' }, el('thead', {}, el('tr', {}, el('th', {}, 'Account'), el('th', {}, 'Debit'), el('th', {}, 'Credit'), el('th'))), body),
+  el('div', { class: 'row' },
+    el('button', { type: 'button', class: 'secondary', onclick: () => addLine() }, 'Add a line'),
+    el('button', {}, 'Save entry'),
+    el('button', { type: 'button', class: 'link', onclick: () => ((editing = null), renderBooks()) }, 'Cancel')),
+  err);
+  editing = { id: doc.id, node, saving: false };
+  renderBooks();
+}
+
+function renderCheck(me) {
+  const c = me.lastCheck;
+  if (!c) return $('check').replaceChildren();
+  const head = el('p', { class: c.errors ? 'warn' : '' }, c.errors
+    ? `Fiscal year ${c.year}: ${c.errors} misstatement${c.errors > 1 ? 's' : ''}, to be fined at your next Interim Review.`
+    : `Fiscal year ${c.year}: clean books. You earned the ${money(rules.config.cleanBooksBonus)} bonus.`);
+  if (!c.errors) return $('check').replaceChildren(head);
+  const filed = me.filed ?? { income: {}, balance: {} };
+  const lines = c.wrongFields.map((f) => {
+    const kind = rules.incomeFields.includes(f) ? 'income' : 'balance';
+    return el('tr', {}, el('td', {}, fieldLabel(f)), el('td', {}, money(filed[kind][f] ?? 0)), el('td', {}, money(c.truth[kind][f])));
+  });
+  const fixes = c.corrections.map((x) => el('li', {}, `${x.text}. You: ${x.recorded ? entryText(x.recorded) : 'not recorded'}. Correct: ${entryText(x.lines)}.`));
+  $('check').replaceChildren(el('details', { class: 'check' }, el('summary', {}, head),
+    lines.length ? el('table', { class: 'fs' }, el('thead', {}, el('tr', {}, el('th', {}, 'Line'), el('th', {}, 'You filed'), el('th', {}, 'Correct'))), el('tbody', {}, lines)) : null,
+    fixes.length ? el('ul', { class: 'small' }, fixes) : null));
+}
+
+function renderFye() {
+  const g = state.game;
+  const me = g.players[mySeat];
+  const due = !g.easyBooks && me?.fyeDue;
+  $('fye').hidden = !due;
+  if (!due) {
+    fyeForm = null;
+    return;
+  }
+  if (fyeForm?.year !== due) {
+    const inputs = {};
+    const table = (title, fields) => el('table', { class: 'fs fye-table' }, el('caption', {}, title),
+      el('tbody', {}, fields.map((f) => {
+        inputs[f] = el('input', { type: 'number', step: 'any', inputMode: 'decimal', placeholder: '0' });
+        return el('tr', { class: /^total|netIncome/.test(f) ? 'total' : '' }, el('td', {}, fieldLabel(f)), el('td', {}, inputs[f]));
+      })));
+    const todo = el('p', { class: 'small warn' });
+    const node = el('form', { onsubmit: (e) => {
+      e.preventDefault();
+      const read = (fields) => Object.fromEntries(fields.map((f) => [f, Number(inputs[f].value) || 0]));
+      fyeForm.sending = true;
+      actNow({ a: 'statements', income: read(rules.incomeFields), balance: read(rules.balanceFields) });
+    } },
+    el('h2', {}, `Fiscal year ${due} is over: file your statements`),
+    el('p', { class: 'small' }, 'Work them out from your own journal entries. Enter amounts as positive numbers, except net income, which is negative for a loss. Retained earnings are after this year\'s closing entries. Leave lines you don\'t use blank.'),
+    todo,
+    el('div', { class: 'statements' }, table('Income statement', rules.incomeFields), table('Balance sheet', rules.balanceFields)),
+    el('button', {}, 'File statements'),
+    el('p', { class: 'error' }));
+    fyeForm = { year: due, node, todo, sending: false };
+    $('fye').replaceChildren(node);
+  }
+  const open = me.docs.filter((d) => d.year <= due && !d.recorded).length;
+  fyeForm.todo.textContent = open ? `${open} document${open > 1 ? 's' : ''} from this year still to record. Anything left unrecorded counts as a misstatement.` : '';
+}

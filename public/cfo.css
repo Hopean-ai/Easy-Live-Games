@@ -89,3 +89,23 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 #statement-tabs button { padding: 6px 10px; font-size: 0.85rem; flex: none; }
 .sale { display: grid; gap: 6px; border: 1px dashed var(--accent); border-radius: 8px; padding: 8px; }
 .sale p { margin: 0; }
+
+.check input { width: auto; margin-right: 6px; }
+label.check { display: flex; align-items: center; gap: 4px; color: var(--fg); }
+.fye { margin-top: 12px; border: 2px solid var(--accent); }
+.fye h2 { margin-top: 0; }
+.fye-table input { width: 140px; padding: 4px 8px; text-align: right; }
+.docs { display: grid; gap: 6px; max-height: 520px; overflow-y: auto; }
+.doc { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 6px 10px; border-radius: 6px; background: #1d232c; }
+.doc .doc-text { font-weight: 600; font-size: 0.9rem; }
+.doc .small { grid-column: 1; }
+.doc button { grid-row: 1 / 3; grid-column: 2; align-self: center; padding: 6px 10px; font-size: 0.85rem; }
+.doc.done { opacity: 0.75; }
+.entry-editor { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--accent); border-radius: 6px; }
+.entry-editor p { margin: 0; }
+.entry { border-collapse: collapse; }
+.entry th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.8rem; }
+.entry select, .entry input { padding: 4px 6px; font-size: 0.85rem; }
+.entry input { width: 110px; }
+select { font: inherit; background: var(--panel); color: var(--fg); border: 1px solid #2a313c; border-radius: 6px; }
+details.check summary { cursor: pointer; }
