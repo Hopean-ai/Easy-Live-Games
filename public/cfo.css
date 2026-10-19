@@ -71,6 +71,7 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .card p { font-size: 0.85rem; }
 .warn { color: var(--error); }
 .chips, .cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip.private { border: 1px dashed var(--accent); }
 .chip { background: #222934; border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; }
 
 .statements { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 8px; }

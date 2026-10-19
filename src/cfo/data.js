@@ -19,7 +19,8 @@ export const CONFIG = {
   fraudFine: 1000, // PLACEHOLDER: per fraud found at an Interim Review
   loanLimit: 2000, // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
-  rowSize: 3, // PLACEHOLDER: face-up zoning and PP&E cards to choose from
+  rowSize: 3,
+  maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings // PLACEHOLDER: face-up zoning and PP&E cards to choose from
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
 
