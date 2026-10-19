@@ -404,6 +404,12 @@ function saleControls(me) {
   return box;
 }
 
+function placesText(me) {
+  const g = state.game;
+  const where = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === mySeat && t.stock > 0);
+  return where.map(({ t, pos }) => `${t.stock.toLocaleString('en-US')} at ${rules.squares[pos].name}`).join(', ');
+}
+
 function widgetText(n) {
   n = Math.floor(n);
   if (!n) return 'No widgets.';
@@ -475,6 +481,7 @@ function renderTile() {
       if (tile.building) {
         const r = rules.rarities[tile.building.rarity];
         box.push(el('p', { class: 'small' }, `${r.name} PP&E, cost ${money(tile.building.cost)}, book value ${money(tile.building.cost - tile.building.dep)}.`));
+        if (tile.stock) box.push(el('p', { class: 'small' }, `${tile.stock.toLocaleString('en-US')} widgets ${tile.zone === 'retail' ? 'on the shelves' : 'waiting to be collected'}.`));
       }
     }
     if (tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land' && tile.zone && !tile.building) {
@@ -529,6 +536,8 @@ function renderHand() {
   const r = me.retail;
   $('widgets').replaceChildren(
     el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets: ${widgetText(me.inventory)}.`),
+    el('p', { class: 'small' }, `${me.carried.toLocaleString('en-US')} on your token. ${placesText(me)}`),
+    el('p', { class: 'small' }, 'Your token picks widgets up at your factories and drops them at your stores as it passes. Passing a transport tile ships them to your stores on that side of the board (freight is charged on other players\' lines).'),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at $${r.price.toFixed(2)} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),

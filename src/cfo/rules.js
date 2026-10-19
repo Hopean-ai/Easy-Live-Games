@@ -24,16 +24,18 @@ export const ACCOUNTS = {
   cogs: 'Cost of widgets sold',
   revRent: 'Rent revenue',
   revInterest: 'Interest revenue',
+  revFreight: 'Freight revenue',
   revOps: 'Operating revenue',
   revOther: 'Other revenue',
   gain: 'Gain (loss) on asset sales',
   expRent: 'Rent expense',
   expDep: 'Depreciation expense',
+  expFreight: 'Freight expense',
   expOther: 'Other expenses',
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
-const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
+const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
 
@@ -47,7 +49,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0) {
     phase: 'roll', // roll | buy | act | over
     dice: null,
     players: [],
-    tiles: SQUARES.map((sq) => (sq.kind === 'land' || sq.kind === 'transport' ? { owner: null, zone: null, building: null } : null)),
+    tiles: SQUARES.map((sq) => (sq.kind === 'land' || sq.kind === 'transport' ? { owner: null, zone: null, building: null, stock: 0 } : null)),
     zoningDeck: [],
     zoningRow: [],
     ppeDeck: [],
@@ -71,6 +73,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0) {
       name, pos: 0, out: false, skip: false, years: 0,
       ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
       journal: [], report: null,
+      carried: 0, // widgets on the player's token; the rest sit in their factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
     };
@@ -132,8 +135,8 @@ export function companyCash(p) {
 
 export function incomeStatement(p) {
   const l = p.ledger;
-  const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
-  const expenses = { cogs: l.cogs, expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
+  const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revFreight: -l.revFreight, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
+  const expenses = { cogs: l.cogs, expFreight: l.expFreight, expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
   const preTax = totalRevenue - totalExpenses;
@@ -205,10 +208,13 @@ const ACTIONS = {
     p.sale = null;
     const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
     g.dice = d;
-    const from = p.pos;
-    p.pos = (p.pos + d[0] + d[1]) % BOARD_SIZE;
     log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
-    if (p.pos < from) fiscalYearEnd(g, p);
+    // Step square by square: widgets are picked up, dropped off and shipped along the way.
+    for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
+      p.pos = (p.pos + 1) % BOARD_SIZE;
+      if (p.pos === 0) fiscalYearEnd(g, p);
+      if (!p.out) visit(g, p, p.pos);
+    }
     g.phase = 'act';
     if (!p.out && g.phase !== 'over') land(g, p);
     return null;
@@ -325,18 +331,19 @@ const ACTIONS = {
   // A one-off sale offered by landing on a Retail square.
   sell(g, p, { option } = {}) {
     if (g.phase !== 'act' || !p.sale) return 'There is no sale to make here.';
-    if (!p.ledger.inventory) return 'You have no widgets to sell.';
     const { pos } = p.sale;
-    const owner = g.tiles[pos].owner;
+    const tile = g.tiles[pos];
+    const owner = tile.owner;
+    const units = storeCapacity(tile);
+    const { price } = retailTerms(g, owner);
     if (owner === g.turn) {
       const s = RETAIL.sales[option];
       if (!s) return 'Pick a kind of sale.';
-      const { units, price } = retailTerms(g, owner);
-      sellWidgets(g, p, units * s.volume, price * s.price, `${s.name} at ${SQUARES[pos].name}`);
+      if (!tile.stock) return 'This store has no widgets on its shelves.';
+      sellWidgets(g, p, tile, units * s.volume, price * s.price, `${s.name} at ${SQUARES[pos].name}`);
     } else {
-      const units = Math.round(g.tiles[pos].building.cost * RETAIL.perTurn);
-      const { price } = retailTerms(g, owner);
-      const sold = sellWidgets(g, p, units, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
+      if (!p.carried) return 'You are not carrying any widgets.';
+      const sold = sellWidgets(g, p, p, units, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
       const cut = Math.round(sold * RETAIL.commission);
       if (cut) {
         post(p, `Commission to ${g.players[owner].name}`, { expOther: cut, cash: -cut });
@@ -351,8 +358,13 @@ const ACTIONS = {
     if (g.phase === 'roll') return 'Roll first.';
     if (g.phase === 'buy') ACTIONS.pass(g, p);
     p.sale = null;
-    const { units, price } = retailTerms(g, g.turn);
-    if (units) sellWidgets(g, p, units, price, 'Widget sales');
+    // Every store sells from its own shelves.
+    const { price } = retailTerms(g, g.turn);
+    g.tiles.forEach((t, pos) => {
+      if (t?.owner === g.turn && t.zone === 'retail' && t.building && t.stock) {
+        sellWidgets(g, p, t, storeCapacity(t), price, `Widget sales at ${SQUARES[pos].name}`);
+      }
+    });
     nextTurn(g);
     return null;
   },
@@ -361,20 +373,80 @@ const ACTIONS = {
 // How many widgets a company's stores sell in a normal turn, and at what price each.
 export function retailTerms(g, idx) {
   const stores = g.tiles.filter((t) => t?.owner === idx && t.zone === 'retail' && t.building);
-  const units = Math.round(stores.reduce((n, t) => n + t.building.cost * RETAIL.perTurn, 0));
+  const units = stores.reduce((n, t) => n + storeCapacity(t), 0);
   const price = Math.min(RETAIL.maxMarkup, RETAIL.markup + RETAIL.markupPerExtra * Math.max(0, stores.length - 1));
   return { units, price, stores: stores.length };
 }
 
-// Sells up to `units` widgets (each cost $1 to make) at `price` each; returns the sale revenue.
-function sellWidgets(g, p, units, price, text) {
-  const n = Math.min(Math.floor(p.ledger.inventory), Math.round(units));
+function storeCapacity(t) {
+  return Math.round(t.building.cost * RETAIL.perTurn);
+}
+
+// Sells up to `units` widgets (each cost $1 to make) from `from` (a store tile's shelves, or the
+// player's own token, both with a count in .stock / .carried) at `price` each; returns the revenue.
+function sellWidgets(g, p, from, units, price, text) {
+  const key = from === p ? 'carried' : 'stock';
+  const n = Math.min(Math.floor(from[key]), Math.round(units));
+  if (n <= 0) return 0;
+  from[key] -= n;
   if (n <= 0) return 0;
   const revenue = Math.round(n * price);
   post(p, text, { cash: revenue, revSales: -revenue });
   post(p, `Cost of widgets sold (${n.toLocaleString('en-US')})`, { cogs: n, inventory: -n });
   log(g, `${p.name} sells ${n.toLocaleString('en-US')} widgets for ${money(revenue)}.`);
   return revenue;
+}
+
+// ---- Moving widgets ----
+// Miles: players transport widgets as they move; passing a transport tile gets them around that
+// side of the board at once. The board's four sides, by position (corners belong to none).
+export function sideOf(pos) {
+  if (pos >= 1 && pos <= 20) return 'top';
+  if (pos >= 22 && pos <= 30) return 'right';
+  if (pos >= 32 && pos <= 51) return 'bottom';
+  if (pos >= 53) return 'left';
+  return null;
+}
+
+const isMine = (g, t, kind) => t?.owner === g.turn && t.zone === kind && t.building;
+
+// What happens to a player's widgets as their token passes (or lands on) a square.
+function visit(g, p, pos) {
+  const t = g.tiles[pos];
+  if (isMine(g, t, 'industrial') && t.stock) {
+    p.carried += t.stock;
+    t.stock = 0;
+  } else if (isMine(g, t, 'retail') && p.carried) {
+    t.stock += p.carried;
+    p.carried = 0;
+  } else if (SQUARES[pos].kind === 'transport') {
+    ship(g, p, pos);
+  }
+}
+
+// Ships everything the player carries, plus their factory stock on this side of the board, to
+// their stores on this side, split evenly. Someone else's line charges freight.
+function ship(g, p, pos) {
+  const side = sideOf(pos);
+  const here = g.tiles.map((t, i) => ({ t, i })).filter(({ i }) => sideOf(i) === side);
+  const stores = here.filter(({ t }) => isMine(g, t, 'retail')).map(({ t }) => t);
+  if (!stores.length) return;
+  const factories = here.filter(({ t }) => isMine(g, t, 'industrial') && t.stock).map(({ t }) => t);
+  const units = p.carried + factories.reduce((n, t) => n + t.stock, 0);
+  if (!units) return;
+  const line = g.tiles[pos];
+  const owner = line.owner === null || line.owner === g.turn ? null : g.players[line.owner];
+  if (owner && !owner.out) {
+    const fee = charge(g, p, units * RETAIL.freight, 'expFreight', `Freight on ${owner.name}'s ${SQUARES[pos].name}`);
+    if (fee) post(owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
+    if (p.out) return;
+  }
+  p.carried = 0;
+  for (const t of factories) t.stock = 0;
+  stores.forEach((t, i) => {
+    t.stock += Math.floor(units / stores.length) + (i < units % stores.length ? 1 : 0);
+  });
+  log(g, `${p.name} ships ${units.toLocaleString('en-US')} widgets by ${SQUARES[pos].name} to ${stores.length} store${stores.length > 1 ? 's' : ''}.`);
 }
 
 // Miles: bank control gives another card option. Each Banking building a company owns lets it
@@ -514,6 +586,8 @@ function liquidate(g, p, need) {
     const stock = p.ledger.inventory;
     const proceeds = Math.round(stock * CONFIG.liquidation);
     post(p, 'Sold widget inventory to the bank', { cash: proceeds, gain: stock - proceeds, inventory: -stock });
+    p.carried = 0;
+    for (const t of owned) t.t.stock = 0;
     log(g, `${p.name} dumps their widget inventory for ${money(proceeds)}.`);
   }
   const buildings = owned.filter(({ t }) => t.building).sort((a, b) => a.t.building.cost - b.t.building.cost);
@@ -534,6 +608,8 @@ function sellBuilding(g, p, t, pos) {
   const book = b.cost - b.dep;
   post(p, `Sold PP&E on ${SQUARES[pos].name} to the bank`, { cash: proceeds, accDep: b.dep, ppe: -b.cost, gain: book - proceeds });
   t.building = null;
+  p.carried += t.stock;
+  t.stock = 0;
   log(g, `${p.name} sells the building on ${SQUARES[pos].name} for ${money(proceeds)}.`);
 }
 
@@ -551,7 +627,7 @@ function bankrupt(g, p, text) {
   if (p.out) return;
   const idx = g.players.indexOf(p);
   g.tiles.forEach((t) => {
-    if (t?.owner === idx) Object.assign(t, { owner: null, zone: null, building: null });
+    if (t?.owner === idx) Object.assign(t, { owner: null, zone: null, building: null, stock: 0 });
   });
   p.out = true;
   log(g, text);
@@ -576,10 +652,13 @@ function fiscalYearEnd(g, p) {
     if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
   });
   // Industrial makes widgets as far as the company's cash allows, then Retail sells them.
-  each('industrial', (b, name, z) => {
-    const spend = Math.min(Math.round(b.cost * z.produce), Math.max(0, Math.floor(companyCash(p))));
-    if (spend) post(p, `Widgets made at ${name}`, { inventory: spend, cash: -spend });
-  });
+  // Industrial makes widgets, as far as the company's cash allows; they wait at the factory.
+  for (const { t, pos } of mine.filter(({ t }) => t.zone === 'industrial')) {
+    const spend = Math.min(Math.round(t.building.cost * ZONES.industrial.produce), Math.max(0, Math.floor(companyCash(p))));
+    if (!spend) continue;
+    post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: spend, cash: -spend });
+    t.stock += spend;
+  }
   for (const { t, pos } of mine) {
     const dep = Math.min(Math.round(t.building.cost * CONFIG.depreciation), t.building.cost - t.building.dep);
     if (dep) {
@@ -801,6 +880,7 @@ export function viewFor(g, who) {
       atBank: Boolean(p.atBank),
       sale: p.sale ?? null,
       inventory: p.ledger.inventory,
+      carried: p.carried,
       retail: retailTerms(g, i),
       ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: p.journal, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
     })),
