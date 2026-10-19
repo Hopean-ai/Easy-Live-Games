@@ -34,6 +34,16 @@
       <ol id="seat-list" class="seats"></ol>
       <p id="wait-text" class="small"></p>
       <label class="check"><input type="checkbox" id="easy-books"> Easy books: the game records journal entries and prepares statements for everyone</label>
+      <label class="field">How to win
+        <select id="win-mode"></select>
+      </label>
+      <p id="win-text" class="small"></p>
+      <label class="field" id="value-field">Company value target ($)
+        <input id="value-target" type="number" min="5000" step="5000">
+      </label>
+      <label class="field">Year limit (0 = none; then the highest net worth wins)
+        <input id="max-years" type="number" min="0" max="50">
+      </label>
       <button id="start" hidden>Start the game</button>
     </section>
 
@@ -95,6 +105,7 @@
       </div>
       <footer class="bar small">
         <span>Room <strong id="room-code-2"></strong></span>
+        <span id="goal"></span>
         <span id="status"></span>
         <button id="resign" class="link">Resign</button>
       </footer>

@@ -15,7 +15,8 @@ export const CONFIG = {
   liquidation: 0.5, // PLACEHOLDER: the bank buys assets back at half their cost
   personalAssetPrice: 1000, // PLACEHOLDER: personal cash paid per Personal Assets draw
   portfolioGoal: 100000, // spreadsheet: $100k personal asset portfolio (~93 draws)
-  maxYears: 8, // PLACEHOLDER: game ends once every company has closed this many fiscal years
+  valueTarget: 50000, // PLACEHOLDER: company value that wins the "company value" game
+  maxYears: 0, // optional room setting: end once every company has closed this many years (0 = no limit)
   fraudFine: 1000, // PLACEHOLDER: per fraud found at an Interim Review
   fyeFraudChance: 0.25, // PLACEHOLDER: chance each unfound fraud is caught when its owner passes FYE
   misstatementFine: 100, // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
@@ -215,3 +216,11 @@ export function deckOf(cards) {
   for (const [id, c] of Object.entries(cards)) for (let i = 0; i < c.count; i++) deck.push(id);
   return deck;
 }
+
+// Miles: several ways to win, chosen per room. Every mode also ends when only one independent
+// company is left, and the player running the largest subsidiary places second.
+export const WIN_MODES = {
+  standing: { name: 'Last company standing', text: 'Drive every other independent company out of business.' },
+  value: { name: 'Company value', text: 'First company worth the target wins.' },
+  portfolio: { name: 'Personal portfolio', text: 'First player whose personal assets reach $100,000 wins.' },
+};
