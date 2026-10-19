@@ -103,14 +103,20 @@ function buildSquares() {
 }
 
 // ---- Zoning (47 cards, Assets sheet) ----
-// What a building earns depends on the zone of the land under it. PLACEHOLDER effects:
-// rent is charged to visitors as a share of the building's cost, yearly is earned at each FYE.
+// What a building does depends on the zone of the land under it (Miles: Industrial makes
+// widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
+// also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
+// - Industrial: each fiscal year, spends `produce` x cost of company cash making widgets (inventory).
+// - Retail: each fiscal year, sells widgets for up to `sell` x cost, at WIDGET_MARKUP x what they cost to make.
+// - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
+// - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 26, rent: 0.1, yearly: 0.4 },
-  retail: { name: 'Retail', count: 10, rent: 0.5, yearly: 0.1 },
-  banking: { name: 'Banking', count: 4, rent: 0.1, yearly: 0.3 },
-  residential: { name: 'Residential', count: 7, rent: 0.3, yearly: 0.2 },
+  industrial: { name: 'Industrial', count: 26, rent: 0.1, produce: 0.3 },
+  retail: { name: 'Retail', count: 10, rent: 0.2, sell: 1.2 },
+  banking: { name: 'Banking', count: 4, rent: 0.1, yearly: 0.1, interest: 0.03 },
+  residential: { name: 'Residential', count: 7, rent: 0.5, yearly: 0.15 },
 };
+export const WIDGET_MARKUP = 2;
 
 // ---- PP&E (47 cards, Assets sheet) ----
 export const RARITIES = {

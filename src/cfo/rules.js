@@ -6,12 +6,13 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT,
+  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, WIDGET_MARKUP,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
 export const ACCOUNTS = {
   cash: 'Cash',
+  inventory: 'Inventory (widgets)',
   land: 'Land',
   ppe: 'PP&E',
   accDep: 'Accumulated depreciation',
@@ -19,7 +20,10 @@ export const ACCOUNTS = {
   capital: 'Contributed capital',
   retained: 'Retained earnings',
   draws: 'Owner distributions',
+  revSales: 'Widget sales',
+  cogs: 'Cost of widgets sold',
   revRent: 'Rent revenue',
+  revInterest: 'Interest revenue',
   revOps: 'Operating revenue',
   revOther: 'Other revenue',
   gain: 'Gain (loss) on asset sales',
@@ -29,7 +33,7 @@ export const ACCOUNTS = {
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
-const TEMPORARY = ['revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
+const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
 
@@ -128,8 +132,8 @@ export function companyCash(p) {
 
 export function incomeStatement(p) {
   const l = p.ledger;
-  const revenue = { revRent: -l.revRent, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
-  const expenses = { expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
+  const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
+  const expenses = { cogs: l.cogs, expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
   const preTax = totalRevenue - totalExpenses;
@@ -139,7 +143,7 @@ export function incomeStatement(p) {
 export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
-  const assets = { cash: l.cash, land: l.land, ppe: l.ppe, accDep: l.accDep };
+  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep };
   const liabilities = { loan: -l.loan };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
@@ -442,6 +446,12 @@ function charge(g, p, amount, account, text) {
 function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
   const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx);
+  if (p.ledger.inventory > 0 && companyCash(p) < need) {
+    const stock = p.ledger.inventory;
+    const proceeds = Math.round(stock * CONFIG.liquidation);
+    post(p, 'Sold widget inventory to the bank', { cash: proceeds, gain: stock - proceeds, inventory: -stock });
+    log(g, `${p.name} dumps their widget inventory for ${money(proceeds)}.`);
+  }
   const buildings = owned.filter(({ t }) => t.building).sort((a, b) => a.t.building.cost - b.t.building.cost);
   for (const { t, pos } of buildings) {
     if (companyCash(p) >= need) return;
@@ -489,16 +499,37 @@ function fiscalYearEnd(g, p) {
   p.years += 1;
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
-  g.tiles.forEach((t, pos) => {
-    if (t?.owner !== idx || !t.building) return;
-    const earned = Math.round(t.building.cost * ZONES[t.zone].yearly);
-    if (earned) post(p, `Operations at ${SQUARES[pos].name}`, { cash: earned, revOps: -earned });
+  const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
+  const each = (zone, fn) => mine.filter(({ t }) => t.zone === zone).forEach(({ t, pos }) => fn(t.building, SQUARES[pos].name, ZONES[zone]));
+
+  // Banking first, on the cash the company held through the year.
+  each('banking', (b, name, z) => {
+    const earned = Math.max(0, Math.round(companyCash(p) * z.interest + b.cost * z.yearly));
+    if (earned) post(p, `Interest and fees at ${name}`, { cash: earned, revInterest: -earned });
+  });
+  each('residential', (b, name, z) => {
+    const earned = Math.round(b.cost * z.yearly);
+    if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
+  });
+  // Industrial makes widgets as far as the company's cash allows, then Retail sells them.
+  each('industrial', (b, name, z) => {
+    const spend = Math.min(Math.round(b.cost * z.produce), Math.max(0, Math.floor(companyCash(p))));
+    if (spend) post(p, `Widgets made at ${name}`, { inventory: spend, cash: -spend });
+  });
+  each('retail', (b, name, z) => {
+    const atCost = Math.min(p.ledger.inventory, Math.round((b.cost * z.sell) / WIDGET_MARKUP));
+    if (atCost <= 0) return;
+    const price = atCost * WIDGET_MARKUP;
+    post(p, `Widgets sold at ${name}`, { cash: price, revSales: -price });
+    post(p, `Cost of widgets sold at ${name}`, { cogs: atCost, inventory: -atCost });
+  });
+  for (const { t, pos } of mine) {
     const dep = Math.min(Math.round(t.building.cost * CONFIG.depreciation), t.building.cost - t.building.dep);
     if (dep) {
       t.building.dep += dep;
       post(p, `Depreciation on ${SQUARES[pos].name}`, { expDep: dep, accDep: -dep });
     }
-  });
+  }
 
   if (p.ledger.loan < 0) charge(g, p, -p.ledger.loan * CONFIG.loanInterest, 'expInterest', 'Loan interest');
   if (p.out) return;

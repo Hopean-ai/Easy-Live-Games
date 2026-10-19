@@ -443,7 +443,7 @@ function renderTile() {
     }
     if (tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land' && tile.zone && !tile.building) {
       const z = rules.zones[tile.zone];
-      box.push(el('p', { class: 'small' }, `${z.name} PP&E charges visitors ${Math.round(z.rent * 100)}% of its cost and earns ${Math.round(z.yearly * 100)}% of its cost each fiscal year.`));
+      box.push(el('p', { class: 'small' }, zoneText(tile.zone)));
       const row = el('div', { class: 'row' });
       g.ppeRow.forEach((r, i) => row.append(el('button', { onclick: () => actNow({ a: 'build', pos: selected, card: i }) }, `Build ${rules.rarities[r].name} (${money(rules.rarities[r].price)})`)));
       if (!g.ppeRow.length) row.append(el('span', { class: 'small' }, 'The PP&E deck is empty.'));
@@ -451,6 +451,18 @@ function renderTile() {
     }
   }
   $('tile').replaceChildren(...box);
+}
+
+function zoneText(id) {
+  const z = rules.zones[id];
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const yearly = {
+    industrial: `each fiscal year spends ${pct(z.produce)} of its cost making widgets`,
+    retail: `each fiscal year sells your widgets, up to ${pct(z.sell)} of its cost, at ${rules.widgetMarkup}× what they cost to make`,
+    residential: `each fiscal year collects tenant rent of ${pct(z.yearly)} of its cost`,
+    banking: `each fiscal year earns ${pct(z.interest)} interest on your company's cash plus fees of ${pct(z.yearly)} of its cost`,
+  }[id];
+  return `${z.name} PP&E charges visitors ${pct(z.rent)} of its cost, and ${yearly}.`;
 }
 
 function renderHand() {

@@ -81,17 +81,21 @@ test('buying land takes a zoning card and posts a journal entry', () => {
   assert.equal(p.ledger.land, sq.price); // transport routes are carried with land
 });
 
-test('a fiscal year end earns, depreciates, taxes and closes the books', () => {
+test('a fiscal year end makes and sells widgets, depreciates, taxes and closes the books', () => {
   const g = createGame(['A', 'B'], 3);
   const p = g.players[0];
-  const pos = posOfSpace(1);
-  Object.assign(g.tiles[pos], { owner: 0, zone: 'industrial', building: { rarity: 'rare', cost: 1000, dep: 0 } });
+  Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'industrial', building: { rarity: 'rare', cost: 1000, dep: 0 } });
+  Object.assign(g.tiles[posOfSpace(2)], { owner: 0, zone: 'retail', building: { rarity: 'uncommon', cost: 200, dep: 0 } });
   p.pos = BOARD_SIZE - 2; // any roll passes FYE
   act(g, 0, { a: 'roll' });
   assert.equal(p.years, 1);
   const r = p.report.income;
-  assert.equal(r.revenue.revOps, CONFIG.baseRevenue + 400);
-  assert.equal(r.expenses.expDep, 100);
+  // Industrial spends $300 on widgets; Retail sells up to $240 of them, i.e. $120 at cost.
+  assert.equal(p.ledger.inventory, 180);
+  assert.equal(r.revenue.revSales, 240);
+  assert.equal(r.expenses.cogs, 120);
+  assert.equal(r.revenue.revOps, CONFIG.baseRevenue);
+  assert.equal(r.expenses.expDep, 120);
   assert.equal(r.tax, Math.round(r.preTax * CONFIG.corporateTax));
   assert.equal(incomeStatement(p).netIncome, 0, 'income accounts start the new year at zero');
   assert.equal(-p.ledger.retained, r.netIncome);
