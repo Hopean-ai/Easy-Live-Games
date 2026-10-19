@@ -1,6 +1,6 @@
 import { readCookie, sessionCookie, SESSION_COOKIE } from './auth.js';
 import { newRoomCode } from './codes.js';
-import { findGame, publicGames } from './games.js';
+import { findGame, publicGames, tableSize } from './games.js';
 
 export { newRoomCode };
 
@@ -60,12 +60,16 @@ export async function handleRequest(request, env) {
     const token = url.searchParams.get('token');
     const who = account ? `account:${account.toLowerCase()}` : TOKEN.test(token ?? '') ? `guest:${token}` : '';
     const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(game.id));
-    return stub.fetch(forward(request, url, { 'X-Player': who }));
+    const { min, max } = tableSize(game);
+    return stub.fetch(forward(request, url, { 'X-Player': who, 'X-Match-Min': String(min), 'X-Match-Max': String(max) }));
   }
 
-  const room = path.match(/^\/api\/rooms\/([^/]+)\/ws$/);
+  // /api/rooms/CODE/ws is Pong's, from before there were other games; others name their game.
+  const room = path.match(/^\/api\/rooms\/([^/]+)\/ws$/) ?? path.match(/^\/api\/rooms\/([^/]+)\/([^/]+)\/ws$/);
   if (room) {
-    const code = room[1];
+    const game = findGame(room.length === 3 ? room[1] : 'pong');
+    if (!game) return new Response('Unknown game', { status: 404 });
+    const code = room.at(-1);
     if (!ROOM_CODE.test(code)) return new Response('Bad room code', { status: 400 });
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected a WebSocket upgrade', { status: 426 });
@@ -73,7 +77,8 @@ export async function handleRequest(request, env) {
     // A signed-in player always plays under their account name; anyone else is marked a guest.
     const account = await accountName(request, env);
     if (account) url.searchParams.set('name', account);
-    const stub = env.ROOMS.get(env.ROOMS.idFromName(code.toUpperCase()));
+    const rooms = env[game.rooms];
+    const stub = rooms.get(rooms.idFromName(code.toUpperCase()));
     return stub.fetch(forward(request, url, account ? { 'X-Player-Account': account } : {}));
   }
 

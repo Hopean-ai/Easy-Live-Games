@@ -105,8 +105,30 @@ test('quick match queues by account or guest token, only for known games', async
   assert.equal(unknown.status, 404);
 });
 
+test('quick match tells the matchmaker each game\'s table size', async () => {
+  let seen = null;
+  const e = env({ onMatch: (id, req) => ((seen = [req.headers.get('X-Match-Min'), req.headers.get('X-Match-Max')]), new Response('ok')) });
+  await worker.fetch(ws('http://x/api/match/pong/ws?token=tab-token-1', { 'X-Match-Max': '99' }), e);
+  assert.deepEqual(seen, ['2', '2']);
+  await worker.fetch(ws('http://x/api/match/cfo/ws?token=tab-token-1'), e);
+  assert.deepEqual(seen, ['2', '6']);
+});
+
+test('game rooms route to that game\'s Durable Objects', async () => {
+  let routed = null;
+  const e = env();
+  e.CFO_ROOMS = { idFromName: (name) => name, get: (id) => ({ fetch: () => ((routed = ['cfo', id]), new Response('ok')) }) };
+  e.ROOMS = { idFromName: (name) => name, get: (id) => ({ fetch: () => ((routed = ['pong', id]), new Response('ok')) }) };
+  await worker.fetch(ws('http://x/api/rooms/cfo/abcd1/ws'), e);
+  assert.deepEqual(routed, ['cfo', 'ABCD1']);
+  await worker.fetch(ws('http://x/api/rooms/pong/abcd1/ws'), e);
+  assert.deepEqual(routed, ['pong', 'ABCD1']);
+  const unknown = await worker.fetch(ws('http://x/api/rooms/chess/abcd1/ws'), e);
+  assert.equal(unknown.status, 404);
+});
+
 test('the games list names Pong and where to play it', async () => {
   const { games } = await (await worker.fetch(new Request('http://x/api/games'), env())).json();
-  assert.deepEqual(games.map((g) => [g.id, g.page]), [['pong', '/pong']]);
+  assert.deepEqual(games.map((g) => [g.id, g.page]), [['pong', '/pong'], ['cfo', '/cfo']]);
   assert.equal(games[0].rooms, undefined);
 });

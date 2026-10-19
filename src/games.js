@@ -10,10 +10,26 @@ export const GAMES = [
     page: '/pong',
     rooms: 'ROOMS',
   },
+  {
+    id: 'cfo',
+    name: 'CFO',
+    blurb: 'An accounting board game: buy land, build PP&E, keep real books, and get rich personally.',
+    players: '2–6',
+    minPlayers: 2,
+    maxPlayers: 6,
+    page: '/cfo',
+    rooms: 'CFO_ROOMS',
+  },
 ];
 
 export function findGame(id) {
   return GAMES.find((g) => g.id === id) ?? null;
+}
+
+// How many players quick match puts in one room.
+export function tableSize(game) {
+  const min = game.minPlayers ?? game.players;
+  return { min, max: game.maxPlayers ?? min };
 }
 
 // What the browser needs to draw the selection page.
