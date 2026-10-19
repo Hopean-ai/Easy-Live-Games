@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, WIN_MODES, BOARD_SIZE, CPE_POS, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -95,11 +95,10 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   return g;
 }
 
-// The room's win condition, with anything missing or out of range set to its default.
+// The room's win settings, with anything missing or out of range set to its default.
 export function winOptions(o = {}) {
   const num = (v, lo, hi, d) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Math.round(Number(v)) : d);
   return {
-    mode: WIN_MODES[o.winMode] ? o.winMode : 'standing',
     valueTarget: num(o.valueTarget, 5000, 10_000_000, CONFIG.valueTarget),
     maxYears: num(o.maxYears, 0, 50, CONFIG.maxYears),
   };
@@ -720,15 +719,11 @@ function afterAction(g) {
   const independent = alive.filter((p) => p.parent === null);
   if (independent.length === 1) return finish(g, independent[0], 'the last company standing');
   if (!independent.length) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
-  if (win.mode === 'value') {
-    const big = independent.find((p) => companyValue(p) >= win.valueTarget);
-    if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
-  }
-  if (win.mode === 'portfolio') {
-    // Miles: the portfolio only wins after a lap of the island.
-    const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
-    if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
-  }
+  const big = independent.find((p) => companyValue(p) >= win.valueTarget);
+  if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
+  // Miles: the portfolio only wins after a lap of the island.
+  const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
+  if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
   if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
     const best = alive.reduce((a, b) => (netWorth(g, b) > netWorth(g, a) ? b : a));
     return finish(g, best, `the highest net worth after ${win.maxYears} fiscal years`);

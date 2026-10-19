@@ -34,11 +34,9 @@
       <ol id="seat-list" class="seats"></ol>
       <p id="wait-text" class="small"></p>
       <label class="check"><input type="checkbox" id="easy-books"> Easy books: the game records journal entries and prepares statements for everyone</label>
-      <label class="field">How to win
-        <select id="win-mode"></select>
-      </label>
-      <p id="win-text" class="small"></p>
-      <label class="field" id="value-field">Company value target ($)
+      <h2>Ways to win</h2>
+      <ul id="win-list" class="small win-list"></ul>
+      <label class="field">Company value target ($)
         <input id="value-target" type="number" min="5000" step="5000">
       </label>
       <label class="field">Year limit (0 = none; then the highest net worth wins)
@@ -55,6 +53,7 @@
               <strong id="turn-text"></strong>
               <span id="dice" class="dice"></span>
             </div>
+            <p id="peek" class="peek small"></p>
             <div id="actions" class="actions"></div>
             <p id="error" class="error" role="alert"></p>
             <ul id="log" class="log"></ul>
@@ -74,7 +73,7 @@
           <h2>Players</h2>
           <table id="players" class="players"></table>
         </section>
-        <section class="panel">
+        <section class="panel tile-panel">
           <h2 id="tile-title">Board</h2>
           <div id="tile"><p class="small">Tap a square to see it. Tap your own zoned land to build on it.</p></div>
         </section>

@@ -160,7 +160,6 @@ $('copy').addEventListener('click', async () => {
 
 $('start').addEventListener('click', () => send({ t: 'start' }));
 $('easy-books').addEventListener('change', (e) => send({ t: 'option', easyBooks: e.target.checked }));
-$('win-mode').addEventListener('change', (e) => send({ t: 'option', winMode: e.target.value }));
 $('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
 $('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
 $('resign').addEventListener('click', () => {
@@ -292,23 +291,24 @@ function renderWaiting() {
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
 }
 
+// Every way to win is live in every game; whichever happens first ends it.
+function winLines(o) {
+  const cfg = rules.config;
+  return [
+    'Last company standing: drive every other independent company out of business.',
+    `Company value: the first company worth ${money(o.valueTarget ?? cfg.valueTarget)}.`,
+    `Personal portfolio: the first player with ${money(cfg.portfolioGoal)} of personal assets who has made a lap of the island.`,
+    ...(o.maxYears ? [`After ${o.maxYears} fiscal years, the highest net worth.`] : []),
+  ];
+}
+
 function renderWinOptions() {
   const o = state.options ?? {};
-  const modes = rules?.winModes ?? {};
-  const select = $('win-mode');
-  if (select.options.length !== Object.keys(modes).length) {
-    select.replaceChildren(...Object.entries(modes).map(([id, m]) => el('option', { value: id }, m.name)));
-  }
-  const mode = modes[o.winMode] ? o.winMode : 'standing';
-  select.value = mode;
-  $('win-text').textContent = mode === 'value'
-    ? `First company worth ${money(o.valueTarget ?? rules.config.valueTarget)} wins.`
-    : modes[mode]?.text ?? '';
-  $('value-field').hidden = mode !== 'value';
+  $('win-list').replaceChildren(...winLines(o).map((t) => el('li', {}, t)));
   // Don't overwrite a number the host is in the middle of typing.
   if (document.activeElement !== $('value-target')) $('value-target').value = o.valueTarget ?? rules?.config.valueTarget ?? '';
   if (document.activeElement !== $('max-years')) $('max-years').value = o.maxYears ?? 0;
-  for (const id of ['win-mode', 'value-target', 'max-years']) $(id).disabled = mySeat !== 0;
+  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== 0;
 }
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
@@ -396,8 +396,8 @@ function renderTurn() {
   }
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
   if (g.win) {
-    const m = rules.winModes[g.win.mode];
-    $('goal').textContent = `Goal: ${g.win.mode === 'value' ? `company worth ${money(g.win.valueTarget)}` : m?.name ?? ''}${g.win.maxYears ? `, ${g.win.maxYears} years max` : ''}`;
+    $('goal').textContent = `Win: last standing, company worth ${money(g.win.valueTarget)}, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
+    $('goal').title = winLines(g.win).join('\n');
   }
   const box = $('actions');
   box.replaceChildren();
@@ -535,6 +535,7 @@ function renderTile() {
   if (selected === null) {
     $('tile-title').textContent = 'Board';
     $('tile').replaceChildren(el('p', { class: 'small' }, 'Tap a square to see it. Tap your own zoned land to build on it.'));
+    $('peek').textContent = 'Tap a square to see it.';
     return;
   }
   const sq = rules.squares[selected];
@@ -591,6 +592,8 @@ function renderTile() {
     }
   }
   $('tile').replaceChildren(...box);
+  // Phones show the board without labels, so name the tapped square under it.
+  $('peek').textContent = `${sq.name ?? CORNER_NAMES[sq.kind]?.[0] ?? DECK_NAMES[sq.deck]}${tile?.owner !== null && tile?.owner !== undefined ? `, owned by ${g.players[tile.owner].name}` : sq.price ? `, ${money(sq.price)}` : ''}. Details below.`;
 }
 
 function zoneText(id) {
