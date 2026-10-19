@@ -108,16 +108,37 @@ function buildSquares() {
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
 // - Industrial: each fiscal year, spends `produce` x cost of company cash making widgets (inventory).
-// - Retail: each fiscal year, sells widgets for up to `sell` x cost, at WIDGET_MARKUP x what they cost to make.
+// - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
 // - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
 export const ZONES = {
   industrial: { name: 'Industrial', count: 26, rent: 0.1, produce: 0.3 },
-  retail: { name: 'Retail', count: 10, rent: 0.2, sell: 1.2 },
+  retail: { name: 'Retail', count: 10, rent: 0.2 },
   banking: { name: 'Banking', count: 4, rent: 0.1, yearly: 0.1, interest: 0.03 },
   residential: { name: 'Residential', count: 7, rent: 0.5, yearly: 0.15 },
 };
-export const WIDGET_MARKUP = 2;
+
+// Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
+// denominations of that count, like bills: a Platinum widget is 10,000 Common ones.
+export const WIDGET_TIERS = [
+  ['Platinum', 10000], ['Gold', 1000], ['Silver', 100], ['Bronze', 10], ['Common', 1],
+];
+
+// Miles: widgets sell throughout the rounds; Retail ownership sets the rate and price, and
+// landing on Retail gives more control that turn. All PLACEHOLDER numbers.
+export const RETAIL = {
+  perTurn: 0.15, // each Retail building sells this x its cost in widgets at the end of each of your turns
+  markup: 2, // sale price per widget, as a multiple of its $1 cost...
+  markupPerExtra: 0.25, // ...plus this for each Retail building beyond the first...
+  maxMarkup: 3, // ...up to this
+  // Choices when you land on your own Retail square, as multiples of a normal turn's volume and price.
+  sales: {
+    clearance: { name: 'Clearance sale', volume: 3, price: 0.75 },
+    premium: { name: 'Premium launch', volume: 1, price: 1.5 },
+  },
+  commission: 0.25, // landing on someone else's Retail: sell through their store, they keep this share
+};
+
 
 // ---- PP&E (47 cards, Assets sheet) ----
 export const RARITIES = {
