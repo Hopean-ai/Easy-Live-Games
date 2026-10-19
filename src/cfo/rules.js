@@ -16,6 +16,7 @@ export const ACCOUNTS = {
   land: 'Land',
   ppe: 'PP&E',
   accDep: 'Accumulated depreciation',
+  investments: 'Investment in subsidiaries',
   loan: 'Bank loan',
   capital: 'Contributed capital',
   retained: 'Retained earnings',
@@ -25,6 +26,7 @@ export const ACCOUNTS = {
   revRent: 'Rent revenue',
   revInterest: 'Interest revenue',
   revFreight: 'Freight revenue',
+  revDividends: 'Dividend income',
   revOps: 'Operating revenue',
   revOther: 'Other revenue',
   gain: 'Gain (loss) on asset sales',
@@ -35,7 +37,7 @@ export const ACCOUNTS = {
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
-const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
+const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
 
@@ -80,6 +82,8 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       carried: 0, // widgets on the player's token; the rest sit in their factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
+      // Shares in this player's company: who holds how many. Everyone starts owning all 100 of theirs.
+      shares: { holders: { [g.players.length]: 100 }, public: 0 }, isPublic: false, parent: null,
       manual: !g.easyBooks, docs: [], docSeq: 0, fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
@@ -155,7 +159,7 @@ export function companyCash(p) {
 
 export function incomeStatement(p) {
   const l = p.ledger;
-  const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revFreight: -l.revFreight, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
+  const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revFreight: -l.revFreight, revDividends: -l.revDividends, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
   const expenses = { cogs: l.cogs, expFreight: l.expFreight, expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
@@ -166,7 +170,7 @@ export function incomeStatement(p) {
 export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
-  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep };
+  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments };
   const liabilities = { loan: -l.loan };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
@@ -183,8 +187,42 @@ export function portfolio(p) {
   return p.assets.reduce((v, id) => v + PERSONAL_CARDS[id].value, 0);
 }
 
-export function netWorth(p) {
-  return round(balanceSheet(p).totalEquity + p.personalCash + portfolio(p));
+// ---- Shares ----
+// Miles: going public raises cash and counts toward winning (the market values a public company
+// above its books), but brings tighter fraud scrutiny. Subsidiaries are part-owned by a parent.
+
+export function totalShares(p) {
+  return Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + p.shares.public;
+}
+
+// What the market pays for the whole company.
+export function companyValue(p) {
+  return Math.max(0, balanceSheet(p).totalEquity) * (p.isPublic ? CONFIG.publicPremium : 1);
+}
+
+export function sharePrice(p) {
+  return round(companyValue(p) / totalShares(p));
+}
+
+// Shares change hands with personal cash, so they trade in whole $100s.
+export function tradePrice(p) {
+  return Math.max(CONFIG.personalUnit, Math.round(sharePrice(p) / CONFIG.personalUnit) * CONFIG.personalUnit);
+}
+
+// A subsidiary's parent holds its shares in the company, which shows on the parent's own books.
+export function netWorth(g, p) {
+  const idx = g.players.indexOf(p);
+  let worth = p.personalCash + portfolio(p);
+  for (const c of g.players) {
+    const held = c.parent === idx ? 0 : (c.shares.holders[idx] ?? 0);
+    if (held && !c.out) worth += (companyValue(c) * held) / totalShares(c);
+  }
+  return round(worth);
+}
+
+// How hard auditors look: public companies get caught and fined more.
+function scrutiny(p) {
+  return p.isPublic ? CONFIG.publicScrutiny : 1;
 }
 
 // ---- Turn flow ----
@@ -299,16 +337,81 @@ const ACTIONS = {
     if (amount % CONFIG.personalUnit) return `Pay yourself in multiples of ${money(CONFIG.personalUnit)}.`;
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     post(p, 'Owner distribution', { draws: amount, cash: -amount });
-    // Tax is worked out on the year's total, so splitting a payout into small ones saves nothing.
-    p.yearDraws = (p.yearDraws ?? 0) + amount;
-    const due = Math.round((p.yearDraws * CONFIG.personalTax) / CONFIG.personalUnit) * CONFIG.personalUnit;
-    let tax = due - (p.yearTax ?? 0);
-    p.yearTax = due;
-    const relief = Math.min(tax, p.deduction);
-    p.deduction -= relief;
-    tax -= relief;
-    p.personalCash += amount - tax;
-    log(g, `${p.name} pays themself ${money(amount)} (${money(tax)} personal tax).`);
+    // Every shareholder gets their share of a distribution. A parent company's share goes to its
+    // books as dividend income; people's shares are taxed; the public's share leaves the game.
+    const total = totalShares(p);
+    for (const [h, n] of Object.entries(p.shares.holders)) {
+      const q = g.players[h];
+      const part = Math.floor((amount * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
+      if (!part || q.out) continue;
+      if (Number(h) === p.parent) {
+        post(q, `Dividend from ${p.name}`, { cash: part, revDividends: -part });
+        log(g, `${q.name}'s company receives a ${money(part)} dividend from ${p.name}.`);
+      } else {
+        const tax = personalIncome(q, part);
+        log(g, `${q.name} receives ${money(part)} from ${p.name}'s company (${money(tax)} personal tax).`);
+      }
+    }
+    return null;
+  },
+
+  // Sell new shares to the public. The company keeps the cash.
+  ipo(g, p) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    if (p.isPublic) return 'Your company is already public.';
+    if (p.parent !== null) return 'A subsidiary cannot go public.';
+    if (p.years < CONFIG.ipoYears) return `You need ${CONFIG.ipoYears} fiscal years of history to go public.`;
+    if (balanceSheet(p).totalEquity <= 0) return 'Investors will not buy into a company with no equity.';
+    const price = round((balanceSheet(p).totalEquity * CONFIG.publicPremium) / totalShares(p));
+    const raised = Math.round(price * CONFIG.ipoShares);
+    p.shares.public += CONFIG.ipoShares;
+    p.isPublic = true;
+    post(p, `Initial public offering of ${CONFIG.ipoShares} shares`, { cash: raised, capital: -raised });
+    log(g, `${p.name}'s company goes public, selling ${CONFIG.ipoShares} shares at ${money(price)} for ${money(raised)}.`);
+    return null;
+  },
+
+  // Buy or sell shares of a public company on the market, with personal cash.
+  trade(g, p, { target, count } = {}) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    const c = g.players[target];
+    if (!c || c.out || !c.isPublic) return 'Pick a public company.';
+    count = Math.trunc(Number(count));
+    if (!count) return 'Enter how many shares.';
+    const me = String(g.players.indexOf(p));
+    const price = tradePrice(c);
+    if (count > 0) {
+      if (count > c.shares.public) return `Only ${c.shares.public} shares are on the market.`;
+      if (count * price > p.personalCash) return 'You do not have enough personal cash.';
+      p.personalCash -= count * price;
+      c.shares.public -= count;
+      c.shares.holders[me] = (c.shares.holders[me] ?? 0) + count;
+      log(g, `${p.name} buys ${count} shares of ${c.name}'s company at ${money(price)}.`);
+    } else {
+      if (-count > (c.shares.holders[me] ?? 0)) return 'You do not hold that many shares.';
+      if (c.shares.holders[me] + count <= 0 && c === p) return 'You cannot sell all of your own company.';
+      p.personalCash += -count * price;
+      c.shares.public += -count;
+      c.shares.holders[me] += count;
+      if (!c.shares.holders[me]) delete c.shares.holders[me];
+      log(g, `${p.name} sells ${-count} shares of ${c.name}'s company at ${money(price)}.`);
+    }
+    return null;
+  },
+
+  // Miles: in a 3+ player game, someone knocked out early can be hired to run a subsidiary.
+  hire(g, p, { target, amount } = {}) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    if (g.players.length < 3) return 'Subsidiaries need a game of three or more.';
+    const q = g.players[target];
+    if (!q || !q.out) return 'Pick a player who is out of the game.';
+    amount = Math.floor(Number(amount));
+    if (!(amount >= CONFIG.subsidiaryMin) || amount % CONFIG.personalUnit) return `Fund it with at least ${money(CONFIG.subsidiaryMin)}, in $100s.`;
+    if (amount > companyCash(p)) return 'Your company does not have that much cash.';
+    const parent = g.players.indexOf(p);
+    post(p, `Invested in ${q.name}'s new subsidiary`, { investments: amount, cash: -amount });
+    restart(g, q, parent, amount);
+    log(g, `${p.name} hires ${q.name} to run a subsidiary with ${money(amount)} of capital.`);
     return null;
   },
 
@@ -531,7 +634,7 @@ function afterAction(g) {
   const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal);
   if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
   if (alive.every((p) => p.years >= CONFIG.maxYears)) {
-    const best = alive.reduce((a, b) => (netWorth(b) > netWorth(a) ? b : a));
+    const best = alive.reduce((a, b) => (netWorth(g, b) > netWorth(g, a) ? b : a));
     return finish(g, best, `the highest net worth after ${CONFIG.maxYears} fiscal years`);
   }
   if (current(g).out) nextTurn(g);
@@ -657,11 +760,48 @@ function sellLand(g, p, t, pos) {
 function bankrupt(g, p, text) {
   if (p.out) return;
   const idx = g.players.indexOf(p);
+  // A failed parent's stake in its subsidiaries goes to the market.
+  for (const c of g.players) {
+    if (c.parent !== idx) continue;
+    c.shares.public += c.shares.holders[idx] ?? 0;
+    delete c.shares.holders[idx];
+    c.parent = null;
+  }
   g.tiles.forEach((t) => {
     if (t?.owner === idx) Object.assign(t, { owner: null, zone: null, building: null, stock: 0 });
   });
   p.out = true;
   log(g, text);
+}
+
+// Personal income from a company, taxed on the person's running total for the year so splitting
+// payouts saves nothing. Returns the tax.
+function personalIncome(q, amount) {
+  q.yearDraws = (q.yearDraws ?? 0) + amount;
+  const due = Math.round((q.yearDraws * CONFIG.personalTax) / CONFIG.personalUnit) * CONFIG.personalUnit;
+  let tax = due - (q.yearTax ?? 0);
+  q.yearTax = due;
+  const relief = Math.min(tax, q.deduction);
+  q.deduction -= relief;
+  tax -= relief;
+  q.personalCash += amount - tax;
+  return tax;
+}
+
+// Brings a knocked-out player back as the manager of a new subsidiary. They keep their personal
+// cash and assets; the company starts fresh, owned mostly by the parent.
+function restart(g, q, parent, capital) {
+  const me = g.players.indexOf(q);
+  const host = g.players[parent];
+  Object.assign(q, {
+    out: false, skip: false, pos: host.pos, years: host.years, atBank: false, sale: null,
+    ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
+    journal: [], report: null, hand: [], frauds: 0, taxWaived: false, carried: 0,
+    docs: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
+    shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, public: 0 },
+    isPublic: false, parent,
+  });
+  post(q, `Capital from ${host.name}`, { cash: capital, capital: -capital });
 }
 
 // ---- Fiscal year end ----
@@ -710,11 +850,12 @@ function fiscalYearEnd(g, p) {
 
   // Miles: fraud can also be caught at FYE. Each fraud not yet found has a chance of turning up.
   let found = 0;
-  for (let i = 0; i < p.frauds; i++) if (rand(g) < CONFIG.fyeFraudChance) found += 1;
+  for (let i = 0; i < p.frauds; i++) if (rand(g) < CONFIG.fyeFraudChance * scrutiny(p)) found += 1;
   if (found) {
     p.frauds -= found;
-    charge(g, p, found * CONFIG.fraudFine, 'expOther', 'Fraud penalties');
-    log(g, `Year-end testing finds ${found} fraud${found > 1 ? 's' : ''} at ${p.name}'s company: ${money(found * CONFIG.fraudFine)} in fines.`);
+    const fine = found * CONFIG.fraudFine * scrutiny(p);
+    charge(g, p, fine, 'expOther', 'Fraud penalties');
+    log(g, `Year-end testing finds ${found} fraud${found > 1 ? 's' : ''} at ${p.name}'s company: ${money(fine)} in fines.`);
     if (p.out) return;
   }
 
@@ -878,8 +1019,9 @@ function audit(g, p) {
   if (p.misstatements) {
     const n = p.misstatements;
     p.misstatements = 0;
-    charge(g, p, n * CONFIG.misstatementFine, 'expOther', 'Audit adjustments');
-    log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(n * CONFIG.misstatementFine)} in fines.`);
+    const fine = n * CONFIG.misstatementFine * scrutiny(p);
+    charge(g, p, fine, 'expOther', 'Audit adjustments');
+    log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(fine)} in fines.`);
     if (p.out) return;
   }
   if (!p.frauds) {
@@ -888,19 +1030,20 @@ function audit(g, p) {
   }
   const n = p.frauds;
   p.frauds = 0;
-  charge(g, p, n * CONFIG.fraudFine, 'expOther', 'Fraud penalties');
+  const fine = n * CONFIG.fraudFine * scrutiny(p);
+  charge(g, p, fine, 'expOther', 'Fraud penalties');
   if (p.out) return;
   p.pos = CPE_POS;
   p.skip = true;
-  log(g, `Interim Review finds ${n} fraud${n > 1 ? 's' : ''} at ${p.name}'s company: ${money(n * CONFIG.fraudFine)} in fines and off to CPE.`);
+  log(g, `Interim Review finds ${n} fraud${n > 1 ? 's' : ''} at ${p.name}'s company: ${money(fine)} in fines and off to CPE.`);
 }
 
 // ---- Players' own books ----
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
-export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revOps', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
-const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
 function incomeFields(p) {
@@ -1019,7 +1162,12 @@ export function viewFor(g, who) {
       personalCash: p.personalCash,
       assets: p.assets,
       portfolio: portfolio(p),
-      netWorth: netWorth(p),
+      netWorth: netWorth(g, p),
+      shares: p.shares,
+      isPublic: p.isPublic,
+      parent: p.parent,
+      sharePrice: sharePrice(p),
+      tradePrice: tradePrice(p),
       handCount: p.hand.length,
       // With manual books everyone sees only the statements a player filed; the truth stays hidden.
       ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: -p.ledger.loan }),

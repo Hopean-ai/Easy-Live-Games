@@ -109,3 +109,6 @@ label.check { display: flex; align-items: center; gap: 4px; color: var(--fg); }
 .entry input { width: 110px; }
 select { font: inherit; background: var(--panel); color: var(--fg); border: 1px solid #2a313c; border-radius: 6px; }
 details.check summary { cursor: pointer; }
+.stock { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid #2a313c; }
+.inline3 { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
+.inline3 input, .inline3 button { padding: 6px 10px; }
