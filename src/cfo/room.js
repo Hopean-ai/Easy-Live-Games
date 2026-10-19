@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CONFIG, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
-import { createGame, act, timeout, viewFor, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
+import { CONFIG, WIN_MODES, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
+import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
 import { sanitizeName } from '../names.js';
 
 const MAX_MESSAGE_BYTES = 512;
@@ -14,7 +14,7 @@ export const ABSENT_TURN_MS = 30_000;
 export class CfoRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { easyBooks: false } };
+    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { easyBooks: false, winMode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 } };
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get('room')) ?? this.room;
@@ -89,7 +89,11 @@ export class CfoRoom extends DurableObject {
     } else if (msg?.t === 'option') {
       // The host chooses the room's options before the game starts.
       if (this.room.status !== 'waiting' || seat !== 0) return;
-      this.room.options = { ...this.room.options, easyBooks: Boolean(msg.easyBooks) };
+      const o = { ...this.room.options };
+      if ('easyBooks' in msg) o.easyBooks = Boolean(msg.easyBooks);
+      for (const k of ['winMode', 'valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
+      const w = winOptions(o);
+      this.room.options = { easyBooks: Boolean(o.easyBooks), winMode: w.mode, valueTarget: w.valueTarget, maxYears: w.maxYears };
     } else if (msg?.t === 'act') {
       if (this.room.status !== 'playing') return;
       const err = act(this.room.game, seat, msg);
@@ -199,7 +203,7 @@ export class CfoRoom extends DurableObject {
 const RULES = {
   config: CONFIG, size: BOARD_SIZE, retail: RETAIL, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
-  incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS,
+  incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS, winModes: WIN_MODES,
 };
 
 function send(ws, msg) {

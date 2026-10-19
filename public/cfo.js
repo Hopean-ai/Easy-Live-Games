@@ -160,6 +160,9 @@ $('copy').addEventListener('click', async () => {
 
 $('start').addEventListener('click', () => send({ t: 'start' }));
 $('easy-books').addEventListener('change', (e) => send({ t: 'option', easyBooks: e.target.checked }));
+$('win-mode').addEventListener('change', (e) => send({ t: 'option', winMode: e.target.value }));
+$('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
+$('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
 $('resign').addEventListener('click', () => {
   if (confirm('Resign? Your company will be wound up and you will be out of the game.')) actNow({ a: 'resign' });
 });
@@ -284,8 +287,28 @@ function renderWaiting() {
   $('wait-text').textContent = text;
   $('easy-books').checked = Boolean(state.options?.easyBooks);
   $('easy-books').disabled = mySeat !== 0;
+  renderWinOptions();
   $('start').hidden = mySeat !== 0;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
+}
+
+function renderWinOptions() {
+  const o = state.options ?? {};
+  const modes = rules?.winModes ?? {};
+  const select = $('win-mode');
+  if (select.options.length !== Object.keys(modes).length) {
+    select.replaceChildren(...Object.entries(modes).map(([id, m]) => el('option', { value: id }, m.name)));
+  }
+  const mode = modes[o.winMode] ? o.winMode : 'standing';
+  select.value = mode;
+  $('win-text').textContent = mode === 'value'
+    ? `First company worth ${money(o.valueTarget ?? rules.config.valueTarget)} wins.`
+    : modes[mode]?.text ?? '';
+  $('value-field').hidden = mode !== 'value';
+  // Don't overwrite a number the host is in the middle of typing.
+  if (document.activeElement !== $('value-target')) $('value-target').value = o.valueTarget ?? rules?.config.valueTarget ?? '';
+  if (document.activeElement !== $('max-years')) $('max-years').value = o.maxYears ?? 0;
+  for (const id of ['win-mode', 'value-target', 'max-years']) $(id).disabled = mySeat !== 0;
 }
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
@@ -353,11 +376,16 @@ function renderTurn() {
   const cur = g.players[g.turn];
   $('dice').textContent = g.dice ? `🎲 ${g.dice[0]} + ${g.dice[1]}` : '';
   if (g.phase === 'over') {
-    $('turn-text').textContent = `${g.players[g.winner].name} wins with ${g.endReason}.`;
+    const second = g.second !== null && g.second !== undefined ? ` ${g.players[g.second].name} is second with the largest subsidiary.` : '';
+    $('turn-text').textContent = `${g.players[g.winner].name} wins with ${g.endReason}.${second}`;
   } else {
     $('turn-text').textContent = myTurn() ? 'Your turn' : `${cur.name}'s turn${state.seats[g.turn]?.connected ? '' : ' (away)'}`;
   }
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
+  if (g.win) {
+    const m = rules.winModes[g.win.mode];
+    $('goal').textContent = `Goal: ${g.win.mode === 'value' ? `company worth ${money(g.win.valueTarget)}` : m?.name ?? ''}${g.win.maxYears ? `, ${g.win.maxYears} years max` : ''}`;
+  }
   const box = $('actions');
   box.replaceChildren();
   if (g.phase === 'over') {

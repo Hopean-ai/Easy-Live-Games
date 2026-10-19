@@ -112,3 +112,5 @@ details.check summary { cursor: pointer; }
 .stock { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid #2a313c; }
 .inline3 { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
 .inline3 input, .inline3 button { padding: 6px 10px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 0.9rem; }
+label.field select, label.field input { padding: 8px 10px; }

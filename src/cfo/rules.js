@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, WIN_MODES, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -67,6 +67,8 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     winner: null,
     endReason: null,
     easyBooks: Boolean(options.easyBooks),
+    win: winOptions(options),
+    second: null,
   };
   g.zoningDeck = shuffle(g, Object.entries(ZONES).flatMap(([id, z]) => Array(z.count).fill(id)));
   g.ppeDeck = shuffle(g, Object.entries(RARITIES).flatMap(([id, r]) => Array(r.count).fill(id)));
@@ -91,6 +93,16 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   }
   log(g, `${g.players[0].name} goes first.`);
   return g;
+}
+
+// The room's win condition, with anything missing or out of range set to its default.
+export function winOptions(o = {}) {
+  const num = (v, lo, hi, d) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Math.round(Number(v)) : d);
+  return {
+    mode: WIN_MODES[o.winMode] ? o.winMode : 'standing',
+    valueTarget: num(o.valueTarget, 5000, 10_000_000, CONFIG.valueTarget),
+    maxYears: num(o.maxYears, 0, 50, CONFIG.maxYears),
+  };
 }
 
 // ---- Random ----
@@ -629,13 +641,23 @@ function nextTurn(g) {
 
 function afterAction(g) {
   if (g.phase === 'over') return;
+  const win = g.win ?? winOptions();
   const alive = g.players.filter((p) => !p.out);
-  if (alive.length === 1) return finish(g, alive[0], 'last company standing');
-  const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal);
-  if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
-  if (alive.every((p) => p.years >= CONFIG.maxYears)) {
+  const independent = alive.filter((p) => p.parent === null);
+  if (independent.length === 1) return finish(g, independent[0], 'the last company standing');
+  if (!independent.length) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
+  if (win.mode === 'value') {
+    const big = independent.find((p) => companyValue(p) >= win.valueTarget);
+    if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
+  }
+  if (win.mode === 'portfolio') {
+    // Miles: later this also needs a lap of the island, once the island exists.
+    const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal);
+    if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
+  }
+  if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
     const best = alive.reduce((a, b) => (netWorth(g, b) > netWorth(g, a) ? b : a));
-    return finish(g, best, `the highest net worth after ${CONFIG.maxYears} fiscal years`);
+    return finish(g, best, `the highest net worth after ${win.maxYears} fiscal years`);
   }
   if (current(g).out) nextTurn(g);
 }
@@ -645,6 +667,13 @@ function finish(g, p, reason) {
   g.winner = g.players.indexOf(p);
   g.endReason = reason;
   log(g, `${p.name} wins with ${reason}.`);
+  // Second place: whoever runs the largest subsidiary still going.
+  const subs = g.players.filter((q) => q !== p && !q.out && q.parent !== null);
+  if (subs.length) {
+    const best = subs.reduce((a, b) => (companyValue(b) > companyValue(a) ? b : a));
+    g.second = g.players.indexOf(best);
+    log(g, `${best.name} is second, running the largest subsidiary.`);
+  }
 }
 
 // ---- Landing ----
@@ -1245,7 +1274,10 @@ export function viewFor(g, who) {
     phase: g.phase,
     dice: g.dice,
     winner: g.winner,
+    second: g.second ?? null,
     endReason: g.endReason,
+    win: g.win,
+    companyValues: g.players.map((p) => companyValue(p)),
     easyBooks: g.easyBooks,
     log: g.log,
     tiles: g.tiles.map((t, pos) => (t ? { ...t, rent: rentFor(g, pos) } : null)),

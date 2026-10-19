@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
 
@@ -53,7 +53,7 @@ function playOut(seed, players = 4, options = {}) {
 
 test('whole games finish with balanced books, from 2 to 6 players', () => {
   for (let seed = 1; seed <= 30; seed++) {
-    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0 });
+    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0, maxYears: 8, winMode: ['standing', 'value', 'portfolio'][seed % 3] });
     assert.ok(g.winner !== null);
     assert.ok(g.endReason);
     if (!g.easyBooks) assert.ok(g.players.every((p) => p.misstatements === 0), 'perfect books have no misstatements');
@@ -449,4 +449,27 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
       assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01, id);
     }
   }
+});
+
+test('win conditions: company value, a year limit, and second place for the largest subsidiary', () => {
+  const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, winMode: 'value', valueTarget: 5000 });
+  const [a] = g.players;
+  g.phase = 'act';
+  post(a, 'Windfall', { cash: 2000, revOther: -2000 });
+  act(g, 0, { a: 'end' });
+  assert.equal(g.phase, 'over');
+  assert.equal(g.winner, 0);
+  assert.match(g.endReason, /company worth \$5,000/);
+
+  const h = createGame(['A', 'B', 'C'], 52, { easyBooks: true });
+  assert.deepEqual(h.win, { mode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 });
+  act(h, 2, { a: 'resign' });
+  h.phase = 'act';
+  act(h, 0, { a: 'hire', target: 2, amount: 1000 });
+  act(h, 1, { a: 'resign' });
+  assert.equal(h.phase, 'over');
+  assert.equal(h.winner, 0);
+  assert.equal(h.second, 2, 'C runs the largest subsidiary');
+
+  assert.deepEqual(winOptions({ winMode: 'nonsense', valueTarget: -5, maxYears: 'x' }), { mode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 });
 });
