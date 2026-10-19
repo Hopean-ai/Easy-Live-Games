@@ -953,9 +953,111 @@ const MARKET_NOW = {
       if (n && !q.out) post(q, 'Higher shipping rates', { cash: 150 * n, revOther: -150 * n });
     });
   },
+  rates(g) {
+    for (const q of alive(g)) if (q.ledger.loan < 0) charge(g, q, -q.ledger.loan * 0.1, 'expInterest', 'Interest rate hike');
+  },
+  housing(g) {
+    g.tiles.forEach((t, pos) => {
+      if (t?.zone !== 'residential' || !t.building || t.owner === null) return;
+      const q = g.players[t.owner];
+      const rent = Math.round(t.building.cost / 2);
+      if (!q.out) post(q, `Housing boom at ${SQUARES[pos].name}`, { cash: rent, revRent: -rent });
+    });
+  },
+  shortage(g) {
+    g.tiles.forEach((t, pos) => {
+      if (t?.zone === 'retail' && t.building && t.stock && !g.players[t.owner].out) {
+        sellWidgets(g, g.players[t.owner], t, storeCapacity(t), 3, `Shortage sales at ${SQUARES[pos].name}`);
+      }
+    });
+  },
+  rezoning(g) {
+    g.zoningDeck.unshift(...g.zoningRow.splice(0));
+    refill(g.zoningRow, g.zoningDeck);
+  },
+  holiday(g) {
+    for (const q of alive(g)) q.taxWaived = true;
+  },
+  spoilage(g) {
+    g.players.forEach((q, i) => {
+      if (q.out || q.ledger.inventory < 1) return;
+      // Take 10% from each place the widgets sit, then book the loss.
+      let lost = 0;
+      const cut = (n) => Math.floor(n / 10);
+      lost += cut(q.carried);
+      q.carried -= cut(q.carried);
+      for (const t of g.tiles) {
+        if (t?.owner === i && t.stock) {
+          lost += cut(t.stock);
+          t.stock -= cut(t.stock);
+        }
+      }
+      if (lost) post(q, 'Widgets lost to supply chain disruption', { expOther: lost, inventory: -lost });
+    });
+  },
 };
 
 const PLAYS = {
+  stuffing(g, p) {
+    const { price, stores } = retailTerms(g, g.turn);
+    if (!stores) return 'You need a store to book sales through.';
+    if (p.ledger.inventory < 1) return 'You have no widgets.';
+    let left = 500;
+    left -= sellWidgets(g, p, p, left, price, 'Early widget sales') / price;
+    for (const [i, t] of g.tiles.entries()) {
+      if (left < 1) break;
+      if (t?.owner === g.turn && t.stock) left -= sellWidgets(g, p, t, left, price, `Early widget sales from ${SQUARES[i].name}`) / price;
+    }
+    return null;
+  },
+  insider(g, p, { target }) {
+    const c = g.players[target];
+    if (!c || c.out || !c.isPublic) return 'Pick a public company.';
+    const count = Math.min(10, c.shares.public);
+    const price = Math.max(CONFIG.personalUnit, Math.round(tradePrice(c) / 2 / CONFIG.personalUnit) * CONFIG.personalUnit);
+    const n = Math.min(count, Math.floor(p.personalCash / price));
+    if (!n) return 'You cannot afford any shares.';
+    const me = String(g.players.indexOf(p));
+    p.personalCash -= n * price;
+    c.shares.public -= n;
+    c.shares.holders[me] = (c.shares.holders[me] ?? 0) + n;
+    log(g, `${p.name} buys ${n} shares of ${c.name}'s company.`);
+    return null;
+  },
+  evasion(g, p) {
+    // Tax is due on the year's total: pretend this year's tax is already settled at a huge figure.
+    p.yearTax = Number.MAX_SAFE_INTEGER / 4;
+    return null;
+  },
+  shell(g, p) {
+    post(p, 'Loan from an affiliate', { cash: 1500, loan: -1500 });
+    return null;
+  },
+  ponzi(g, p) {
+    let got = 0;
+    for (const q of alive(g)) {
+      if (q === p) continue;
+      const take = Math.min(100, q.personalCash);
+      q.personalCash -= take;
+      got += take;
+    }
+    p.personalCash += got;
+    log(g, `${p.name} collects ${money(got)} from "investors".`);
+    return null;
+  },
+  // `row` picks the PP&E card; `card` already names the hand card being played.
+  backdate(g, p, { pos, row }) {
+    const err = canBuild(g, pos);
+    if (err) return err;
+    const rarity = g.ppeRow[row];
+    if (!rarity) return 'Pick an available PP&E card.';
+    const price = Math.round(RARITIES[rarity].price / 2);
+    if (companyCash(p) < price) return 'Your company cannot afford it.';
+    g.ppeRow.splice(row, 1);
+    refill(g.ppeRow, g.ppeDeck);
+    putBuilding(g, p, pos, rarity, price);
+    return null;
+  },
   bribe(g, p) {
     const cost = 100 * g.zoningRow.length;
     if (!g.zoningRow.length) return 'There are no zoning cards to replace.';

@@ -590,6 +590,17 @@ function playControls(id, i) {
         `${rules.rarities[r].name} ×${counts[r]} (${money(rules.rarities[r].price * 0.9)})`)));
   }
   if (id === 'embezzle') return amountForm('Embezzle', 'Up to $2,000.', (amount) => play({ amount }));
+  if (id === 'insider') {
+    const targets = g.players.map((p, j) => ({ p, j })).filter(({ p }) => p.isPublic && !p.out);
+    if (!targets.length) return el('p', { class: 'small' }, 'No company is public yet.');
+    return el('div', { class: 'row' }, targets.map(({ p, j }) => el('button', { class: 'secondary', onclick: () => play({ target: j }) }, `${p.name}'s shares`)));
+  }
+  if (id === 'backdate') {
+    const ok = selected !== null && g.tiles[selected]?.owner === mySeat && g.tiles[selected].zone && !g.tiles[selected].building;
+    if (!ok) return el('p', { class: 'small' }, 'Select one of your zoned, empty squares first.');
+    return el('div', { class: 'row' }, g.ppeRow.map((r, k) =>
+      el('button', { class: 'secondary', onclick: () => play({ pos: selected, row: k }) }, `${rules.rarities[r].name} (${money(rules.rarities[r].price / 2)})`)));
+  }
   return el('button', { class: 'secondary', onclick: () => play() }, 'Play');
 }
 

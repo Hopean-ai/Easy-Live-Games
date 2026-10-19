@@ -167,6 +167,12 @@ export const FRAUD_CARDS = {
   embezzle: { name: 'Embezzle', count: 4, keep: true, placeholder: true, text: 'Move up to $2,000 from your company to yourself with no personal tax, booked as an expense.' },
   cook: { name: 'Cook the Books', count: 3, keep: true, placeholder: true, text: 'Your company pays no tax at its next fiscal year end.' },
   kickback: { name: 'Kickback', count: 3, keep: true, placeholder: true, text: 'Every other company pays yours $200.' },
+  stuffing: { name: 'Channel Stuffing', count: 3, keep: true, placeholder: true, text: 'Book next year\'s sales now: sell up to 500 of your widgets, wherever they are, at your store price.' },
+  insider: { name: 'Insider Trading', count: 2, keep: true, placeholder: true, text: 'Buy up to 10 shares of a public company at half the market price.' },
+  evasion: { name: 'Tax Evasion', count: 3, keep: true, placeholder: true, text: 'Pay no personal tax on what you take out of companies for the rest of this fiscal year.' },
+  shell: { name: 'Shell Company', count: 2, keep: true, placeholder: true, text: 'Borrow $1,500 through a front, on top of your Bank loan limit.' },
+  ponzi: { name: 'Ponzi Scheme', count: 2, keep: true, placeholder: true, text: 'Every other player pays you $100 of personal cash.' },
+  backdate: { name: 'Backdated Invoice', count: 3, keep: true, placeholder: true, text: 'Build one of the available PP&E cards for half its price.' },
 };
 
 export const MARKET_CARDS = {
@@ -179,6 +185,12 @@ export const MARKET_CARDS = {
   boom: { name: 'Boom', count: 3, placeholder: true, text: 'Every company earns $500.' },
   lawsuit: { name: 'Lawsuit', count: 2, placeholder: true, text: 'Your company pays $750.' },
   shipping: { name: 'Shipping Rates Rise', count: 2, placeholder: true, text: 'Owners of transport tiles earn $150 for each one they own.' },
+  rates: { name: 'Interest Rate Hike', count: 2, placeholder: true, text: 'Every company with a Bank loan pays 10% of it in interest now.' },
+  housing: { name: 'Housing Boom', count: 2, placeholder: true, text: 'Owners of Residential PP&E collect half of each building\'s cost in rent.' },
+  shortage: { name: 'Widget Shortage', count: 2, placeholder: true, text: 'Every store sells a normal turn\'s worth of widgets right now at $3 each.' },
+  rezoning: { name: 'Zoning Reform', count: 2, placeholder: true, text: 'The available zoning cards are replaced for free.' },
+  holiday: { name: 'Tax Holiday', count: 2, placeholder: true, text: 'No company pays corporate tax at its next fiscal year end.' },
+  spoilage: { name: 'Supply Chain Disruption', count: 2, placeholder: true, text: 'Every company writes off 10% of its widgets.' },
 };
 
 export const PERSONAL_CARDS = {
