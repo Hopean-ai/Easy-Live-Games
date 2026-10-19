@@ -25,6 +25,8 @@ export const CONFIG = {
   ipoShares: 40, // PLACEHOLDER: new shares sold at an IPO (every company starts with 100)
   publicPremium: 1.5, // PLACEHOLDER: the market values a public company at this x its book equity
   publicScrutiny: 2, // PLACEHOLDER: public companies are twice as likely to be caught, and fined twice as much
+  acquirePremium: 1.5, // PLACEHOLDER: buying a rival outright costs this x its market value...
+  acquireMin: 10000, // ...and never less than this, so an early or nearly broke company isn't a cheap kill
   subsidiaryMin: 1000, // PLACEHOLDER: least a parent must put into a new subsidiary
   managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
   personalUnit: 100, // Miles: personal cash is less granular; it moves in whole $100s
