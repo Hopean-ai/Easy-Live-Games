@@ -43,9 +43,12 @@ const JOURNAL_SIZE = 60;
 
 // ---- Setup ----
 
-// options.easyBooks: the game records every journal entry and prepares the statements itself.
-// Otherwise (the default, as Miles wants) players record their own entries and fill in their own
-// statements at each fiscal year end, checked against the true books kept here.
+// By default (as Miles wants) players record their own entries and fill in their own statements
+// at each fiscal year end, checked against the true books kept here.
+// options.autoStatements: players still record every entry, but their statements are generated
+// from what they recorded, so journal mistakes flow through (Miles's choice for the easier mode).
+// options.easyBooks: the game records every entry and prepares the statements itself. Rooms no
+// longer offer it (Miles: no); tests and simulations use it to play fast.
 export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, options = {}) {
   if (names.length < CONFIG.minPlayers || names.length > CONFIG.maxPlayers) throw new Error('bad player count');
   const g = {
@@ -67,6 +70,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     winner: null,
     endReason: null,
     easyBooks: Boolean(options.easyBooks),
+    autoStatements: Boolean(options.autoStatements) && !options.easyBooks,
     win: winOptions(options),
     second: null,
   };
@@ -86,7 +90,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       frauds: 0, taxWaived: false, deduction: 0,
       // Shares in this player's company: who holds how many. Everyone starts owning all 100 of theirs.
       shares: { holders: { [g.players.length]: 100 }, public: 0 }, isPublic: false, parent: null,
-      manual: !g.easyBooks, docs: [], docSeq: 0, fyePending: null, lastCheck: null, filed: null, misstatements: 0,
+      manual: !g.easyBooks, docs: [], docSeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
     post(p, 'Owner invests starting capital', { cash: CONFIG.startCompanyCash, capital: -CONFIG.startCompanyCash });
@@ -919,7 +923,7 @@ function fiscalYearEnd(g, p) {
   // Miles: statements are worked on through the following year, even on other players' turns.
   // Whatever is still unfiled at the next year end is filed blank.
   if (p.fyePending) {
-    log(g, `${p.name} misses the deadline for fiscal year ${p.fyePending.year}'s statements.`);
+    if (!g.autoStatements) log(g, `${p.name} misses the deadline for fiscal year ${p.fyePending.year}'s statements.`);
     BOOKS.statements(g, p, {});
   }
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
@@ -1263,6 +1267,25 @@ export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'in
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
+// The statements a player's own recorded entries add up to, for auto statements: their books so
+// far plus this year's recorded documents, with the year then closed into retained earnings.
+function statementsFromEntries(p, year) {
+  const ledger = { ...(p.bookLedger ?? Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0]))) };
+  for (const d of p.docs) {
+    if (d.year > year || !d.recorded) continue;
+    for (const [acct, v] of d.recorded) ledger[acct] = round(ledger[acct] + v);
+  }
+  const books = { ledger };
+  const income = incomeFields(books);
+  let total = 0;
+  for (const a of TEMPORARY) {
+    total += ledger[a];
+    ledger[a] = 0;
+  }
+  ledger.retained = round(ledger.retained + total);
+  return { income, balance: balanceFields(books), ledger };
+}
+
 function incomeFields(p) {
   const out = {};
   for (const f of INCOME_FIELDS) out[f] = f === 'netIncome' ? incomeStatement(p).netIncome : round(CREDIT_NORMAL.has(f) ? -p.ledger[f] : p.ledger[f]);
@@ -1319,6 +1342,11 @@ const BOOKS = {
   statements(g, p, { income = {}, balance = {} } = {}) {
     const pending = p.fyePending;
     if (!pending) return 'You have no statements due.';
+    if (g.autoStatements) {
+      const own = statementsFromEntries(p, pending.year);
+      ({ income, balance } = own);
+      p.bookLedger = own.ledger;
+    }
     const read = (src, fields) => Object.fromEntries(fields.map((f) => [f, round(Number(src?.[f]) || 0)]));
     const filed = { year: pending.year, income: read(income, INCOME_FIELDS), balance: read(balance, BALANCE_FIELDS) };
     const wrongFields = [];
@@ -1365,6 +1393,7 @@ export function viewFor(g, who) {
     win: g.win,
     companyValues: g.players.map((p) => companyValue(p)),
     easyBooks: g.easyBooks,
+    autoStatements: Boolean(g.autoStatements),
     log: g.log,
     tiles: g.tiles.map((t, pos) => (t ? { ...t, rent: rentFor(g, pos) } : null)),
     zoningRow: g.zoningRow,
