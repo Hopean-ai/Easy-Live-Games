@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
 import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
 
-const count = (kind) => SQUARES.filter((s) => s.kind === kind).length;
+const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
 test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transport', () => {
   assert.equal(BOARD_SIZE, 62);
-  assert.equal(SQUARES.length, 62);
+  assert.equal(SQUARES.length, 62 + 24);
+  assert.equal(SQUARES.filter((s) => s.island).length, 24);
   assert.equal(count('land'), 47);
   assert.equal(count('transport'), 8);
   assert.equal(count('deck'), 3);
@@ -29,7 +30,10 @@ function playOut(seed, players = 4, options = {}) {
     else if (g.phase === 'buy') {
       if (act(g, w, { a: 'buy', zone: 0 })) act(g, w, { a: 'pass' });
     } else {
-      for (let pos = 0; pos < BOARD_SIZE; pos++) if (!canBuild(g, pos)) act(g, w, { a: 'build', pos, card: 0 });
+      for (let pos = 0; pos < SQUARES.length; pos++) if (!canBuild(g, pos)) act(g, w, { a: 'build', pos, card: 0 });
+      // Fly to the island when rich, and home again after a lap.
+      if (SQUARES[p.pos].mode === 'air' && p.ledger.cash > 2000) act(g, w, { a: 'fly' });
+      if (p.atTerminal && p.islandLaps) act(g, w, { a: 'fly', to: posOfSpace(16) });
       if (p.hand.length) act(g, w, { a: 'play', card: 0, target: (w + 1) % players, pos: 0, rarity: 'common' });
       if (p.atBank) act(g, w, { a: 'borrow', amount: 1000 });
       if (p.sale) act(g, w, { a: 'sell', option: 'premium' });
@@ -77,12 +81,12 @@ test('players record their own entries and file their own statements', () => {
   assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['nonsense', -3000]] }), 'Pick an account for every line.');
   assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['revOps', -3000]] }), null);
 
-  // Pass FYE: the turn can't end until statements are filed.
+  // Pass FYE: statements are due by the next year end, so the turn can go on.
   p.pos = BOARD_SIZE - 2;
   act(g, 0, { a: 'roll' });
   if (g.phase === 'buy') act(g, 0, { a: 'pass' });
   assert.ok(p.fyePending);
-  assert.match(act(g, 0, { a: 'end' }), /File your statements/);
+  assert.equal(act(g, 0, { a: 'end' }), null);
   const truth = p.fyePending.truth;
   assert.equal(truth.balance.capital, 3000);
   assert.equal(truth.balance.cash, p.ledger.cash);
@@ -93,7 +97,6 @@ test('players record their own entries and file their own statements', () => {
   assert.equal(p.lastCheck.corrections.length, 1 + unrecorded);
   assert.equal(p.misstatements, 2 + unrecorded);
   assert.equal(viewFor(g, 1).players[0].filed.balance.cash, truth.balance.cash + 50, 'others see what was filed');
-  assert.equal(act(g, 0, { a: 'end' }), null);
 
   // The Interim Review fines misstatements.
   const cash = p.ledger.cash;
@@ -472,4 +475,101 @@ test('win conditions: company value, a year limit, and second place for the larg
   assert.equal(h.second, 2, 'C runs the largest subsidiary');
 
   assert.deepEqual(winOptions({ winMode: 'nonsense', valueTarget: -5, maxYears: 'x' }), { mode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 });
+});
+
+test('the island: fly in for a fare, loop it, buy a landmark, and fly home from the Terminal', () => {
+  const g = createGame(['A', 'B'], 8);
+  const [a, b] = g.players;
+  const airport = posOfSpace(34);
+  post(a, 'Test capital', { cash: 20000, capital: -20000 });
+
+  // Nobody owns the airport yet, so there are no flights.
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.pos = airport;
+  assert.match(act(g, 0, { a: 'fly' }), /Nobody/);
+
+  // B's airport flies A to the Terminal, and B keeps the fare.
+  g.tiles[airport].owner = 1;
+  const bCash = b.ledger.cash;
+  assert.equal(act(g, 0, { a: 'fly' }), null);
+  assert.equal(a.pos, ISLAND_START);
+  assert.equal(b.ledger.cash, bCash + CONFIG.islandFare);
+  assert.equal(incomeStatement(a).expenses.expFreight, CONFIG.islandFare);
+  assert.match(act(g, 0, { a: 'fly', to: airport }), /already flown/);
+
+  // Landmarks come with their zone and building.
+  const resort = SQUARES.findIndex((s) => s.landmark === 'resort');
+  Object.assign(g, { turn: 0, phase: 'buy' });
+  a.pos = resort;
+  assert.equal(act(g, 0, { a: 'buy' }), null);
+  assert.equal(g.tiles[resort].zone, 'residential');
+  assert.equal(g.tiles[resort].building.rarity, 'landmark');
+  assert.ok(canBuild(g, resort));
+
+  // Looping past the Terminal counts a lap, and only then can A fly home.
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.flew = false;
+  assert.match(act(g, 0, { a: 'fly', to: airport }), /Terminal/);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  a.pos = ISLAND_START + 23;
+  act(g, 0, { a: 'roll' });
+  assert.ok(a.pos > ISLAND_START && a.pos < ISLAND_START + 24, 'stays on the island');
+  assert.equal(a.islandLaps, 1);
+  if (g.phase === 'buy') act(g, 0, { a: 'pass' });
+  const before = b.ledger.cash;
+  assert.equal(act(g, 0, { a: 'fly', to: airport }), null);
+  assert.equal(a.pos, airport);
+  assert.equal(b.ledger.cash, before + CONFIG.islandFare);
+  const bs = balanceSheet(a);
+  assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('the portfolio win needs a lap of the island', () => {
+  const g = createGame(['A', 'B'], 9, { winMode: 'portfolio' });
+  const a = g.players[0];
+  a.assets.push(...Array(200).fill('mansion'));
+  a.personalCash = CONFIG.portfolioGoal;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.notEqual(g.phase, 'over');
+  a.islandLaps = 1;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.equal(g.phase, 'over');
+  assert.equal(g.winner, 0);
+});
+
+test('shipments reach stores on any side with your own transport, and keep moving while you are away', () => {
+  const g = createGame(['A', 'B'], 10);
+  const a = g.players[0];
+  const factory = posOfSpace(2); // top
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
+  give(a, 200);
+  a.carried = 0;
+  g.tiles[factory].stock = 200;
+  const shop = posOfSpace(30); // bottom
+  store(g, 0, 30, 'common', 100);
+  g.tiles[posOfSpace(34)].owner = 0; // A's airport on the bottom side
+  g.tiles[posOfSpace(5)].owner = 0; // A's railway on the top side
+  // A is away on the island; at the end of the turn A's lines ship the top factory's stock to the bottom store.
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.pos = ISLAND_START + 3;
+  assert.equal(act(g, 0, { a: 'end' }), null);
+  assert.equal(g.tiles[factory].stock, 0);
+  // Whatever the store didn't sell this turn is on its shelves.
+  assert.ok(a.ledger.inventory < 200, 'some sold');
+  assert.equal(g.tiles[shop].stock, a.ledger.inventory);
+});
+
+test('statements not filed by the next year end are filed blank', () => {
+  const g = createGame(['A', 'B'], 22);
+  const p = g.players[0];
+  for (let year = 1; year <= 2; year++) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = BOARD_SIZE - 2;
+    act(g, 0, { a: 'roll' });
+  }
+  assert.equal(p.fyePending.year, 2);
+  assert.equal(p.filed.year, 1);
+  assert.ok(p.misstatements > 0);
 });

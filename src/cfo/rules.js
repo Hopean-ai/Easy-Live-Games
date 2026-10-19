@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, WIN_MODES, BOARD_SIZE, CPE_POS, SQUARES, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, WIN_MODES, BOARD_SIZE, CPE_POS, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -269,7 +269,6 @@ export function timeout(g) {
   if (g.phase === 'roll') ACTIONS.roll(g, p);
   if (g.phase === 'buy') ACTIONS.pass(g, p);
   if (g.phase === 'act') {
-    if (p.fyePending) BOOKS.statements(g, p, {});
     ACTIONS.end(g, p);
   }
   afterAction(g);
@@ -279,14 +278,25 @@ const ACTIONS = {
   roll(g, p) {
     if (g.phase !== 'roll') return 'You have already rolled.';
     p.atBank = false;
+    p.atTerminal = false;
+    p.atExchange = false;
+    p.flew = false;
     p.sale = null;
     const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
     g.dice = d;
     log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
     // Step square by square: widgets are picked up, dropped off and shipped along the way.
     for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
-      p.pos = (p.pos + 1) % BOARD_SIZE;
+      p.pos = nextPos(p.pos);
       if (p.pos === 0) fiscalYearEnd(g, p);
+      if (p.pos === ISLAND_START) {
+        // Passing or landing on the island's Terminal completes a lap and offers a flight home.
+        // It also closes the fiscal year, so a company stuck on the island still keeps its books.
+        p.islandLaps = (p.islandLaps ?? 0) + 1;
+        p.atTerminal = true;
+        log(g, `${p.name} completes a lap of the island.`);
+        fiscalYearEnd(g, p);
+      }
       if (!p.out) visit(g, p, p.pos);
     }
     g.phase = 'act';
@@ -298,6 +308,7 @@ const ACTIONS = {
     if (g.phase !== 'buy') return 'There is nothing to buy.';
     const sq = SQUARES[p.pos];
     const tile = g.tiles[p.pos];
+    if (sq.landmark) return buyLandmark(g, p, sq, tile);
     if (companyCash(p) < sq.price) return 'Your company cannot afford it.';
     let zoneId = null;
     if (sq.kind === 'land' && g.zoningRow.length) {
@@ -310,6 +321,39 @@ const ACTIONS = {
     tile.zone = zoneId;
     g.phase = 'act';
     log(g, `${p.name} buys ${sq.name} for ${money(sq.price)}${zoneId ? `, zoned ${ZONES[zoneId].name}` : ''}.`);
+    return null;
+  },
+
+  // Fly to the island from an owned airport you landed on, or home from the island's Terminal
+  // to any airport (`to`). The fare goes to the airport's owner; your own airport flies you free.
+  fly(g, p, { to } = {}) {
+    if (g.phase !== 'act') return 'Finish landing first.';
+    if (p.flew) return 'You have already flown this turn.';
+    const home = onIsland(p.pos);
+    const airport = home ? to : p.pos;
+    if (home && !p.atTerminal) return 'Flights leave the island from its Terminal.';
+    if (SQUARES[airport]?.kind !== 'transport' || SQUARES[airport].mode !== 'air') return 'Pick an airport.';
+    const owner = g.tiles[airport].owner;
+    if (!home && owner === null) return 'Nobody runs flights from this airport yet.';
+    if (owner !== null && owner !== g.turn) {
+      if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
+      const fare = charge(g, p, CONFIG.islandFare, 'expFreight', `Airfare on ${g.players[owner].name}'s ${SQUARES[airport].name}`);
+      post(g.players[owner], `Airfare from ${p.name}`, { cash: fare, revFreight: -fare });
+    } else if (owner === null) {
+      if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
+      charge(g, p, CONFIG.islandFare, 'expFreight', 'Airfare');
+    }
+    p.flew = true;
+    p.atTerminal = false;
+    p.sale = null;
+    if (home) {
+      p.pos = airport;
+      log(g, `${p.name} flies home to ${SQUARES[airport].name}.`);
+      visit(g, p, airport);
+    } else {
+      p.pos = ISLAND_START;
+      log(g, `${p.name} flies to the island.`);
+    }
     return null;
   },
 
@@ -429,8 +473,9 @@ const ACTIONS = {
 
   personal(g, p) {
     if (g.phase === 'buy') return 'Buy or pass first.';
-    if (p.personalCash < CONFIG.personalAssetPrice) return `You need ${money(CONFIG.personalAssetPrice)} of personal cash.`;
-    p.personalCash -= CONFIG.personalAssetPrice;
+    const price = personalPrice(p);
+    if (p.personalCash < price) return `You need ${money(price)} of personal cash.`;
+    p.personalCash -= price;
     gainPersonal(g, p, drawPersonal(g), 'buys');
     return null;
   },
@@ -501,9 +546,15 @@ const ACTIONS = {
 
   end(g, p) {
     if (g.phase === 'roll') return 'Roll first.';
-    if (p.fyePending) return `File your statements for fiscal year ${p.fyePending.year} first.`;
     if (g.phase === 'buy') ACTIONS.pass(g, p);
     p.sale = null;
+    // Away on the island, your own transport lines still carry your factories' widgets to your
+    // stores; without them, widgets wait for you to come back.
+    if (onIsland(p.pos)) {
+      g.tiles.forEach((t, pos) => {
+        if (t?.owner === g.turn && SQUARES[pos].kind === 'transport') ship(g, p, pos, false);
+      });
+    }
     // Every store sells from its own shelves.
     const { price } = retailTerms(g, g.turn);
     g.tiles.forEach((t, pos) => {
@@ -515,6 +566,24 @@ const ACTIONS = {
     return null;
   },
 };
+
+// The Exchange on the island sells personal assets at half price.
+export function personalPrice(p) {
+  return p.atExchange ? CONFIG.personalAssetPrice / 2 : CONFIG.personalAssetPrice;
+}
+
+// Island landmarks come with their zone and building, so they are bought whole.
+function buyLandmark(g, p, sq, tile) {
+  const lm = LANDMARKS[sq.landmark];
+  if (companyCash(p) < sq.price + lm.building) return 'Your company cannot afford it.';
+  post(p, `Bought ${sq.name}`, { land: sq.price, ppe: lm.building, cash: -(sq.price + lm.building) });
+  tile.owner = g.turn;
+  tile.zone = lm.zone;
+  tile.building = { rarity: 'landmark', cost: lm.building, dep: 0 };
+  g.phase = 'act';
+  log(g, `${p.name} buys the ${sq.name} for ${money(sq.price + lm.building)}.`);
+  return null;
+}
 
 // How many widgets a company's stores sell in a normal turn, and at what price each.
 export function retailTerms(g, idx) {
@@ -550,7 +619,8 @@ export function sideOf(pos) {
   if (pos >= 1 && pos <= 20) return 'top';
   if (pos >= 22 && pos <= 30) return 'right';
   if (pos >= 32 && pos <= 51) return 'bottom';
-  if (pos >= 53) return 'left';
+  if (pos >= 53 && pos < BOARD_SIZE) return 'left';
+  if (pos >= BOARD_SIZE) return 'island';
   return null;
 }
 
@@ -571,14 +641,18 @@ function visit(g, p, pos) {
 }
 
 // Ships everything the player carries, plus their factory stock on this side of the board, to
-// their stores on this side, split evenly. Someone else's line charges freight.
-function ship(g, p, pos) {
+// their stores on this side or on any side where they own transport (Miles), split evenly.
+// Someone else's line charges freight. With carry false, only factory stock moves (the player
+// isn't there with their token).
+function ship(g, p, pos, carry = true) {
   const side = sideOf(pos);
+  const sides = new Set([side, ...g.tiles.map((t, i) => (t?.owner === g.turn && SQUARES[i].kind === 'transport' ? sideOf(i) : null))]);
   const here = g.tiles.map((t, i) => ({ t, i })).filter(({ i }) => sideOf(i) === side);
-  const stores = here.filter(({ t }) => isMine(g, t, 'retail')).map(({ t }) => t);
+  const stores = g.tiles.filter((t, i) => isMine(g, t, 'retail') && sides.has(sideOf(i)));
   if (!stores.length) return;
   const factories = here.filter(({ t }) => isMine(g, t, 'industrial') && t.stock).map(({ t }) => t);
-  const units = p.carried + factories.reduce((n, t) => n + t.stock, 0);
+  const carried = carry ? p.carried : 0;
+  const units = carried + factories.reduce((n, t) => n + t.stock, 0);
   if (!units) return;
   const line = g.tiles[pos];
   const owner = line.owner === null || line.owner === g.turn ? null : g.players[line.owner];
@@ -587,7 +661,7 @@ function ship(g, p, pos) {
     if (fee) post(owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
     if (p.out) return;
   }
-  p.carried = 0;
+  p.carried -= carried;
   for (const t of factories) t.stock = 0;
   stores.forEach((t, i) => {
     t.stock += Math.floor(units / stores.length) + (i < units % stores.length ? 1 : 0);
@@ -651,8 +725,8 @@ function afterAction(g) {
     if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
   }
   if (win.mode === 'portfolio') {
-    // Miles: later this also needs a lap of the island, once the island exists.
-    const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal);
+    // Miles: the portfolio only wins after a lap of the island.
+    const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
     if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
   }
   if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
@@ -703,6 +777,17 @@ function land(g, p) {
       p.atBank = true;
       log(g, `${p.name} visits the Bank.`);
       return;
+    case 'terminal':
+      return log(g, `${p.name} is at the island Terminal and can fly home.`);
+    case 'haven':
+      log(g, `${p.name} visits an Offshore Haven.`);
+      return drawCard(g, p, 'fraud');
+    case 'customs':
+      log(g, `${p.name} is held at Customs while auditors go through the books.`);
+      return audit(g, p);
+    case 'exchange':
+      p.atExchange = true;
+      return log(g, `${p.name} visits the Exchange, where personal assets are half price this turn.`);
     case 'deck':
       if (sq.deck === 'personal') return gainPersonal(g, p, drawPersonal(g), 'draws');
       return drawCard(g, p, sq.deck);
@@ -717,7 +802,7 @@ export function rentFor(g, pos) {
     const owned = g.tiles.filter((t, i) => t?.owner === tile.owner && SQUARES[i].mode === sq.mode).length;
     return TRANSPORT_RENT * 2 ** (owned - 1);
   }
-  const fullSet = SQUARES.every((s, i) => s?.set !== sq.set || s.kind !== 'land' || g.tiles[i].owner === tile.owner);
+  const fullSet = sq.set !== undefined && SQUARES.every((s, i) => s?.set !== sq.set || s.kind !== 'land' || g.tiles[i].owner === tile.owner);
   let rent = sq.price * CONFIG.landRent * (fullSet ? 2 : 1);
   if (tile.building && tile.zone) rent += tile.building.cost * ZONES[tile.zone].rent;
   return Math.round(rent);
@@ -836,6 +921,12 @@ function restart(g, q, parent, capital) {
 // ---- Fiscal year end ----
 
 function fiscalYearEnd(g, p) {
+  // Miles: statements are worked on through the following year, even on other players' turns.
+  // Whatever is still unfiled at the next year end is filed blank.
+  if (p.fyePending) {
+    log(g, `${p.name} misses the deadline for fiscal year ${p.fyePending.year}'s statements.`);
+    BOOKS.statements(g, p, {});
+  }
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
@@ -1307,6 +1398,10 @@ export function viewFor(g, who) {
       ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: -p.ledger.loan }),
       fyeDue: p.fyePending?.year ?? null,
       atBank: Boolean(p.atBank),
+      atTerminal: Boolean(p.atTerminal),
+      atExchange: Boolean(p.atExchange),
+      flew: Boolean(p.flew),
+      islandLaps: p.islandLaps ?? 0,
       sale: p.sale ?? null,
       inventory: p.ledger.inventory,
       carried: p.carried,

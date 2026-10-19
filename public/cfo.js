@@ -314,13 +314,26 @@ function renderWinOptions() {
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
 // CPE bottom-right and Interim Review bottom-left.
 function gridPos(pos) {
+  // The island is a 7 x 7 ring inside the board, Terminal at its top-left.
+  if (pos >= rules.islandStart) {
+    const k = pos - rules.islandStart;
+    if (k <= 6) return [3, 14 + k];
+    if (k <= 12) return [k - 3, 20];
+    if (k <= 18) return [9, 32 - k];
+    return [27 - k, 14];
+  }
   if (pos <= 21) return [1, pos + 1];
   if (pos <= 31) return [pos - 20, 22];
   if (pos <= 52) return [11, 53 - pos];
   return [63 - pos, 1];
 }
 
-const CORNER_NAMES = { fye: ['FYE', 'Fiscal year end'], bank: ['Bank', 'Borrow here'], cpe: ['CPE', 'Sit out a turn'], review: ['Interim Review', 'Audit'] };
+const CORNER_NAMES = {
+  fye: ['FYE', 'Fiscal year end'], bank: ['Bank', 'Borrow here'], cpe: ['CPE', 'Sit out a turn'], review: ['Interim Review', 'Audit'],
+  terminal: ['Terminal', 'Fly home'], haven: ['Offshore Haven', 'Draw Fraud'], customs: ['Customs', 'Audit'], exchange: ['Exchange', 'Assets ½ price'],
+};
+const LANDMARK_COLOR = '#f5f5f5';
+const isAirport = (pos) => rules.squares[pos]?.mode === 'air';
 const DECK_NAMES = { market: 'Market Forces', fraud: 'Fraud', personal: 'Personal Assets' };
 const MODE_ICONS = { truck: '🚚', rail: '🚆', air: '✈️' };
 
@@ -330,14 +343,14 @@ function buildBoard() {
   const board = $('board');
   squareEls = rules.squares.map((sq, pos) => {
     const [row, col] = gridPos(pos);
-    const node = el('button', { class: `sq ${sq.kind}`, style: { gridRow: row, gridColumn: col }, onclick: () => select(pos) });
-    if (sq.kind === 'land') node.append(el('span', { class: 'stripe', style: { background: rules.sets[sq.set].color } }));
+    const node = el('button', { class: `sq ${sq.kind}${sq.island ? ' island' : ''}${sq.landmark ? ' landmark' : ''}`, style: { gridRow: row, gridColumn: col }, onclick: () => select(pos) });
+    if (sq.kind === 'land') node.append(el('span', { class: 'stripe', style: { background: sq.landmark ? LANDMARK_COLOR : rules.sets[sq.set].color } }));
     const title = sq.kind === 'land' ? sq.name
       : sq.kind === 'transport' ? `${MODE_ICONS[sq.mode]} ${rules.modes[sq.mode].name}`
         : sq.kind === 'deck' ? DECK_NAMES[sq.deck]
           : CORNER_NAMES[sq.kind][0];
     node.append(el('span', { class: 'sq-name' }, title));
-    if (sq.price) node.append(el('span', { class: 'sq-price' }, money(sq.price)));
+    if (sq.price) node.append(el('span', { class: 'sq-price' }, money(sq.price + (sq.landmark ? rules.landmarks[sq.landmark].building : 0))));
     if (CORNER_NAMES[sq.kind]) node.append(el('span', { class: 'sq-price' }, CORNER_NAMES[sq.kind][1]));
     node.append(el('span', { class: 'sq-build' }), el('span', { class: 'tokens' }));
     board.append(node);
@@ -397,24 +410,27 @@ function renderTurn() {
   const sq = rules.squares[me.pos];
   if (g.phase === 'roll') box.append(el('button', { onclick: () => actNow({ a: 'roll' }) }, 'Roll the dice'));
   if (g.phase === 'buy') {
-    const label = sq.kind === 'transport' ? sq.name : sq.name;
-    box.append(el('p', {}, `${label} is for sale at ${money(sq.price)}. Your company has ${money(me.cash)}.`));
-    if (sq.kind === 'land' && g.zoningRow.length) {
+    const lm = sq.landmark && rules.landmarks[sq.landmark];
+    const price = sq.price + (lm ? lm.building : 0);
+    box.append(el('p', {}, `${sq.name} is for sale at ${money(price)}${lm ? `, with its ${rules.zones[lm.zone].name} landmark already built` : ''}. Your company has ${money(me.cash)}.`));
+    if (sq.kind === 'land' && !lm && g.zoningRow.length) {
       box.append(el('p', { class: 'small' }, 'Buying it takes one of the available zoning cards:'));
       const row = el('div', { class: 'row' });
       g.zoningRow.forEach((z, i) => row.append(el('button', { onclick: () => actNow({ a: 'buy', zone: i }) }, `Buy as ${rules.zones[z].name}`)));
       box.append(row);
     } else {
-      box.append(el('button', { onclick: () => actNow({ a: 'buy' }) }, `Buy for ${money(sq.price)}`));
+      box.append(el('button', { onclick: () => actNow({ a: 'buy' }) }, `Buy for ${money(price)}`));
     }
     box.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'pass' }) }, 'Pass'));
   }
   if (g.phase === 'act') {
     const row = el('div', { class: 'row' });
     row.append(el('button', { onclick: () => actNow({ a: 'end' }) }, 'End turn'));
-    row.append(el('button', { class: 'secondary', disabled: me.personalCash < rules.config.personalAssetPrice, onclick: () => actNow({ a: 'personal' }) },
-      `Buy a personal asset (${money(rules.config.personalAssetPrice)})`));
+    const assetPrice = rules.config.personalAssetPrice / (me.atExchange ? 2 : 1);
+    row.append(el('button', { class: 'secondary', disabled: me.personalCash < assetPrice, onclick: () => actNow({ a: 'personal' }) },
+      `Buy a personal asset (${money(assetPrice)})`));
     box.append(row);
+    box.append(...flightControls(me));
     box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in $${rules.config.personalUnit}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && me.inventory > 0) box.append(saleControls(me));
     const cfg = rules.config;
@@ -433,6 +449,22 @@ function renderTurn() {
     if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
   }
+}
+
+// Flights: to the island from an airport someone owns, or home from the island's Terminal.
+function flightControls(me) {
+  const g = state.game;
+  if (me.flew) return [];
+  const fareTo = (pos) => (g.tiles[pos].owner === mySeat ? 'free on your own airline' : money(rules.config.islandFare));
+  if (isAirport(me.pos) && g.tiles[me.pos].owner !== null) {
+    return [el('button', { class: 'secondary', onclick: () => actNow({ a: 'fly' }) }, `Fly to the island (${fareTo(me.pos)})`)];
+  }
+  if (me.atTerminal) {
+    const airports = rules.squares.map((sq, pos) => pos).filter(isAirport);
+    return [el('p', { class: 'small' }, 'Fly home to:'), el('div', { class: 'row' }, airports.map((pos) =>
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'fly', to: pos }) }, `${rules.squares[pos].name} (${fareTo(pos)})`)))];
+  }
+  return [];
 }
 
 // Landing on a Retail square: your own offers special sales; someone else's lets you sell through it.
@@ -508,13 +540,18 @@ function renderTile() {
   const sq = rules.squares[selected];
   const tile = g.tiles[selected];
   const box = [];
-  if (sq.kind === 'land') {
+  if (sq.landmark) {
+    const lm = rules.landmarks[sq.landmark];
+    $('tile-title').textContent = sq.name;
+    box.push(el('p', {}, `An island landmark: ${money(sq.price)} of land sold with a ${money(lm.building)} ${rules.zones[lm.zone].name} building already on it.`));
+  } else if (sq.kind === 'land') {
     const set = rules.sets[sq.set];
     $('tile-title').textContent = sq.name;
     box.push(el('p', {}, `${set.name} set of ${set.size}${set.placeholder ? ' (placeholder colour)' : ''}. Price ${money(sq.price)}.`));
   } else if (sq.kind === 'transport') {
     $('tile-title').textContent = sq.name;
-    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds.`));
+    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds. Passing it ships your widgets to your stores on this side, or on any side where you own transport.`));
+    if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
     box.push(el('p', {}, sq.deck === 'personal' ? 'Land here to draw a free Personal Assets card.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
@@ -525,6 +562,10 @@ function renderTile() {
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Every fraud you have played since your last review costs ${money(rules.config.fraudFine)} and sends you to CPE.`,
+      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year, and that turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
+      haven: 'An Offshore Haven. Land here to draw a Fraud card.',
+      customs: 'Customs. Landing here means an audit, just like an Interim Review.',
+      exchange: `The Exchange. Land here and personal assets cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,
     }[sq.kind]));
   }
   if (tile) {
@@ -591,7 +632,7 @@ function renderHand() {
   $('widgets').replaceChildren(
     el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
     el('p', { class: 'small' }, `${me.carried.toLocaleString('en-US')} on your token. ${placesText(me)}`),
-    el('p', { class: 'small' }, 'Your token picks widgets up at your factories and drops them at your stores as it passes. Passing a transport tile ships them to your stores on that side of the board (freight is charged on other players\' lines).'),
+    el('p', { class: 'small' }, 'Your token picks widgets up at your factories and drops them at your stores as it passes. Passing a transport tile ships them to your stores on that side of the board, or on any side where you own transport (freight is charged on other players\' lines). While you are on the island, your own lines keep moving your factories\' widgets.'),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at $${r.price.toFixed(2)} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
@@ -835,6 +876,7 @@ function renderFye() {
       actNow({ a: 'statements', income: read(rules.incomeFields), balance: read(rules.balanceFields) });
     } },
     el('h2', {}, `Fiscal year ${due} is over: file your statements`),
+    el('p', { class: 'small' }, 'Play goes on while you work. You can file at any time, even on other players\' turns, but anything not filed by your next fiscal year end is filed blank.'),
     el('p', { class: 'small' }, 'Work them out from your own journal entries. Enter amounts as positive numbers, except net income, which is negative for a loss. Retained earnings are after this year\'s closing entries. Leave lines you don\'t use blank.'),
     todo,
     el('div', { class: 'statements' }, table('Income statement', rules.incomeFields), table('Balance sheet', rules.balanceFields)),
