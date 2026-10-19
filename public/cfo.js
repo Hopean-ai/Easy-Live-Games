@@ -921,8 +921,15 @@ function renderMarket() {
         el('button', { class: 'secondary', onclick: () => actNow({ a: 'trade', target: i, count: Number(input.value) }) }, 'Buy'),
         el('button', { class: 'secondary', onclick: () => actNow({ a: 'trade', target: i, count: -Number(input.value) }) }, 'Sell')));
     }
+    const me = g.players[mySeat];
+    if (canTrade && i !== mySeat && c.parent === null && me?.parent === null) {
+      row.append(el('button', { class: 'secondary', disabled: me.cash < c.acquisitionPrice,
+        onclick: () => confirm(`Buy ${c.name}'s company for ${money(c.acquisitionPrice)}? ${c.name} will be out of the game, and their business joins yours.`) && actNow({ a: 'acquire', target: i }) },
+      `Buy the company for ${money(c.acquisitionPrice)}`));
+    }
     return row;
   }).filter(Boolean);
+  rows.push(el('p', { class: 'small' }, `You can buy a rival independent company outright for ${Math.round((rules.config.acquirePremium - 1) * 100)}% over its market value, taking its owner out of the game. Public companies are valued higher, so they cost more.`));
   rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but its frauds and misstatements are ${rules.config.publicScrutiny}× as likely to be caught and fined. Distributions are shared among all shareholders.`));
   $('market').replaceChildren(...rows);
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -37,6 +37,7 @@ function playOut(seed, players = 4, options = {}) {
       if (p.hand.length) act(g, w, { a: 'play', card: 0, target: (w + 1) % players, pos: 0, rarity: 'common' });
       if (p.atBank) act(g, w, { a: 'borrow', amount: 1000 });
       if (p.sale) act(g, w, { a: 'sell', option: 'premium' });
+      if (p.ledger.cash > 12000) act(g, w, { a: 'acquire', target: (w + 1) % players });
       if (p.ledger.cash > 3000) act(g, w, { a: 'pay', amount: 1000 });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
       // A diligent bookkeeper: records every document correctly and files the true statements.
@@ -606,4 +607,38 @@ test('auto statements are built from the entries players record', () => {
       assert.equal(p.lastCheck.errors, 0);
     }
   }
+});
+
+test('buying a rival company takes it out of the game; public companies cost more', () => {
+  const g = createGame(['A', 'B', 'C'], 24, { easyBooks: true });
+  const [a, b, c] = g.players;
+  post(a, 'Test capital', { cash: 20000, capital: -20000 });
+  const lot = posOfSpace(1);
+  g.tiles[lot].owner = 1;
+  post(b, 'Bought land', { land: 80, cash: -80 });
+  post(b, 'Test capital', { cash: 10000, capital: -10000 });
+  Object.assign(g, { turn: 0, phase: 'act' });
+
+  const privatePrice = acquisitionPrice(b);
+  assert.equal(privatePrice, Math.ceil(Math.max(CONFIG.acquireMin, companyValue(b) * CONFIG.acquirePremium) / 100) * 100);
+  b.isPublic = true;
+  assert.ok(acquisitionPrice(b) > privatePrice, 'public companies cost more');
+  b.isPublic = false;
+
+  const bPersonal = b.personalCash;
+  assert.equal(act(g, 0, { a: 'acquire', target: 1 }), null);
+  assert.ok(b.out);
+  assert.equal(g.tiles[lot].owner, 0);
+  assert.equal(b.personalCash, bPersonal + privatePrice, 'B owned all of it and is paid in full');
+  assert.ok(a.ledger.goodwill > 0);
+  const bs = balanceSheet(a);
+  assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
+  assert.match(act(g, 0, { a: 'acquire', target: 1 }), /rival/);
+  assert.notEqual(g.phase, 'over');
+  // Buying the last rival wins.
+  post(a, 'More capital', { cash: 40000, capital: -40000 });
+  assert.equal(act(g, 0, { a: 'acquire', target: 2 }), null);
+  assert.equal(g.phase, 'over');
+  assert.equal(g.winner, 0);
+  assert.ok(c.out);
 });

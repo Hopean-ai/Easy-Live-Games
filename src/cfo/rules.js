@@ -17,6 +17,7 @@ export const ACCOUNTS = {
   ppe: 'PP&E',
   accDep: 'Accumulated depreciation',
   investments: 'Investment in subsidiaries',
+  goodwill: 'Goodwill',
   loan: 'Bank loan',
   capital: 'Contributed capital',
   retained: 'Retained earnings',
@@ -185,7 +186,7 @@ export function incomeStatement(p) {
 export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
-  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments };
+  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
   const liabilities = { loan: -l.loan };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
@@ -459,6 +460,21 @@ const ACTIONS = {
   },
 
   // Miles: in a 3+ player game, someone knocked out early can be hired to run a subsidiary.
+  // Miles: while a rival's company still exists, you can buy it outright to take them out of the
+  // game. The price is its market value plus a premium, so a public company (valued at a
+  // multiple of its books) costs more. Its shareholders are paid in personal cash, the public's
+  // shares are bought back, and its business (land, buildings, cash, debts) joins yours.
+  acquire(g, p, { target } = {}) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    const q = g.players[target];
+    if (p.parent !== null) return 'A subsidiary cannot buy other companies.';
+    if (!q || q === p || q.out || q.parent !== null) return 'Pick a rival independent company.';
+    const price = acquisitionPrice(q);
+    if (companyCash(p) < price) return `Buying ${q.name}'s company costs ${money(price)}.`;
+    acquireCompany(g, p, q, price);
+    return null;
+  },
+
   hire(g, p, { target, amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
     if (g.players.length < 3) return 'Subsidiaries need a game of three or more.';
@@ -870,6 +886,43 @@ function sellLand(g, p, t, pos) {
   log(g, `${p.name} sells ${sq.name} for ${money(proceeds)}.`);
 }
 
+export function acquisitionPrice(q) {
+  const raw = Math.max(CONFIG.acquireMin, companyValue(q) * CONFIG.acquirePremium);
+  return Math.ceil(raw / CONFIG.personalUnit) * CONFIG.personalUnit;
+}
+
+function acquireCompany(g, p, q, price) {
+  const me = g.players.indexOf(p);
+  const them = g.players.indexOf(q);
+  // The buyer takes on the target's assets and debts; anything paid above their book value is goodwill.
+  const lines = {};
+  for (const a of ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'loan']) lines[a] = q.ledger[a];
+  lines.cash -= price;
+  const net = Object.values(lines).reduce((a, b) => a + b, 0);
+  if (net < 0) lines.goodwill += -net;
+  else lines.gain = -net; // a bargain purchase
+  post(p, `Bought ${q.name}'s company`, lines);
+  // Shareholders are paid in whole $100s of personal cash; the public's shares are bought back.
+  const total = totalShares(q);
+  for (const [h, n] of Object.entries(q.shares.holders)) {
+    const part = Math.floor((price * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
+    if (part && (!g.players[h].out || Number(h) === them)) g.players[h].personalCash += part;
+  }
+  g.tiles.forEach((t) => {
+    if (t?.owner === them) t.owner = me;
+  });
+  p.carried += q.carried;
+  // The target's own subsidiaries now belong to the buyer.
+  for (const c of g.players) {
+    if (c.parent !== them) continue;
+    c.parent = me;
+    c.shares.holders[me] = (c.shares.holders[me] ?? 0) + (c.shares.holders[them] ?? 0);
+    delete c.shares.holders[them];
+  }
+  Object.assign(q, { out: true, carried: 0, docs: [], fyePending: null, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
+  log(g, `${p.name} buys ${q.name}'s company for ${money(price)}. ${q.name} is out of the game.`);
+}
+
 function bankrupt(g, p, text) {
   if (p.out) return;
   const idx = g.players.indexOf(p);
@@ -911,6 +964,7 @@ function restart(g, q, parent, capital) {
     ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     journal: [], report: null, hand: [], frauds: 0, taxWaived: false, carried: 0,
     docs: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
+    bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, public: 0 },
     isPublic: false, parent,
   });
@@ -1263,7 +1317,7 @@ function audit(g, p) {
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
 export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
@@ -1417,6 +1471,7 @@ export function viewFor(g, who) {
       parent: p.parent,
       sharePrice: sharePrice(p),
       tradePrice: tradePrice(p),
+      acquisitionPrice: acquisitionPrice(p),
       handCount: p.hand.length,
       // With manual books everyone sees only the statements a player filed; the truth stays hidden.
       ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: -p.ledger.loan }),
