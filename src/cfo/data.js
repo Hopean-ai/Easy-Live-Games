@@ -20,6 +20,12 @@ export const CONFIG = {
   fyeFraudChance: 0.25, // PLACEHOLDER: chance each unfound fraud is caught when its owner passes FYE
   misstatementFine: 100, // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
   cleanBooksBonus: 200, // PLACEHOLDER: for filing a fiscal year with no misstatements
+  ipoYears: 2, // PLACEHOLDER: fiscal years a company needs before it can go public
+  ipoShares: 40, // PLACEHOLDER: new shares sold at an IPO (every company starts with 100)
+  publicPremium: 1.5, // PLACEHOLDER: the market values a public company at this x its book equity
+  publicScrutiny: 2, // PLACEHOLDER: public companies are twice as likely to be caught, and fined twice as much
+  subsidiaryMin: 1000, // PLACEHOLDER: least a parent must put into a new subsidiary
+  managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
   personalUnit: 100, // Miles: personal cash is less granular; it moves in whole $100s
   loanLimit: 2000, // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end

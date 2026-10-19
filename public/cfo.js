@@ -263,6 +263,7 @@ function render() {
   renderStatements();
   renderBooks();
   renderFye();
+  renderMarket();
   $('log').replaceChildren(...[...state.game.log].reverse().map((line) => el('li', {}, line))); // newest first
 }
 
@@ -388,6 +389,17 @@ function renderTurn() {
     box.append(row);
     box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in $${rules.config.personalUnit}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && me.inventory > 0) box.append(saleControls(me));
+    const cfg = rules.config;
+    if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
+      box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? You will own less of your company, and auditors will look twice as hard.`) && actNow({ a: 'ipo' }) },
+        `Go public: sell ${cfg.ipoShares} new shares at about ${money(me.sharePrice * cfg.publicPremium)} each`));
+    }
+    if (g.players.length >= 3) {
+      g.players.forEach((q, j) => {
+        if (!q.out || j === mySeat) return;
+        box.append(amountForm(`Hire ${q.name}`, `${q.name} is out. Fund a subsidiary for them to run (at least ${money(cfg.subsidiaryMin)}); you keep ${100 - cfg.managerShares}% of it.`, (amount) => actNow({ a: 'hire', target: j, amount })));
+      });
+    }
     if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total at ${Math.round(rules.config.loanInterest * 100)}% a year.`, (amount) => actNow({ a: 'borrow', amount })));
     const loan = me.loan ?? me.balance?.liabilities.loan ?? 0;
     if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
@@ -448,7 +460,7 @@ function renderPlayers() {
   const head = el('tr', {}, ...['', 'Company cash', 'Personal cash', 'Portfolio', 'Net worth', 'Year'].map((h) => el('th', {}, h)));
   const rows = g.players.map((p, i) =>
     el('tr', { class: `${p.out ? 'out' : ''} ${i === g.turn ? 'current' : ''}` },
-      el('td', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === mySeat ? ' (you)' : ''}${p.out ? ' · out' : p.skip ? ' · at CPE' : ''}${state.seats[i]?.connected ? '' : ' · away'}`),
+      el('td', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === mySeat ? ' (you)' : ''}${p.out ? ' · out' : p.skip ? ' · at CPE' : ''}${p.isPublic ? ' · public' : ''}${p.parent !== null && !p.out ? ` · runs ${g.players[p.parent].name}'s subsidiary` : ''}${state.seats[i]?.connected ? '' : ' · away'}`),
       el('td', {}, money(p.cash)),
       el('td', {}, money(p.personalCash)),
       el('td', {}, money(p.portfolio)),
@@ -794,4 +806,29 @@ function renderFye() {
   }
   const open = me.docs.filter((d) => d.year <= due && !d.recorded).length;
   fyeForm.todo.textContent = open ? `${open} document${open > 1 ? 's' : ''} from this year still to record. Anything left unrecorded counts as a misstatement.` : '';
+}
+
+// ---- Shares ----
+
+function renderMarket() {
+  const g = state.game;
+  const canTrade = myTurn() && g.phase === 'act';
+  const rows = g.players.map((c, i) => {
+    if (c.out) return null;
+    const total = Object.values(c.shares.holders).reduce((a, b) => a + b, 0) + c.shares.public;
+    const mine = c.shares.holders[mySeat] ?? 0;
+    const status = c.isPublic ? `Public, ${c.shares.public} of ${total} shares on the market` : c.parent !== null ? `Subsidiary of ${g.players[c.parent].name}` : 'Private';
+    const row = el('div', { class: 'stock' },
+      el('strong', {}, `${c.name}'s company`),
+      el('span', { class: 'small' }, `${status}. Share price ${money(c.sharePrice)}${c.isPublic ? `, trades at ${money(c.tradePrice)}` : ''}. You hold ${mine}.`));
+    if (canTrade && c.isPublic) {
+      const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Shares', inputMode: 'numeric' });
+      row.append(el('div', { class: 'inline3' }, input,
+        el('button', { class: 'secondary', onclick: () => actNow({ a: 'trade', target: i, count: Number(input.value) }) }, 'Buy'),
+        el('button', { class: 'secondary', onclick: () => actNow({ a: 'trade', target: i, count: -Number(input.value) }) }, 'Sell')));
+    }
+    return row;
+  }).filter(Boolean);
+  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but its frauds and misstatements are ${rules.config.publicScrutiny}× as likely to be caught and fined. Distributions are shared among all shareholders.`));
+  $('market').replaceChildren(...rows);
 }

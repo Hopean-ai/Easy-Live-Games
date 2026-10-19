@@ -313,7 +313,7 @@ test('resigning leaves the last company standing as the winner', () => {
   assert.equal(act(g, 1, { a: 'resign' }), null);
   assert.equal(g.phase, 'over');
   assert.equal(g.winner, 0);
-  assert.ok(netWorth(g.players[0]) > 0);
+  assert.ok(netWorth(g, g.players[0]) > 0);
 });
 
 test('each Banking building shows its owner one more private PP&E option', () => {
@@ -350,4 +350,61 @@ test('frauds can also be found when passing FYE', () => {
     caught += 2 - p.frauds;
   }
   assert.ok(caught > 5 && caught < 40, `about a quarter of 80 frauds found, got ${caught}`);
+});
+
+test('going public raises cash, prices the company above its books, and doubles scrutiny', () => {
+  const g = createGame(['A', 'B'], 31, { easyBooks: true });
+  const [a, b] = g.players;
+  g.phase = 'act';
+  assert.match(act(g, 0, { a: 'ipo' }), /fiscal years/);
+  a.years = 2;
+  const worth = netWorth(g, a);
+  assert.equal(act(g, 0, { a: 'ipo' }), null);
+  // Equity $3,000 x 1.5 / 100 shares = $45 a share; 40 new shares raise $1,800.
+  assert.equal(a.ledger.cash, 4800);
+  assert.equal(a.shares.public, 40);
+  assert.equal(act(g, 0, { a: 'ipo' }), 'Your company is already public.');
+  assert.ok(netWorth(g, a) > worth, 'the market premium counts toward net worth');
+
+  // B buys shares with personal cash, then gets a cut of A's distributions.
+  g.turn = 1;
+  assert.equal(act(g, 1, { a: 'trade', target: 0, count: 2 }), null);
+  assert.equal(b.personalCash, 500 - 2 * 100);
+  assert.equal(a.shares.holders[1], 2);
+  g.turn = 0;
+  const aPersonal = a.personalCash;
+  assert.equal(act(g, 0, { a: 'pay', amount: 1400 }), null);
+  // A holds 100 of 140 shares: $1,000, less $200 tax. B's 2 shares earn $20, under the $100 unit.
+  assert.equal(a.personalCash, aPersonal + 800);
+  assert.equal(b.personalCash, 300);
+  g.turn = 1;
+  assert.equal(act(g, 1, { a: 'trade', target: 0, count: -2 }), null);
+  assert.equal(b.personalCash, 500);
+});
+
+test('a knocked-out player can be hired to run a subsidiary', () => {
+  const g = createGame(['A', 'B', 'C'], 32, { easyBooks: true });
+  const [a, b, c] = g.players;
+  assert.equal(act(g, 2, { a: 'resign' }), null);
+  assert.ok(c.out);
+  g.phase = 'act';
+  assert.match(act(g, 0, { a: 'hire', target: 1, amount: 1000 }), /out of the game/);
+  assert.match(act(g, 0, { a: 'hire', target: 2, amount: 500 }), /at least/);
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: 1000 }), null);
+  assert.equal(c.out, false);
+  assert.equal(c.parent, 0);
+  assert.equal(c.ledger.cash, 1000);
+  assert.equal(a.ledger.investments, 1000);
+  assert.deepEqual(c.shares.holders, { 0: 75, 2: 25 });
+
+  // The subsidiary's distribution goes 75% to A's company, 25% to C personally.
+  g.turn = 2;
+  const cPersonal = c.personalCash;
+  assert.equal(act(g, 2, { a: 'pay', amount: 400 }), null);
+  assert.equal(a.ledger.revDividends, -300);
+  assert.equal(c.personalCash, cPersonal + 100);
+  for (const p of [a, b, c]) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
 });
