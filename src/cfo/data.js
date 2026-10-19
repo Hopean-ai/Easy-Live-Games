@@ -268,11 +268,3 @@ export function deckOf(cards) {
   for (const [id, c] of Object.entries(cards)) for (let i = 0; i < c.count; i++) deck.push(id);
   return deck;
 }
-
-// Miles: several ways to win, chosen per room. Every mode also ends when only one independent
-// company is left, and the player running the largest subsidiary places second.
-export const WIN_MODES = {
-  standing: { name: 'Last company standing', text: 'Drive every other independent company out of business.' },
-  value: { name: 'Company value', text: 'First company worth the target wins.' },
-  portfolio: { name: 'Personal portfolio', text: 'First player whose personal assets reach $100,000 wins.' },
-};

@@ -51,6 +51,7 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .dice { font-variant-numeric: tabular-nums; }
 .actions { display: grid; gap: 8px; align-content: start; max-width: 640px; }
 .actions p { margin: 0; }
+.peek { display: none; margin: 0; }
 .hint-left { margin: 2px 0 0; }
 .log { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 240px; font-size: 0.85rem; color: var(--muted); }
 .log li:first-child { color: var(--fg); }
@@ -116,5 +117,33 @@ details.check summary { cursor: pointer; }
 .stock { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid #2a313c; }
 .inline3 { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
 .inline3 input, .inline3 button { padding: 6px 10px; }
+.win-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 label.field { display: grid; gap: 4px; color: var(--muted); font-size: 0.9rem; }
 label.field select, label.field input { padding: 8px 10px; }
+
+/* Phones: the whole board fits the screen as a map of colours, owners and tokens. Tap a square to
+   read it in the panel just below; the turn controls move under the board. */
+@media (max-width: 760px) {
+  body.cfo main { padding: 0 8px; }
+  .board-wrap { overflow: visible; }
+  .board {
+    min-width: 0;
+    grid-template-columns: repeat(22, minmax(0, 1fr));
+    grid-template-rows: repeat(11, minmax(0, auto)) auto;
+    gap: 1px;
+  }
+  .sq { aspect-ratio: 1 / 1.25; padding: 3px 0 0; border-width: 1px; border-radius: 2px; font-size: 0; }
+  .sq.owned { border-width: 2px; }
+  .stripe { height: 4px; }
+  .sq-name, .sq-price, .sq-build { display: none; }
+  .tokens { margin: auto 0 0; gap: 0; justify-content: center; }
+  .token { width: 6px; height: 6px; border-width: 0; }
+  .centre { grid-row: 12; grid-column: 1 / -1; padding: 12px 0 0; }
+  .turn-line { font-size: 1rem; }
+  .peek { display: block; }
+  .log { max-height: 160px; }
+  .panels { grid-template-columns: 1fr; }
+  .tile-panel { order: -1; }
+  .bar { flex-wrap: wrap; gap: 6px 12px; }
+  .fye-table input { width: 100px; }
+}

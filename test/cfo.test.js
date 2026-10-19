@@ -57,7 +57,7 @@ function playOut(seed, players = 4, options = {}) {
 
 test('whole games finish with balanced books, from 2 to 6 players', () => {
   for (let seed = 1; seed <= 30; seed++) {
-    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0, maxYears: 8, winMode: ['standing', 'value', 'portfolio'][seed % 3] });
+    const g = playOut(seed, 2 + (seed % 5), { easyBooks: seed % 2 === 0, maxYears: 8 });
     assert.ok(g.winner !== null);
     assert.ok(g.endReason);
     if (!g.easyBooks) assert.ok(g.players.every((p) => p.misstatements === 0), 'perfect books have no misstatements');
@@ -455,7 +455,7 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
 });
 
 test('win conditions: company value, a year limit, and second place for the largest subsidiary', () => {
-  const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, winMode: 'value', valueTarget: 5000 });
+  const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, valueTarget: 5000 });
   const [a] = g.players;
   g.phase = 'act';
   post(a, 'Windfall', { cash: 2000, revOther: -2000 });
@@ -465,7 +465,7 @@ test('win conditions: company value, a year limit, and second place for the larg
   assert.match(g.endReason, /company worth \$5,000/);
 
   const h = createGame(['A', 'B', 'C'], 52, { easyBooks: true });
-  assert.deepEqual(h.win, { mode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 });
+  assert.deepEqual(h.win, { valueTarget: CONFIG.valueTarget, maxYears: 0 });
   act(h, 2, { a: 'resign' });
   h.phase = 'act';
   act(h, 0, { a: 'hire', target: 2, amount: 1000 });
@@ -474,7 +474,7 @@ test('win conditions: company value, a year limit, and second place for the larg
   assert.equal(h.winner, 0);
   assert.equal(h.second, 2, 'C runs the largest subsidiary');
 
-  assert.deepEqual(winOptions({ winMode: 'nonsense', valueTarget: -5, maxYears: 'x' }), { mode: 'standing', valueTarget: CONFIG.valueTarget, maxYears: 0 });
+  assert.deepEqual(winOptions({ valueTarget: -5, maxYears: 'x' }), { valueTarget: CONFIG.valueTarget, maxYears: 0 });
 });
 
 test('the island: fly in for a fare, loop it, buy a landmark, and fly home from the Terminal', () => {
@@ -525,7 +525,7 @@ test('the island: fly in for a fare, loop it, buy a landmark, and fly home from 
 });
 
 test('the portfolio win needs a lap of the island', () => {
-  const g = createGame(['A', 'B'], 9, { winMode: 'portfolio' });
+  const g = createGame(['A', 'B'], 9);
   const a = g.players[0];
   a.assets.push(...Array(200).fill('mansion'));
   a.personalCash = CONFIG.portfolioGoal;
