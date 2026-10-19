@@ -36,10 +36,14 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .token { width: 11px; height: 11px; border-radius: 50%; border: 1px solid #000; }
 .sq.fye, .sq.bank, .sq.cpe, .sq.review { background: #1f2630; }
 .sq.deck { background: #241d2e; }
+/* The island sits inside the board, to the right of the turn controls. */
+.sq.island { background: #14292b; border-color: #1f4d50; }
+.sq.terminal, .sq.haven, .sq.customs, .sq.exchange { background: #10393c; }
+.sq.landmark .sq-name { color: #ffe9a8; }
 .sq.transport { background: #1b2430; }
 
 .centre {
-  grid-row: 2 / 11; grid-column: 2 / 22;
+  grid-row: 2 / 11; grid-column: 2 / 13;
   display: grid; grid-template-rows: auto auto auto 1fr; gap: 8px;
   padding: 12px 16px; min-height: 0;
 }

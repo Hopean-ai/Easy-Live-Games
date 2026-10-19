@@ -32,6 +32,7 @@ export const CONFIG = {
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
   rowSize: 3,
   maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings // PLACEHOLDER: face-up zoning and PP&E cards to choose from
+  islandFare: 1500, // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
 
@@ -43,6 +44,28 @@ export const CONFIG = {
 export const BOARD_SIZE = 62;
 export const CORNERS = { 0: 'fye', 21: 'bank', 31: 'cpe', 52: 'review' };
 export const CPE_POS = 31;
+
+// ---- The island ----
+// Miles: a late-game area in the middle, 24 squares including its corners, reached only by
+// paying an airport's owner a fare. You loop it; the only way off is a flight from its Terminal,
+// so a player stuck there without their own transport network falls behind. Positions 62-85,
+// laid out as a 7 x 7 ring with the Terminal at its top-left.
+export const ISLAND_START = BOARD_SIZE;
+export const ISLAND_SIZE = 24;
+export const ISLAND_CORNERS = { 0: 'terminal', 6: 'haven', 12: 'customs', 18: 'exchange' };
+export const onIsland = (pos) => pos >= ISLAND_START;
+export const nextPos = (pos) => (onIsland(pos)
+  ? ISLAND_START + ((pos - ISLAND_START + 1) % ISLAND_SIZE)
+  : (pos + 1) % BOARD_SIZE);
+// The island's 20 other squares, in order: four pricier land sets, two decks and two landmarks.
+const ISLAND_SPACES = ['set', 'set', 'set', 'market', 'set', 'set', 'set', 'set', 'resort', 'set', 'set', 'set',
+  'set', 'personal', 'set', 'set', 'set', 'port', 'set', 'set'];
+// Miles: perhaps some special buildings. Landmarks are sold with their building already up, and
+// with a zone of their own. PLACEHOLDER numbers.
+export const LANDMARKS = {
+  resort: { name: 'Grand Resort', zone: 'residential', price: 1200, building: 3000 },
+  port: { name: 'Free Port', zone: 'retail', price: 1200, building: 3000 },
+};
 
 export function posOfSpace(n) {
   if (n <= 20) return n;
@@ -59,7 +82,8 @@ const DECK_SPACES = { 8: 'market', 28: 'fraud', 48: 'personal' };
 export const MODES = {
   truck: { name: 'Trucking', companies: ['Iron Mile Logistics', 'Steel Ridge Transport'] },
   rail: { name: 'Railway', companies: ['Norfolk Western Railway', 'BNSF Railway', 'LBJ Railway'] },
-  air: { name: 'Airport', companies: ['Ascendance Airlines', 'Titan Air Cargo', 'NorthStar Logistics'] },
+  // Miles: airports are expensive, since they are the way to the island. PLACEHOLDER price.
+  air: { name: 'Airport', companies: ['Ascendance Airlines', 'Titan Air Cargo', 'NorthStar Logistics'], price: 1200 },
 };
 export const TRANSPORT_PRICE = 400; // PLACEHOLDER
 export const TRANSPORT_RENT = 50; // PLACEHOLDER: doubles for each other tile of the same mode owned
@@ -82,13 +106,18 @@ export const SETS = [
   { name: 'Blue', color: '#2f5fd0', size: 2, price: 350 },
   { name: 'Gray', color: '#8a8f98', size: 2, price: 400, placeholder: true },
   { name: 'Purple', color: '#7b3fa0', size: 2, price: 450 },
+  // Island sets: PLACEHOLDER names, colours and prices.
+  { name: 'Coral', color: '#ff7f6e', size: 4, price: 600, island: true },
+  { name: 'Lagoon', color: '#1fb5c9', size: 4, price: 700, island: true },
+  { name: 'Palm', color: '#5fbf6a', size: 4, price: 800, island: true },
+  { name: 'Gold Coast', color: '#d4af37', size: 4, price: 1000, island: true },
 ];
 
 // One entry per position: { kind, ... }.
 export const SQUARES = buildSquares();
 
 function buildSquares() {
-  const squares = new Array(BOARD_SIZE);
+  const squares = new Array(BOARD_SIZE + ISLAND_SIZE);
   for (const [pos, corner] of Object.entries(CORNERS)) squares[pos] = { kind: corner };
   const modeCount = { truck: 0, rail: 0, air: 0 };
   const landSlots = [];
@@ -96,21 +125,43 @@ function buildSquares() {
     const pos = posOfSpace(n);
     if (TRANSPORT_SPACES[n]) {
       const mode = TRANSPORT_SPACES[n];
-      squares[pos] = { kind: 'transport', space: n, mode, name: MODES[mode].companies[modeCount[mode]++], price: TRANSPORT_PRICE };
+      squares[pos] = { kind: 'transport', space: n, mode, name: MODES[mode].companies[modeCount[mode]++], price: MODES[mode].price ?? TRANSPORT_PRICE };
     } else if (DECK_SPACES[n]) {
       squares[pos] = { kind: 'deck', space: n, deck: DECK_SPACES[n] };
     } else {
       landSlots.push([n, pos]);
     }
   }
+  const islandSlots = [];
+  for (let k = 0; k < ISLAND_SIZE; k++) {
+    const pos = ISLAND_START + k;
+    if (ISLAND_CORNERS[k]) {
+      squares[pos] = { kind: ISLAND_CORNERS[k], island: true };
+      continue;
+    }
+    islandSlots.push(pos);
+  }
   let i = 0;
+  let j = 0;
+  ISLAND_SPACES.forEach((what, k) => {
+    const pos = islandSlots[k];
+    if (what === 'market' || what === 'personal') squares[pos] = { kind: 'deck', deck: what, island: true };
+    else if (LANDMARKS[what]) squares[pos] = { kind: 'land', island: true, landmark: what, name: LANDMARKS[what].name, price: LANDMARKS[what].price };
+  });
   SETS.forEach((set, s) => {
     for (let k = 0; k < set.size; k++) {
-      const [n, pos] = landSlots[i++];
-      squares[pos] = { kind: 'land', space: n, set: s, name: `${set.name} ${k + 1}`, price: set.price };
+      let n = null;
+      let pos;
+      if (set.island) {
+        while (ISLAND_SPACES[j] !== 'set') j++;
+        pos = islandSlots[j++];
+      } else {
+        [n, pos] = landSlots[i++];
+      }
+      squares[pos] = { kind: 'land', space: n, set: s, name: `${set.name} ${k + 1}`, price: set.price, ...(set.island ? { island: true } : {}) };
     }
   });
-  if (i !== landSlots.length) throw new Error('land sets do not fill the board');
+  if (i !== landSlots.length || j !== ISLAND_SPACES.length) throw new Error('land sets do not fill the board');
   return squares;
 }
 
@@ -159,6 +210,7 @@ export const RARITIES = {
   rare: { name: 'Rare', count: 5, price: 1000 },
   epic: { name: 'Epic', count: 3, price: 10000 },
   legendary: { name: 'Legendary', count: 1, price: 100000 },
+  landmark: { name: 'Landmark', count: 0, price: 3000 }, // only on the island's landmark squares
 };
 
 // ---- Draw decks (Draw Decks sheet) ----
