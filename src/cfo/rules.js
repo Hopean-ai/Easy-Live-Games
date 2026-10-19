@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, BOARD_SIZE, CPE_POS, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -1021,16 +1021,8 @@ function fiscalYearEnd(g, p) {
   }
   p.taxWaived = false;
 
-  // Miles: fraud can also be caught at FYE. Each fraud not yet found has a chance of turning up.
-  let found = 0;
-  for (let i = 0; i < p.frauds; i++) if (rand(g) < CONFIG.fyeFraudChance * scrutiny(p)) found += 1;
-  if (found) {
-    p.frauds -= found;
-    const fine = found * CONFIG.fraudFine * scrutiny(p);
-    charge(g, p, fine, 'expOther', 'Fraud penalties');
-    log(g, `Year-end testing finds ${found} fraud${found > 1 ? 's' : ''} at ${p.name}'s company: ${money(fine)} in fines.`);
-    if (p.out) return;
-  }
+  // Miles: fraud can also be caught at FYE.
+  if (fraudCheck(g, p, CONFIG.fyeFraudChance, 'Year-end testing')) return;
 
   personalYearEnd(g, p);
 
@@ -1299,18 +1291,21 @@ function audit(g, p) {
     log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(fine)} in fines.`);
     if (p.out) return;
   }
-  if (!p.frauds) {
-    log(g, `Interim Review: ${p.name}'s books are clean.`);
-    return;
-  }
-  const n = p.frauds;
-  p.frauds = 0;
-  const fine = n * CONFIG.fraudFine * scrutiny(p);
-  charge(g, p, fine, 'expOther', 'Fraud penalties');
-  if (p.out) return;
-  p.pos = CPE_POS;
-  p.skip = true;
-  log(g, `Interim Review finds ${n} fraud${n > 1 ? 's' : ''} at ${p.name}'s company: ${money(fine)} in fines and off to CPE.`);
+  if (!fraudCheck(g, p, CONFIG.auditFraudChance, 'The Interim Review')) log(g, `Interim Review: nothing wrong found at ${p.name}'s company.`);
+}
+
+// The chance that a check finds any of a player's frauds: every fraud committed so far might be
+// the one found, and public companies get twice the scrutiny.
+export function fraudRisk(p, chance) {
+  if (!p.frauds) return 0;
+  return 1 - (1 - Math.min(1, chance * scrutiny(p))) ** p.frauds;
+}
+
+// Miles: being caught is an immediate loss. Returns true if the player was convicted.
+function fraudCheck(g, p, chance, who) {
+  if (!p.frauds || rand(g) >= fraudRisk(p, chance)) return false;
+  bankrupt(g, p, `${who} uncovers fraud at ${p.name}'s company. ${p.name} is convicted and out of the game.`);
+  return true;
 }
 
 // ---- Players' own books ----
@@ -1490,7 +1485,7 @@ export function viewFor(g, who) {
         lastCheck: p.lastCheck,
         misstatements: p.misstatements,
       } : {}),
-      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
     })),
   };
 }
