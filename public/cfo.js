@@ -467,7 +467,7 @@ function renderTurn() {
       box.append(el('button', { class: 'secondary', disabled: me.cash < rules.config.settlement, onclick: () => actNow({ a: 'settle' }) },
         `Settle one fraud quietly (${money(rules.config.settlement)} in legal fees)`));
     }
-    box.append(amountForm('Pay yourself extra', `Your salary is paid automatically at each fiscal year end. This pays you more now, from company cash in ${money(rules.config.personalUnit)}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    box.append(amountForm('Pay yourself extra', `Your salary is paid automatically at each fiscal year end. This pays you more now from company cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : me.carried > 0)) box.append(saleControls(me));
     const cfg = rules.config;
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
@@ -619,21 +619,35 @@ function renderTile() {
         if (tile.stock) box.push(el('p', { class: 'small' }, `${tile.stock.toLocaleString('en-US')} widgets ${tile.zone === 'retail' ? 'on the shelves' : 'waiting to be collected'}.`));
       }
     }
-    if (tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land' && tile.zone && !tile.building) {
-      const z = rules.zones[tile.zone];
-      box.push(el('p', { class: 'small' }, zoneText(tile.zone)));
+    const mine = tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land';
+    if (mine && tile.zone && !sq.landmark) {
+      // Building on empty land, or upgrading what's there: the old PP&E's salvage goes toward the new.
+      const old = tile.building;
+      const salvage = old ? salvageValue(old) : 0;
+      if (!old) box.push(el('p', { class: 'small' }, zoneText(tile.zone)));
       const cash = g.players[mySeat].cash;
-      box.push(el('p', { class: 'cash-line' }, `Company cash: ${money(cash)}`));
+      box.push(el('p', { class: 'cash-line' }, `Company cash: ${money(cash)}${old ? `. Destroying this PP&E salvages ${money(salvage)} toward an upgrade.` : ''}`));
       const row = el('div', { class: 'row' });
       const extras = g.players[mySeat].bankOptions ?? [];
       [...g.ppeRow, ...extras].forEach((r, i) => {
         const price = rules.rarities[r].price;
-        const after = cash >= price ? `leaves ${money(cash - price)}` : `${money(price - cash)} short`;
-        row.append(el('button', { class: `build${i >= g.ppeRow.length ? ' secondary' : ''}`, disabled: cash < price, onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
-          el('span', {}, `Build ${rules.rarities[r].name} ${money(price)}`),
+        if (old && price <= old.cost) return;
+        const net = price - salvage;
+        const after = cash >= net ? `leaves ${money(cash - net)}` : `${money(net - cash)} short`;
+        row.append(el('button', { class: `build${i >= g.ppeRow.length ? ' secondary' : ''}`, disabled: cash < net, onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
+          el('span', {}, old ? `Upgrade to ${rules.rarities[r].name} ${money(net)}` : `Build ${rules.rarities[r].name} ${money(price)}`),
           el('span', { class: 'build-after' }, `${after}${i >= g.ppeRow.length ? ' · bank option' : ''}`)));
       });
-      if (!g.ppeRow.length && !extras.length) row.append(el('span', { class: 'small' }, 'The PP&E deck is empty.'));
+      if (!row.children.length) row.append(el('span', { class: 'small' }, old ? 'No pricier PP&E is face up to upgrade to.' : 'The PP&E deck is empty.'));
+      box.push(row);
+    }
+    if (mine && !sq.landmark && g.zoningRow.some((z) => z !== tile.zone)) {
+      const fee = Math.round(sq.price * rules.config.rezoneFee);
+      box.push(el('p', { class: 'small' }, `Rezone for ${money(fee)}${tile.building ? `. The PP&E here is destroyed for ${money(salvageValue(tile.building))} salvage and must be rebuilt` : ''}:`));
+      const row = el('div', { class: 'row' });
+      g.zoningRow.forEach((z, i) => {
+        if (z !== tile.zone) row.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'rezone', pos: selected, zone: i }) }, `Rezone ${rules.zones[z].name}`));
+      });
       box.push(row);
     }
   }
@@ -679,6 +693,9 @@ function renderOffers() {
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'respond', offer: o.id, accept: false }) }, 'Decline'));
   }));
 }
+
+// Mirrors salvageValue() in src/cfo/rules.js.
+const salvageValue = (b) => Math.round(((b.basis ?? b.cost) - b.dep) * rules.config.salvage);
 
 // Mirrors production() and storeTerms() in src/cfo/rules.js: the land price and the PP&E both count.
 function production(pos, cost, landing) {
@@ -1102,7 +1119,7 @@ function renderMarket() {
     const status = c.isPublic ? `Public, ${c.shares.public} of ${total} shares on the market` : c.parent !== null ? `Subsidiary of ${g.players[c.parent].name}` : 'Private';
     const row = el('div', { class: 'stock' },
       el('strong', {}, `${c.name}'s company`),
-      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}${c.isPublic ? `, paid in whole ${money(rules.config.personalUnit)}s` : ''}.`} You hold ${mine}.`));
+      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}.`} You hold ${mine}.`));
     if (canTrade && c.isPublic) {
       const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Shares', inputMode: 'numeric' });
       row.append(el('div', { class: 'inline3' }, input,
