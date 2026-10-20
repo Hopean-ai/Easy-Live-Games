@@ -169,7 +169,7 @@ function buildSquares() {
   return squares;
 }
 
-// ---- Zoning (47 cards, Assets sheet) ----
+// ---- Zoning (47 cards from the Assets sheet, plus 16 for the island) ----
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
