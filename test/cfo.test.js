@@ -288,7 +288,12 @@ test('fraud: more of it means likelier to be caught, and being caught is an imme
   const p = g.players[0];
   p.hand = ['cook'];
   g.phase = 'act';
+  assert.match(act(g, 0, { a: 'play', card: 0 }), /no expenses/);
+  post(p, 'Legal fees', { expOther: M(3000), cash: -M(3000) });
+  const before = incomeStatement(p).netIncome;
   assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.equal(incomeStatement(p).netIncome, before + M(2000), 'cooked books show more profit');
+  assert.equal(p.ledger.ppe, M(2000));
   assert.equal(p.frauds, 1);
   assert.equal(viewFor(g, 1).players[0].frauds, undefined, 'others cannot see frauds');
   assert.equal(viewFor(g, 1).players[0].hand, undefined, 'others cannot see the hand');
@@ -437,6 +442,7 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     a.ledger.capital -= M(50);
     b.assets.push('wealthy');
     a.frauds = 2; // so the cards that clear frauds have something to clear
+    post(a, 'Legal fees', { expOther: M(500), cash: -M(500) }); // something for Cook the Books to move
     a.personalCash = M(2000);
     a.atBank = true;
     act(g, 0, { a: 'borrow', amount: M(500) });

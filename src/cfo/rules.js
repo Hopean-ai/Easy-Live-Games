@@ -1367,9 +1367,20 @@ const PLAYS = {
     log(g, `${p.name}'s company books ${money(amount)} of miscellaneous expenses.`);
     return null;
   },
+  // Capitalizing expenses, as at WorldCom: the costs move onto the balance sheet as an asset that
+  // isn't there, so profit and equity (and the tax on that profit) go up.
   cook(g, p) {
-    if (p.taxWaived) return 'Your books are already cooked for this year.';
-    p.taxWaived = true;
+    let left = M(2000);
+    const lines = { ppe: 0 };
+    for (const acct of ['expOther', 'expRent', 'expFreight']) {
+      const moved = Math.min(left, Math.max(0, p.ledger[acct]));
+      if (!moved) continue;
+      lines[acct] = -moved;
+      lines.ppe += moved;
+      left -= moved;
+    }
+    if (!lines.ppe) return 'Your company has no expenses this year to move.';
+    post(p, 'Capitalized improvements', lines);
     return null;
   },
   kickback(g, p) {
