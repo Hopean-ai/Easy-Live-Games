@@ -814,3 +814,32 @@ test('scarce ways to clear frauds: two cards and a settlement at island Customs'
   a.frauds = 1;
   assert.match(act(g, 0, { a: 'settle' }), /Customs/, 'once per visit');
 });
+
+test('the Personal Assets square gives a free card, a discount on one card, or nothing', () => {
+  const g = createGame(['A', 'B'], 48);
+  const p = g.players[0];
+  const target = posOfSpace(48);
+  assert.equal(SQUARES[target].deck, 'personal');
+  const seen = { free: 0, half: 0, quarter: 0, none: 0 };
+  for (let landings = 0; landings < 300;) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = target - 7;
+    p.assets = [];
+    act(g, 0, { a: 'roll' });
+    if (p.pos !== target) continue;
+    landings += 1;
+    const price = viewFor(g, 0).players[0].personalPrice;
+    if (p.assets.length) seen.free += 1;
+    else if (price === CONFIG.personalAssetPrice / 2) seen.half += 1;
+    else if (price === CONFIG.personalAssetPrice * 0.75) seen.quarter += 1;
+    else seen.none += 1;
+    if (price < CONFIG.personalAssetPrice) {
+      // The discount covers one card; the next one is full price.
+      p.personalCash = 2 * CONFIG.personalAssetPrice;
+      assert.equal(act(g, 0, { a: 'personal' }), null);
+      assert.equal(p.personalCash, 2 * CONFIG.personalAssetPrice - price);
+      assert.equal(viewFor(g, 0).players[0].personalPrice, CONFIG.personalAssetPrice);
+    }
+  }
+  for (const [k, n] of Object.entries(seen)) assert.ok(n > 30, `${k} happened ${n} times in 300`);
+});

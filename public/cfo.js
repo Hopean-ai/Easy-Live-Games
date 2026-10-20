@@ -432,7 +432,7 @@ function renderTurn() {
   if (g.phase === 'act') {
     const row = el('div', { class: 'row' });
     row.append(el('button', { onclick: () => actNow({ a: 'end' }) }, 'End turn'));
-    const assetPrice = rules.config.personalAssetPrice / (me.atExchange ? 2 : 1);
+    const assetPrice = me.personalPrice ?? rules.config.personalAssetPrice;
     row.append(el('button', { class: 'secondary', disabled: me.personalCash < assetPrice, onclick: () => actNow({ a: 'personal' }) },
       `Buy a personal asset (${money(assetPrice)})`));
     box.append(row);

@@ -325,6 +325,7 @@ const ACTIONS = {
     p.atBank = false;
     p.atTerminal = false;
     p.atExchange = false;
+    p.personalOffer = 0;
     p.atCustoms = false;
     p.flew = false;
     p.sale = null;
@@ -541,6 +542,7 @@ const ACTIONS = {
     const price = personalPrice(p);
     if (p.personalCash < price) return `You need ${money(price)} of personal cash.`;
     p.personalCash -= price;
+    p.personalOffer = 0;
     gainPersonal(g, p, drawPersonal(g), 'buys');
     return null;
   },
@@ -644,9 +646,23 @@ const ACTIONS = {
   },
 };
 
-// The Exchange on the island sells personal assets at half price.
+// The Exchange on the island sells personal assets at half price; a Personal Assets square can
+// discount one card. The better of the two applies.
 export function personalPrice(p) {
-  return p.atExchange ? CONFIG.personalAssetPrice / 2 : CONFIG.personalAssetPrice;
+  const off = Math.max(p.atExchange ? 0.5 : 0, p.personalOffer ?? 0);
+  return Math.round(CONFIG.personalAssetPrice * (1 - off));
+}
+
+function personalSquare(g, p) {
+  let r = rand(g);
+  const odds = CONFIG.personalSquareOdds;
+  const hit = odds.find((o) => (r -= o.chance) < 0) ?? odds[odds.length - 1];
+  if (hit.free) return gainPersonal(g, p, drawPersonal(g), 'is given');
+  if (hit.discount) {
+    p.personalOffer = hit.discount;
+    return log(g, `${p.name} is offered ${Math.round(hit.discount * 100)}% off one personal asset this turn.`);
+  }
+  log(g, `${p.name} finds nothing worth buying.`);
 }
 
 // Island landmarks come with their zone and building, so they are bought whole.
@@ -872,7 +888,7 @@ function land(g, p) {
       p.atExchange = true;
       return log(g, `${p.name} visits the Exchange, where personal assets are half price this turn.`);
     case 'deck':
-      if (sq.deck === 'personal') return gainPersonal(g, p, drawPersonal(g), 'draws');
+      if (sq.deck === 'personal') return personalSquare(g, p);
       return drawCard(g, p, sq.deck);
   }
 }
@@ -1632,6 +1648,7 @@ export function viewFor(g, who) {
       atBank: Boolean(p.atBank),
       atTerminal: Boolean(p.atTerminal),
       atExchange: Boolean(p.atExchange),
+      personalPrice: personalPrice(p),
       atCustoms: Boolean(p.atCustoms),
       flew: Boolean(p.flew),
       islandLaps: p.islandLaps ?? 0,
