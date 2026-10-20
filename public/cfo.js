@@ -600,7 +600,7 @@ function renderTile() {
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
-      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year, and that turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
+      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year. Like any transport tile, it ships the widgets you carry to your stores across the island. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
       exchange: `The Exchange. Land here and personal assets cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,

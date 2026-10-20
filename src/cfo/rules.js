@@ -421,6 +421,7 @@ const ACTIONS = {
     } else {
       p.pos = ISLAND_START;
       log(g, `${p.name} flies to the island.`);
+      visit(g, p, ISLAND_START);
     }
     return null;
   },
@@ -789,7 +790,8 @@ function visit(g, p, pos, landing) {
   } else if (isMine(g, t, 'retail') && p.carried) {
     t.stock += p.carried;
     p.carried = 0;
-  } else if (SQUARES[pos].kind === 'transport') {
+  } else if (SQUARES[pos].kind === 'transport' || SQUARES[pos].kind === 'terminal') {
+    // Miles: the island's Terminal is its airport, shipping to your stores across the island.
     ship(g, p, pos);
   }
 }
@@ -809,7 +811,7 @@ function ship(g, p, pos, carry = true) {
   const units = carried + factories.reduce((n, t) => n + t.stock, 0);
   if (!units) return;
   const line = g.tiles[pos];
-  const owner = line.owner === null || line.owner === g.turn ? null : g.players[line.owner];
+  const owner = !line || line.owner === null || line.owner === g.turn ? null : g.players[line.owner]; // the Terminal is free
   if (owner && !owner.out) {
     const fee = charge(g, p, units * RETAIL.freight, 'expFreight', `Freight on ${owner.name}'s ${SQUARES[pos].name}`);
     if (fee) post(owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
