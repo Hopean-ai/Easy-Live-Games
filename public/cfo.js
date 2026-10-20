@@ -421,6 +421,8 @@ function renderTurn() {
   } else {
     $('turn-text').textContent = myTurn() ? 'Your turn' : `${cur.name}'s turn${state.seats[g.turn]?.connected ? '' : ' (away)'}`;
   }
+  const self = g.players[mySeat];
+  $('my-cash').textContent = self && !self.out && g.phase !== 'over' ? `Company cash ${money(self.cash)} · personal ${money(self.personalCash)}` : '';
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
   if (g.win) {
     $('goal').textContent = `Win: last standing, company worth ${money(g.win.valueTarget)}, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
@@ -618,10 +620,17 @@ function renderTile() {
     if (tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land' && tile.zone && !tile.building) {
       const z = rules.zones[tile.zone];
       box.push(el('p', { class: 'small' }, zoneText(tile.zone)));
+      const cash = g.players[mySeat].cash;
+      box.push(el('p', { class: 'cash-line' }, `Company cash: ${money(cash)}`));
       const row = el('div', { class: 'row' });
       const extras = g.players[mySeat].bankOptions ?? [];
-      [...g.ppeRow, ...extras].forEach((r, i) => row.append(el('button', { class: i >= g.ppeRow.length ? 'secondary' : '', onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
-        `Build ${rules.rarities[r].name} (${money(rules.rarities[r].price)})${i >= g.ppeRow.length ? ' · bank option' : ''}`)));
+      [...g.ppeRow, ...extras].forEach((r, i) => {
+        const price = rules.rarities[r].price;
+        const after = cash >= price ? `leaves ${money(cash - price)}` : `${money(price - cash)} short`;
+        row.append(el('button', { class: `build${i >= g.ppeRow.length ? ' secondary' : ''}`, disabled: cash < price, onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
+          el('span', {}, `Build ${rules.rarities[r].name} ${money(price)}`),
+          el('span', { class: 'build-after' }, `${after}${i >= g.ppeRow.length ? ' · bank option' : ''}`)));
+      });
       if (!g.ppeRow.length && !extras.length) row.append(el('span', { class: 'small' }, 'The PP&E deck is empty.'));
       box.push(row);
     }
