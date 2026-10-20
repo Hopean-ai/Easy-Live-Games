@@ -36,6 +36,7 @@ export const CONFIG = {
   // the square of the frauds on record (PLACEHOLDER). Over a 16-year game, holding 1 fraud is
   // caught about 8% of the time, 2 about 27%, 3 about 53%, 5 about 91%.
   auditFraudChance: 0.02, // at an Interim Review (or island Customs)
+  fraudExpiryYears: 4, // PLACEHOLDER: one fraud ages off the record every this many fiscal years (playtests: moderate fraud breaks even)
   fyeFraudChance: 0.002, // at each fiscal year end
   misstatementFine: M(100), // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
   cleanBooksBonus: M(200), // PLACEHOLDER: for filing a fiscal year with no misstatements
@@ -47,6 +48,8 @@ export const CONFIG = {
   acquireMin: M(10000), // ...and never less than this, so an early or nearly broke company isn't a cheap kill
   subsidiaryMin: M(1000), // PLACEHOLDER: least a parent must put into a new subsidiary
   managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
+  bookkeeperFee: M(100), // PLACEHOLDER: yearly fee for a bookkeeper who records entries and files statements (no clean-books bonus)
+  seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
   personalUnit: M(100), // Miles: personal cash is less granular; it moves in whole units of this
   loanLimit: M(5000), // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
@@ -272,6 +275,7 @@ export const MARKET_CARDS = {
   rezoning: { name: 'Zoning Reform', count: 2, placeholder: true, text: 'The available zoning cards are replaced for free.' },
   holiday: { name: 'Tax Holiday', count: 2, placeholder: true, text: 'No company pays corporate tax at its next fiscal year end.' },
   spoilage: { name: 'Supply Chain Disruption', count: 2, placeholder: true, text: 'Every company writes off 10% of its widgets.' },
+  whistle: { name: 'Whistleblower', count: 2, keep: true, placeholder: true, text: `Tip off the regulators about a rival: they face a fraud check at Interim Review odds. If they're convicted, you collect a ${usd(1000)} reward.` },
 };
 
 export const PERSONAL_CARDS = {

@@ -772,7 +772,7 @@ test('with manual books, rivals see only filed figures and market prices', () =>
   assert.equal(v.players[0].inventory, null);
   assert.equal(v.players[0].sharePrice, null);
   assert.equal(v.companyValues[0], null);
-  assert.equal(v.players[1].cash, CONFIG.startCompanyCash);
+  assert.equal(v.players[1].cash, CONFIG.startCompanyCash + CONFIG.seatBonus, 'the second seat starts with a little more');
   assert.ok(v.players[0].acquisitionPrice > 0);
   assert.equal(viewFor(createGame(['A', 'B'], 57, { easyBooks: true }), 1).players[0].cash, CONFIG.startCompanyCash);
 });
@@ -789,7 +789,7 @@ test('buying a company you hold shares in pays only the other holders', () => {
   const cash = a.ledger.cash;
   assert.equal(act(g, 0, { a: 'acquire', target: 1 }), null);
   assert.equal(a.personalCash, personal, 'the buyer is not paid for their own shares');
-  assert.equal(a.ledger.cash, cash - price * 0.8 + CONFIG.startCompanyCash);
+  assert.equal(a.ledger.cash, cash - price * 0.8 + CONFIG.startCompanyCash + CONFIG.seatBonus);
 });
 
 test('scarce ways to clear frauds: two cards and a settlement at island Customs', () => {
@@ -883,4 +883,86 @@ test('plain personal assets have small effects', () => {
   const cash = p.personalCash;
   act(g, 0, { a: 'roll' });
   assert.ok(p.personalCash >= cash + M(100));
+});
+
+test('frauds age off the record, one every few fiscal years', () => {
+  const g = createGame(['A', 'B'], 61, { easyBooks: true });
+  const p = g.players[0];
+  p.frauds = 2;
+  const yearEnd = () => {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = BOARD_SIZE - 2;
+    act(g, 0, { a: 'roll' });
+  };
+  for (let y = 1; y < CONFIG.fraudExpiryYears && !p.out; y++) yearEnd();
+  if (p.out) return; // caught along the way, which can happen
+  assert.equal(p.frauds, 2);
+  yearEnd();
+  if (p.out) return;
+  assert.equal(p.frauds, 1);
+});
+
+test('a bookkeeper records and files everything for a fee, with no clean-books bonus', () => {
+  const g = createGame(['A', 'B'], 62);
+  const p = g.players[0];
+  assert.equal(act(g, 0, { a: 'outsource', on: true }), null);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.fyePending, null, 'the statements are filed');
+  assert.equal(p.misstatements, 0);
+  assert.ok(p.journal.some((e) => e.text === 'Bookkeeping fees'));
+  assert.ok(!p.journal.some((e) => e.text === 'Bonus for clean books'));
+  assert.equal(act(g, 0, { a: 'outsource', on: false }), null);
+  assert.equal(p.outsourced, false);
+});
+
+test('going public needs a clean filing', () => {
+  const g = createGame(['A', 'B'], 63);
+  const p = g.players[0];
+  Object.assign(g, { turn: 0, phase: 'act' });
+  p.years = CONFIG.ipoYears;
+  p.lastCheck = { errors: 2 };
+  assert.match(act(g, 0, { a: 'ipo' }), /clean statements/);
+  p.lastCheck = { errors: 0 };
+  assert.equal(act(g, 0, { a: 'ipo' }), null);
+});
+
+test('a whistleblower tip runs a fraud check on a rival and pays a reward on a conviction', () => {
+  let rewarded = 0;
+  for (let seed = 0; seed < 40; seed++) {
+    const g = createGame(['A', 'B'], 900 + seed, { easyBooks: true });
+    const [a, b] = g.players;
+    b.frauds = 5; // a 50% chance at Interim Review odds
+    Object.assign(g, { turn: 0, phase: 'act' });
+    a.hand = ['whistle'];
+    const cash = a.personalCash;
+    assert.equal(act(g, 0, { a: 'play', card: 0, target: 1 }), null);
+    if (b.out) {
+      rewarded += 1;
+      assert.equal(a.personalCash, cash + M(1000));
+    } else {
+      assert.equal(a.personalCash, cash);
+    }
+  }
+  assert.ok(rewarded > 5 && rewarded < 35, `${rewarded} of 40`);
+});
+
+test('a discounted building is booked, depreciated and sold at what was paid', () => {
+  const g = createGame(['A', 'B'], 64, { easyBooks: true });
+  const p = g.players[0];
+  const pos = posOfSpace(1);
+  Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: null });
+  Object.assign(g, { turn: 0, phase: 'act' });
+  g.ppeRow[0] = 'rare';
+  p.hand = ['backdate'];
+  assert.equal(act(g, 0, { a: 'play', card: 0, pos, row: 0 }), null);
+  const b = g.tiles[pos].building;
+  assert.equal(b.basis, RARITIES.rare.price / 2);
+  assert.equal(p.ledger.ppe, b.basis);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  if (p.out) return;
+  assert.equal(-p.ledger.accDep, Math.round(b.basis * CONFIG.depreciation));
 });

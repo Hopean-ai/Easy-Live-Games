@@ -94,7 +94,9 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       manual: !g.easyBooks, docs: [], docSeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
-    post(p, 'Owner invests starting capital', { cash: CONFIG.startCompanyCash, capital: -CONFIG.startCompanyCash });
+    // Later seats can start with a little more, to offset going first.
+    const capital = CONFIG.startCompanyCash + (g.players.length - 1) * CONFIG.seatBonus;
+    post(p, 'Owner invests starting capital', { cash: capital, capital: -capital });
   }
   log(g, `${g.players[0].name} goes first.`);
   return g;
@@ -265,6 +267,7 @@ function cleanAction(action) {
   if (typeof action.option === 'string' && Object.hasOwn(RETAIL.sales, action.option)) out.option = action.option;
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
+  if (typeof action.on === 'boolean') out.on = action.on;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -475,6 +478,8 @@ const ACTIONS = {
     if (p.parent !== null) return 'A subsidiary cannot go public.';
     if (p.years < CONFIG.ipoYears) return `You need ${CONFIG.ipoYears} fiscal years of history to go public.`;
     if (balanceSheet(p).totalEquity <= 0) return 'Investors will not buy into a company with no equity.';
+    // Miles: realism. As with the SEC, investors want clean statements before a listing.
+    if (p.manual && (p.misstatements || p.lastCheck?.errors)) return 'Investors want clean statements first: your last filing had misstatements.';
     const price = round((balanceSheet(p).totalEquity * CONFIG.publicPremium) / totalShares(p));
     const raised = Math.round(price * CONFIG.ipoShares);
     p.shares.public += CONFIG.ipoShares;
@@ -799,7 +804,8 @@ export function canBuild(g, pos) {
 
 function putBuilding(g, p, pos, rarity, price) {
   post(p, `Built ${RARITIES[rarity].name} PP&E on ${SQUARES[pos].name}`, { ppe: price, cash: -price });
-  g.tiles[pos].building = { rarity, cost: RARITIES[rarity].price, dep: 0 };
+  // `cost` sizes what the building produces; `basis` is what was paid, which the books carry.
+  g.tiles[pos].building = { rarity, cost: RARITIES[rarity].price, basis: price, dep: 0 };
   log(g, `${p.name} builds ${RARITIES[rarity].name} PP&E on ${SQUARES[pos].name} for ${money(price)}.`);
 }
 
@@ -974,8 +980,9 @@ function liquidate(g, p, need) {
 function sellBuilding(g, p, t, pos) {
   const b = t.building;
   const proceeds = Math.round(b.cost * CONFIG.liquidation);
-  const book = b.cost - b.dep;
-  post(p, `Sold PP&E on ${SQUARES[pos].name} to the bank`, { cash: proceeds, accDep: b.dep, ppe: -b.cost, gain: book - proceeds });
+  const basis = b.basis ?? b.cost;
+  const book = basis - b.dep;
+  post(p, `Sold PP&E on ${SQUARES[pos].name} to the bank`, { cash: proceeds, accDep: b.dep, ppe: -basis, gain: book - proceeds });
   t.building = null;
   p.carried += t.stock;
   t.stock = 0;
@@ -1136,7 +1143,8 @@ function fiscalYearEnd(g, p) {
     if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
   });
   for (const { t, pos } of mine) {
-    const dep = Math.min(Math.round(t.building.cost * CONFIG.depreciation), t.building.cost - t.building.dep);
+    const basis = t.building.basis ?? t.building.cost;
+    const dep = Math.min(Math.round(basis * CONFIG.depreciation), basis - t.building.dep);
     if (dep) {
       t.building.dep += dep;
       post(p, `Depreciation on ${SQUARES[pos].name}`, { expDep: dep, accDep: -dep });
@@ -1144,6 +1152,8 @@ function fiscalYearEnd(g, p) {
   }
 
   if (p.ledger.loan < 0) charge(g, p, -p.ledger.loan * CONFIG.loanInterest, 'expInterest', 'Loan interest');
+  if (p.out) return;
+  if (p.outsourced) charge(g, p, CONFIG.bookkeeperFee, 'expOther', 'Bookkeeping fees');
   if (p.out) return;
 
   const preTax = incomeStatement(p).preTax;
@@ -1165,6 +1175,16 @@ function fiscalYearEnd(g, p) {
 
   // Miles: fraud can also be caught at FYE.
   if (fraudCheck(g, p, CONFIG.fyeFraudChance, 'Year-end testing')) return;
+  // Old frauds age off the record, as the statute of limitations runs out.
+  if (CONFIG.fraudExpiryYears && p.frauds) {
+    p.fraudClock = (p.fraudClock ?? 0) + 1;
+    if (p.fraudClock >= CONFIG.fraudExpiryYears) {
+      p.frauds -= 1;
+      p.fraudClock = 0;
+    }
+  } else {
+    p.fraudClock = 0;
+  }
 
   personalYearEnd(g, p);
 
@@ -1185,6 +1205,10 @@ function fiscalYearEnd(g, p) {
   if (p.manual) {
     truth.balance = balanceFields(p);
     p.fyePending = { year: p.years, truth };
+    if (p.outsourced) {
+      for (const d of p.docs) if (d.year <= p.years) d.recorded = d.lines;
+      BOOKS.statements(g, p, structuredClone(truth));
+    }
   }
   log(g, `${p.name} closes fiscal year ${p.years} with net income of ${money(statement.netIncome)}.`);
 }
@@ -1421,6 +1445,18 @@ const PLAYS = {
     log(g, `Every company pays ${p.name} a ${money(M(200))} fee.`);
     return null;
   },
+  whistle(g, p, { target }) {
+    const q = g.players[target];
+    if (!q || q === p || q.out) return 'Pick another player.';
+    log(g, `${p.name} tips off the regulators about ${q.name}'s company.`);
+    if (fraudCheck(g, q, CONFIG.auditFraudChance, 'A whistleblower\'s tip')) {
+      p.personalCash += M(1000);
+      log(g, `${p.name} collects a ${money(M(1000))} whistleblower reward.`);
+    } else {
+      log(g, `The regulators find nothing at ${q.name}'s company.`);
+    }
+    return null;
+  },
   alienation(g, p, { target }) {
     const q = g.players[target];
     if (!q || q === p || q.out) return 'Pick another player.';
@@ -1536,6 +1572,13 @@ function sameEntry(a, b) {
 
 // These may be done at any time, not only on your own turn.
 const BOOKS = {
+  // A bookkeeper records every entry and files the statements, for a yearly fee and no clean-books bonus.
+  outsource(g, p, { on } = {}) {
+    if (!p.manual) return 'This game keeps the books for you.';
+    p.outsourced = Boolean(on);
+    log(g, `${p.name} ${p.outsourced ? 'hires' : 'lets go of'} a bookkeeper.`);
+    return null;
+  },
   record(g, p, { doc, lines } = {}) {
     if (!p.manual) return 'This game keeps the books for you.';
     const d = p.docs.find((x) => x.id === doc);
@@ -1602,7 +1645,7 @@ const BOOKS = {
       corrections: wrongDocs.map((d) => ({ text: d.text, lines: d.lines, recorded: d.recorded })),
       entries: yearDocs.length,
     };
-    if (!errors) post(p, 'Bonus for clean books', { cash: CONFIG.cleanBooksBonus, revOther: -CONFIG.cleanBooksBonus });
+    if (!errors && !p.outsourced) post(p, 'Bonus for clean books', { cash: CONFIG.cleanBooksBonus, revOther: -CONFIG.cleanBooksBonus });
     log(g, `${p.name} files statements for fiscal year ${pending.year}.`);
     return null;
   },
@@ -1674,7 +1717,7 @@ export function viewFor(g, who) {
         lastCheck: p.lastCheck,
         misstatements: p.misstatements,
       } : {}),
-      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction, outsourced: Boolean(p.outsourced) } : {}),
     })),
   };
 }
