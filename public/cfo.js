@@ -437,6 +437,10 @@ function renderTurn() {
       `Buy a personal asset (${money(assetPrice)})`));
     box.append(row);
     box.append(...flightControls(me));
+    if (me.atCustoms && me.frauds) {
+      box.append(el('button', { class: 'secondary', disabled: me.cash < rules.config.settlement, onclick: () => actNow({ a: 'settle' }) },
+        `Settle one fraud quietly (${money(rules.config.settlement)} in legal fees)`));
+    }
     box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in ${money(rules.config.personalUnit)}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : me.carried > 0)) box.append(saleControls(me));
     const cfg = rules.config;

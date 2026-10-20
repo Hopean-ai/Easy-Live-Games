@@ -43,6 +43,7 @@ export const CONFIG = {
   rowSize: 3, // face-up zoning cards
   ppeRowSize: 5, // face-up PP&E cards: more choice, so a row of unaffordable cards is rare
   maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings
+  settlement: M(5000), // PLACEHOLDER: paid at island Customs to settle one fraud and clear it from your record
   islandFare: M(1500), // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
@@ -85,10 +86,11 @@ export function posOfSpace(n) {
   return n + 3;
 }
 
-// Transport squares come from the labels beside the board; deck squares are the three spaces
-// left over once 47 land and 8 transport tiles are placed (PLACEHOLDER positions).
+// Transport squares come from the labels beside the board. The spreadsheet left three spaces for
+// decks; Miles asked for more, so three lots became decks too: one per side gets a Fraud or
+// Market Forces square, and the main board now has 44 lots (PLACEHOLDER positions).
 const TRANSPORT_SPACES = { 5: 'rail', 25: 'rail', 45: 'rail', 11: 'truck', 40: 'truck', 16: 'air', 34: 'air', 54: 'air' };
-const DECK_SPACES = { 8: 'market', 28: 'fraud', 48: 'personal' };
+const DECK_SPACES = { 8: 'market', 18: 'fraud', 28: 'fraud', 37: 'market', 48: 'personal', 57: 'market' };
 
 export const MODES = {
   truck: { name: 'Trucking', companies: ['Iron Mile Logistics', 'Steel Ridge Transport'] },
@@ -103,11 +105,11 @@ export const TRANSPORT_RENT = M(50); // PLACEHOLDER: doubles for each other tile
 // colour; they get placeholder colours so they still form sets.
 export const SETS = [
   { name: 'Brown', color: '#8b5a2b', size: 4, price: M(80) },
-  { name: 'Pink', color: '#e58fb5', size: 4, price: M(100), placeholder: true },
+  { name: 'Pink', color: '#e58fb5', size: 3, price: M(100), placeholder: true },
   { name: 'Baby Blue', color: '#9fd3f0', size: 4, price: M(120) },
-  { name: 'Teal', color: '#2a9d8f', size: 4, price: M(140), placeholder: true },
+  { name: 'Teal', color: '#2a9d8f', size: 3, price: M(140), placeholder: true },
   { name: 'Red', color: '#d64545', size: 3, price: M(160) },
-  { name: 'Lime', color: '#a3c940', size: 4, price: M(180), placeholder: true },
+  { name: 'Lime', color: '#a3c940', size: 3, price: M(180), placeholder: true },
   { name: 'Orange', color: '#f08a24', size: 3, price: M(200) },
   { name: 'Tan', color: '#c9a66b', size: 3, price: M(220), placeholder: true },
   { name: 'Yellow', color: '#f2d33c', size: 3, price: M(240) },
@@ -176,7 +178,7 @@ function buildSquares() {
   return squares;
 }
 
-// ---- Zoning (47 cards from the Assets sheet, plus 16 for the island) ----
+// ---- Zoning (60 cards, one per lot) ----
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
@@ -184,10 +186,10 @@ function buildSquares() {
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
 // - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
-// The spreadsheet's 47 cards cover the main board's lots; Miles: 16 more (2 Industrial, 6 Retail,
-// 2 Banking, 6 Residential) cover the island's lots, so there is one card per lot.
+// One card per lot: the spreadsheet's 47, less 3 Industrial for the lots that became deck squares,
+// plus 16 for the island's lots (2 Industrial, 6 Retail, 2 Banking, 6 Residential).
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 28, rent: 0.1, produce: 0.5 },
+  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.5 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
   residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.3 },
@@ -216,10 +218,10 @@ export const RETAIL = {
 };
 
 
-// ---- PP&E (63 cards, one per lot; the Assets sheet had 47) ----
+// ---- PP&E (60 cards, one per lot; the Assets sheet had 47) ----
 // Each step up costs about 4x the last, so the top cards take saving for (Miles: the right feel).
 export const RARITIES = {
-  common: { name: 'Common', count: 24, price: M(100) },
+  common: { name: 'Common', count: 21, price: M(100) },
   uncommon: { name: 'Uncommon', count: 18, price: M(400) },
   rare: { name: 'Rare', count: 12, price: M(1500) },
   epic: { name: 'Epic', count: 6, price: M(6000) },
@@ -239,6 +241,7 @@ export const FRAUD_CARDS = {
   evasion: { name: 'Tax Evasion', count: 3, keep: true, placeholder: true, text: 'Pay no personal tax on what you take out of companies for the rest of this fiscal year.' },
   shell: { name: 'Shell Company', count: 2, keep: true, placeholder: true, text: `Borrow ${usd(1500)} through a front, on top of your Bank loan limit.` },
   ponzi: { name: 'Ponzi Scheme', count: 2, keep: true, placeholder: true, text: `Every other player pays you ${usd(100)} of personal cash.` },
+  shred: { name: 'Shred the Evidence', count: 2, keep: true, placeholder: true, text: 'Clear two frauds from your record. Shredding is itself a fraud, so it counts as one.' },
   backdate: { name: 'Backdated Invoice', count: 3, keep: true, placeholder: true, text: 'Build one of the available PP&E cards for half its price.' },
 };
 
@@ -247,6 +250,7 @@ export const MARKET_CARDS = {
     name: 'Alienation of Affection', count: 5, keep: true,
     text: `Pay ${usd(1000)} to the bank to take all "Spouse" cards from another player. If you already have Spouse cards, discard them.`,
   },
+  limitations: { name: 'Statute of Limitations', count: 2, keep: true, placeholder: true, text: 'Clear one fraud from your record.' },
   contractor: { name: 'Contractor Connections', count: 5, keep: true, text: 'Search the PP&E deck and build any card for 90% of its price.' },
   recession: { name: 'Recession', count: 3, placeholder: true, text: 'Every company loses 10% of its cash.' },
   boom: { name: 'Boom', count: 3, placeholder: true, text: `Every company earns ${usd(500)}.` },

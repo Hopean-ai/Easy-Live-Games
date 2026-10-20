@@ -5,19 +5,20 @@ import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyVa
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
-test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transport', () => {
+test('the board: 58 spaces, 4 corners, 44 land, 8 transport, 6 decks', () => {
   assert.equal(BOARD_SIZE, 62);
   assert.equal(SQUARES.length, 62 + 24);
   assert.equal(SQUARES.filter((s) => s.island).length, 24);
-  assert.equal(count('land'), 47);
+  assert.equal(count('land'), 44);
   assert.equal(count('transport'), 8);
-  assert.equal(count('deck'), 3);
+  assert.equal(count('deck'), 6);
+  assert.deepEqual(['fraud', 'market'].map((d) => SQUARES.filter((s) => s.deck === d).length), [2, 4]);
   assert.deepEqual([0, 21, 31, 52].map((p) => SQUARES[p].kind), ['fye', 'bank', 'cpe', 'review']);
   assert.equal(SQUARES[posOfSpace(5)].mode, 'rail');
   assert.equal(SQUARES[posOfSpace(54)].mode, 'air');
   // One zoning card per lot: the main board's 47 plus the island's, less its pre-zoned landmarks.
   const lots = SQUARES.filter((s) => s.kind === 'land' && !s.landmark).length;
-  assert.equal(lots, 63);
+  assert.equal(lots, 60);
   assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), lots);
   assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), lots, 'one PP&E card per lot too');
 });
@@ -35,17 +36,18 @@ function playOut(seed, players = 4, options = {}) {
     } else {
       for (let pos = 0; pos < SQUARES.length; pos++) if (!canBuild(g, pos)) act(g, w, { a: 'build', pos, card: 0 });
       // Fly to the island when rich, and home again after a lap.
-      if (SQUARES[p.pos].mode === 'air' && p.ledger.cash > 2000) act(g, w, { a: 'fly' });
+      if (SQUARES[p.pos].mode === 'air' && p.ledger.cash > M(2000)) act(g, w, { a: 'fly' });
       if (p.atTerminal && p.islandLaps) act(g, w, { a: 'fly', to: posOfSpace(16) });
       if (p.hand.length) act(g, w, { a: 'play', card: 0, target: (w + 1) % players, pos: 0, rarity: 'common' });
-      if (p.atBank) act(g, w, { a: 'borrow', amount: 1000 });
+      if (p.atBank) act(g, w, { a: 'borrow', amount: M(1000) });
       if (p.sale) act(g, w, { a: 'sell', option: 'premium' });
-      if (p.ledger.cash > 12000) act(g, w, { a: 'acquire', target: (w + 1) % players });
-      if (p.ledger.cash > 3000) act(g, w, { a: 'pay', amount: 1000 });
+      if (p.ledger.cash > M(12000)) act(g, w, { a: 'acquire', target: (w + 1) % players });
+      if (p.ledger.cash > M(3000)) act(g, w, { a: 'pay', amount: M(1000) });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
       // A diligent bookkeeper: records every document correctly and files the true statements.
       for (const d of p.docs) act(g, w, { a: 'record', doc: d.id, lines: d.lines });
       if (p.fyePending) assert.equal(act(g, w, { a: 'statements', ...p.fyePending.truth }), null);
+      if (g.phase === 'over') break; // a clean-books bonus can win the game
       assert.equal(act(g, w, { a: 'end' }), null);
     }
     for (const q of g.players) {
@@ -434,6 +436,7 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     a.ledger.inventory += M(50);
     a.ledger.capital -= M(50);
     b.assets.push('wealthy');
+    a.frauds = 2; // so the cards that clear frauds have something to clear
     a.personalCash = M(2000);
     a.atBank = true;
     act(g, 0, { a: 'borrow', amount: M(500) });
@@ -781,4 +784,27 @@ test('buying a company you hold shares in pays only the other holders', () => {
   assert.equal(act(g, 0, { a: 'acquire', target: 1 }), null);
   assert.equal(a.personalCash, personal, 'the buyer is not paid for their own shares');
   assert.equal(a.ledger.cash, cash - price * 0.8 + CONFIG.startCompanyCash);
+});
+
+test('scarce ways to clear frauds: two cards and a settlement at island Customs', () => {
+  const g = createGame(['A', 'B'], 59, { easyBooks: true });
+  const a = g.players[0];
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.hand = ['limitations', 'shred'];
+  assert.match(act(g, 0, { a: 'play', card: 0 }), /no frauds/);
+  a.frauds = 3;
+  assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.equal(a.frauds, 2);
+  assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.equal(a.frauds, 1, 'shredding clears two but counts as one');
+
+  assert.match(act(g, 0, { a: 'settle' }), /Customs/);
+  a.atCustoms = true;
+  post(a, 'Test capital', { cash: CONFIG.settlement, capital: -CONFIG.settlement });
+  const cash = a.ledger.cash;
+  assert.equal(act(g, 0, { a: 'settle' }), null);
+  assert.equal(a.frauds, 0);
+  assert.equal(a.ledger.cash, cash - CONFIG.settlement);
+  a.frauds = 1;
+  assert.match(act(g, 0, { a: 'settle' }), /Customs/, 'once per visit');
 });
