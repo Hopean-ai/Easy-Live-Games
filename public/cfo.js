@@ -358,6 +358,9 @@ function buildBoard() {
   });
 }
 
+// Empty zoned lots show a short zone mark; built ones show the building's rarity initial.
+const ZONE_MARKS = { industrial: 'ind', retail: 'shop', banking: 'bank', residential: 'res' };
+
 function renderBoard() {
   const g = state.game;
   squareEls.forEach((node, pos) => {
@@ -366,7 +369,7 @@ function renderBoard() {
     node.classList.toggle('owned', Boolean(tile && tile.owner !== null));
     node.classList.toggle('selected', selected === pos);
     const b = node.querySelector('.sq-build');
-    b.textContent = tile?.building ? rules.rarities[tile.building.rarity].name[0] : tile?.zone ? rules.zones[tile.zone].name[0].toLowerCase() : '';
+    b.textContent = tile?.building ? rules.rarities[tile.building.rarity].name[0] : tile?.zone ? ZONE_MARKS[tile.zone] ?? '' : '';
     b.title = tile?.zone ? `${rules.zones[tile.zone].name}${tile.building ? `, ${rules.rarities[tile.building.rarity].name} PP&E` : ''}` : '';
     const tokens = node.querySelector('.tokens');
     tokens.replaceChildren(
@@ -402,6 +405,9 @@ function renderTurn() {
   const box = $('actions');
   box.replaceChildren();
   if (g.phase === 'over') {
+    const order = g.players.map((p, i) => ({ p, i })).sort((a, b) => (a.i === g.winner ? -1 : b.i === g.winner ? 1 : b.p.netWorth - a.p.netWorth));
+    box.append(el('h2', {}, 'Final standings'), el('ol', { class: 'standings' }, order.map(({ p, i }) =>
+      el('li', {}, `${p.name}${i === g.winner ? ' (winner)' : ''}${p.out ? ', out' : ''}: net worth ${money(p.netWorth)}, portfolio ${money(p.portfolio)}, ${p.years} fiscal year${p.years === 1 ? '' : 's'}`))));
     if (mySeat !== null) box.append(el('button', { onclick: () => send({ t: 'again' }) }, 'Play again with this table'));
     return;
   }
@@ -432,7 +438,7 @@ function renderTurn() {
     box.append(row);
     box.append(...flightControls(me));
     box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in $${rules.config.personalUnit}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
-    if (me.sale && me.inventory > 0) box.append(saleControls(me));
+    if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : me.carried > 0)) box.append(saleControls(me));
     const cfg = rules.config;
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
       box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? You will own less of your company, and auditors will look twice as hard.`) && actNow({ a: 'ipo' }) },
@@ -456,13 +462,14 @@ function flightControls(me) {
   const g = state.game;
   if (me.flew) return [];
   const fareTo = (pos) => (g.tiles[pos].owner === mySeat ? 'free on your own airline' : money(rules.config.islandFare));
+  const cantPay = (pos) => g.tiles[pos].owner !== mySeat && me.cash < rules.config.islandFare;
   if (isAirport(me.pos) && g.tiles[me.pos].owner !== null) {
-    return [el('button', { class: 'secondary', onclick: () => actNow({ a: 'fly' }) }, `Fly to the island (${fareTo(me.pos)})`)];
+    return [el('button', { class: 'secondary', disabled: cantPay(me.pos), onclick: () => actNow({ a: 'fly' }) }, `Fly to the island (${fareTo(me.pos)})`)];
   }
   if (me.atTerminal) {
     const airports = rules.squares.map((sq, pos) => pos).filter(isAirport);
     return [el('p', { class: 'small' }, 'Fly home to:'), el('div', { class: 'row' }, airports.map((pos) =>
-      el('button', { class: 'secondary', onclick: () => actNow({ a: 'fly', to: pos }) }, `${rules.squares[pos].name} (${fareTo(pos)})`)))];
+      el('button', { class: 'secondary', disabled: cantPay(pos), onclick: () => actNow({ a: 'fly', to: pos }) }, `${rules.squares[pos].name} (${fareTo(pos)})`)))];
   }
   return [];
 }
@@ -517,11 +524,11 @@ function amountForm(label, hint, onSubmit) {
 
 function renderPlayers() {
   const g = state.game;
-  const head = el('tr', {}, ...['', 'Company cash', 'Personal cash', 'Portfolio', 'Net worth', 'Year'].map((h) => el('th', {}, h)));
+  const head = el('tr', {}, ...['', 'Company', 'Personal', 'Portfolio', 'Net worth', 'Year'].map((h, k) => el('th', { title: ['', 'Company cash', 'Personal cash', 'Personal asset portfolio', 'Net worth', 'Fiscal years closed'][k] }, h)));
   const rows = g.players.map((p, i) =>
     el('tr', { class: `${p.out ? 'out' : ''} ${i === g.turn ? 'current' : ''}` },
       el('td', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === mySeat ? ' (you)' : ''}${p.out ? ' · out' : p.skip ? ' · at CPE' : ''}${p.isPublic ? ' · public' : ''}${p.parent !== null && !p.out ? ` · runs ${g.players[p.parent].name}'s subsidiary` : ''}${state.seats[i]?.connected ? '' : ' · away'}`),
-      el('td', {}, money(p.cash)),
+      el('td', { title: p.cash === null ? 'Hidden until they file statements' : i !== mySeat && !g.easyBooks ? 'As of their last filed statements' : '' }, p.cash === null ? '—' : money(p.cash)),
       el('td', {}, money(p.personalCash)),
       el('td', {}, money(p.portfolio)),
       el('td', {}, money(p.netWorth)),
@@ -661,7 +668,7 @@ function playControls(id, i) {
     const ok = selected !== null && g.tiles[selected]?.owner === mySeat && g.tiles[selected].zone && !g.tiles[selected].building;
     if (!ok) return el('p', { class: 'small' }, 'Select one of your zoned, empty squares first.');
     return el('div', { class: 'row' }, Object.keys(counts).map((r) =>
-      el('button', { class: 'secondary', onclick: () => play({ pos: selected, rarity: r }) },
+      el('button', { class: 'secondary', disabled: g.players[mySeat].cash < rules.rarities[r].price * 0.9, onclick: () => play({ pos: selected, rarity: r }) },
         `${rules.rarities[r].name} ×${counts[r]} (${money(rules.rarities[r].price * 0.9)})`)));
   }
   if (id === 'embezzle') return amountForm('Embezzle', 'Up to $2,000.', (amount) => play({ amount }));
@@ -674,7 +681,7 @@ function playControls(id, i) {
     const ok = selected !== null && g.tiles[selected]?.owner === mySeat && g.tiles[selected].zone && !g.tiles[selected].building;
     if (!ok) return el('p', { class: 'small' }, 'Select one of your zoned, empty squares first.');
     return el('div', { class: 'row' }, g.ppeRow.map((r, k) =>
-      el('button', { class: 'secondary', onclick: () => play({ pos: selected, row: k }) }, `${rules.rarities[r].name} (${money(rules.rarities[r].price / 2)})`)));
+      el('button', { class: 'secondary', disabled: g.players[mySeat].cash < rules.rarities[r].price / 2, onclick: () => play({ pos: selected, row: k }) }, `${rules.rarities[r].name} (${money(rules.rarities[r].price / 2)})`)));
   }
   return el('button', { class: 'secondary', onclick: () => play() }, 'Play');
 }
@@ -773,9 +780,12 @@ function filedTables(p) {
 function renderBooks() {
   const g = state.game;
   const me = g.players[mySeat];
-  const manual = !g.easyBooks && me?.docs;
+  const manual = !g.easyBooks && me?.docs && g.phase !== 'over';
   $('books-panel').hidden = !manual;
   if (!manual) return;
+  $('books-intro').textContent = g.autoStatements
+    ? 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end your statements are built from these entries, and an Interim Review fines every wrong entry.'
+    : 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end you fill in your own statements, and an Interim Review fines every wrong entry and every statement with a mistake.';
   renderCheck(me);
   const docs = [...me.docs].reverse();
   if (editing && !docs.some((d) => d.id === editing.id)) editing = null;
@@ -861,7 +871,7 @@ function renderCheck(me) {
 function renderFye() {
   const g = state.game;
   const me = g.players[mySeat];
-  const due = !g.easyBooks && me?.fyeDue;
+  const due = !g.easyBooks && g.phase !== 'over' && me?.fyeDue;
   $('fye').hidden = !due;
   if (!due) {
     fyeForm = null;
@@ -917,7 +927,7 @@ function renderMarket() {
     const status = c.isPublic ? `Public, ${c.shares.public} of ${total} shares on the market` : c.parent !== null ? `Subsidiary of ${g.players[c.parent].name}` : 'Private';
     const row = el('div', { class: 'stock' },
       el('strong', {}, `${c.name}'s company`),
-      el('span', { class: 'small' }, `${status}. Share price ${money(c.sharePrice)}${c.isPublic ? `, trades at ${money(c.tradePrice)}` : ''}. You hold ${mine}.`));
+      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}${c.isPublic ? ', paid in whole $100s' : ''}.`} You hold ${mine}.`));
     if (canTrade && c.isPublic) {
       const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Shares', inputMode: 'numeric' });
       row.append(el('div', { class: 'inline3' }, input,

@@ -3,7 +3,7 @@ import { CONFIG, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZON
 import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
 import { sanitizeName } from '../names.js';
 
-const MAX_MESSAGE_BYTES = 512;
+const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is about 600 bytes
 // An absent player's turn is played for them after this long, so one closed tab can't stall a
 // game. A separate, optional turn timer (CONFIG.turnSeconds) applies to everyone when set.
 export const ABSENT_TURN_MS = 30_000;
@@ -14,7 +14,7 @@ export const ABSENT_TURN_MS = 30_000;
 export class CfoRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: 0 } };
+    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears } };
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get('room')) ?? this.room;
@@ -96,8 +96,17 @@ export class CfoRoom extends DurableObject {
       this.room.options = { autoStatements: Boolean(o.autoStatements), valueTarget: w.valueTarget, maxYears: w.maxYears };
     } else if (msg?.t === 'act') {
       if (this.room.status !== 'playing') return;
-      const err = act(this.room.game, seat, msg);
-      if (err) return send(ws, { t: 'error', text: err });
+      // If a rule ever throws, put the game back as it was rather than saving half an action.
+      const before = structuredClone(this.room.game);
+      let err;
+      try {
+        err = act(this.room.game, seat, msg);
+      } catch (e) {
+        console.error('CFO action failed', msg?.a, e);
+        this.room.game = before;
+        return send(ws, { t: 'error', text: 'That move could not be made.' });
+      }
+      if (err) return send(ws, { t: 'error', text: String(err) });
       if (this.room.game.phase === 'over') this.room.status = 'over';
     } else {
       return;
