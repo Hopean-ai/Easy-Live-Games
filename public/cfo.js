@@ -888,16 +888,62 @@ function startEditing(doc) {
     return renderBooks();
   }
   const body = el('tbody');
-  const addLine = (acct = '', v = 0) => {
+  const totals = el('p', { class: 'small' });
+  // The plug: whatever the amounts typed so far leave unbalanced is filled in, on the other side,
+  // on the last line with no amount of its own (a new line if there is none). The player still
+  // picks every account and types the amounts from the document; the plug only saves typing the
+  // balancing figure. A plugged amount is shown in italics and becomes the player's own once typed
+  // over; typing in either column of a line clears the other column.
+  const amount = (row, side) => row.querySelectorAll('input')[side];
+  const typed = (input) => input.value !== '' && !input.classList.contains('plug');
+  let plugRow = null;
+  const plug = () => {
+    const rows = [...body.children];
+    let diff = 0;
+    for (const row of rows) {
+      if (typed(amount(row, 0))) diff += Number(amount(row, 0).value) || 0;
+      if (typed(amount(row, 1))) diff -= Number(amount(row, 1).value) || 0;
+      for (const input of row.querySelectorAll('input.plug')) {
+        input.value = '';
+        input.classList.remove('plug');
+      }
+    }
+    diff = Math.round(diff * 100) / 100;
+    if (diff) {
+      // The plug stays on its line while that line is still free, so it doesn't jump around.
+      const free = (row) => !typed(amount(row, 0)) && !typed(amount(row, 1));
+      let target = plugRow && rows.includes(plugRow) && free(plugRow) ? plugRow : rows.findLast(free);
+      if (!target) target = addLine();
+      plugRow = target;
+      const input = amount(target, diff > 0 ? 1 : 0);
+      input.value = Math.abs(diff);
+      input.classList.add('plug');
+    }
+    const sum = (side) => [...body.children].reduce((t, row) => t + (Number(amount(row, side).value) || 0), 0);
+    totals.textContent = `Debits ${money(sum(0))}, credits ${money(sum(1))}.${diff ? ' The plug is in italics.' : ''}`;
+  };
+  function addLine(acct = '', v = 0) {
     const select = el('select', {}, el('option', { value: '' }, 'Account…'),
       Object.entries(rules.accounts).map(([id, name]) => el('option', { value: id, selected: id === acct }, name)));
     const dr = el('input', { type: 'number', min: 0, step: 'any', placeholder: 'Debit', value: v > 0 ? v : '' });
     const cr = el('input', { type: 'number', min: 0, step: 'any', placeholder: 'Credit', value: v < 0 ? -v : '' });
+    for (const [mine, other] of [[dr, cr], [cr, dr]]) {
+      mine.addEventListener('input', () => {
+        mine.classList.remove('plug');
+        if (mine.value !== '') {
+          other.value = '';
+          other.classList.remove('plug');
+        }
+        plug();
+      });
+    }
     const row = el('tr', {}, el('td', {}, select), el('td', {}, dr), el('td', {}, cr),
-      el('td', {}, el('button', { type: 'button', class: 'link', title: 'Remove line', onclick: () => row.remove() }, '×')));
+      el('td', {}, el('button', { type: 'button', class: 'link', title: 'Remove line', onclick: () => { row.remove(); plug(); } }, '×')));
     body.append(row);
-  };
+    return row;
+  }
   for (const [a, v] of doc.recorded ?? [['', 0], ['', 0]]) addLine(a, v);
+  plug();
   const err = el('p', { class: 'error' });
   const node = el('form', { class: 'entry-editor', onsubmit: (e) => {
     e.preventDefault();
@@ -912,8 +958,9 @@ function startEditing(doc) {
   } },
   el('p', { class: 'small' }, doc.text),
   el('table', { class: 'entry' }, el('thead', {}, el('tr', {}, el('th', {}, 'Account'), el('th', {}, 'Debit'), el('th', {}, 'Credit'), el('th'))), body),
+  totals,
   el('div', { class: 'row' },
-    el('button', { type: 'button', class: 'secondary', onclick: () => addLine() }, 'Add a line'),
+    el('button', { type: 'button', class: 'secondary', onclick: () => { addLine(); plug(); } }, 'Add a line'),
     el('button', {}, 'Save entry'),
     el('button', { type: 'button', class: 'link', onclick: () => ((editing = null), renderBooks()) }, 'Cancel')),
   err);

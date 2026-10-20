@@ -65,7 +65,7 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .tile-box p { margin: 4px 0; }
 .isle {
   grid-row: 4 / 9; grid-column: 15 / 20;
-  display: grid; gap: 8px; align-content: start;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start;
   padding: 10px; min-width: 0;
   background: #0f2224; border: 1px solid #1f4d50; border-radius: 8px;
   font-size: 0.85rem;
@@ -74,6 +74,15 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .isle button { padding: 7px 10px; }
 .isle .error:empty { display: none; }
 .isle .actions p { overflow-wrap: anywhere; }
+/* Everything in the island box shrinks to fit it: inputs drop their default width, button
+   labels wrap, and side-by-side controls stack when there's no room. */
+.isle .actions { grid-template-columns: minmax(0, 1fr); max-width: none; }
+.isle .actions > *, .isle .row > *, .isle .inline > * { min-width: 0; }
+.isle input, .isle select { width: 100%; min-width: 0; }
+.isle button { white-space: normal; }
+.isle .row > button { flex: 1 1 110px; }
+.isle .inline { grid-template-columns: minmax(0, 1fr) auto; }
+.isle .inline3 { grid-template-columns: minmax(0, 1fr) auto auto; }
 .turn-line { display: flex; justify-content: space-between; gap: 12px; font-size: 1.1rem; }
 .dice { font-variant-numeric: tabular-nums; }
 .actions { display: grid; gap: 8px; align-content: start; max-width: 640px; }
@@ -144,6 +153,7 @@ label.check { display: flex; align-items: center; gap: 4px; color: var(--fg); }
 .entry th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.8rem; }
 .entry select, .entry input { padding: 4px 6px; font-size: 0.85rem; }
 .entry input { width: 110px; }
+.entry input.plug { font-style: italic; color: var(--muted); }
 select { font: inherit; background: var(--panel); color: var(--fg); border: 1px solid #2a313c; border-radius: 6px; }
 details.check summary { cursor: pointer; }
 .stock { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid #2a313c; }
