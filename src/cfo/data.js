@@ -169,7 +169,7 @@ function buildSquares() {
   return squares;
 }
 
-// ---- Zoning (47 cards, Assets sheet) ----
+// ---- Zoning (47 cards from the Assets sheet, plus 16 for the island) ----
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
@@ -177,11 +177,13 @@ function buildSquares() {
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
 // - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
+// The spreadsheet's 47 cards cover the main board's lots; Miles: 16 more (2 Industrial, 6 Retail,
+// 2 Banking, 6 Residential) cover the island's lots, so there is one card per lot.
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 26, rent: 0.1, produce: 0.3 },
-  retail: { name: 'Retail', count: 10, rent: 0.2 },
-  banking: { name: 'Banking', count: 4, rent: 0.1, yearly: 0.1, interest: 0.03 },
-  residential: { name: 'Residential', count: 7, rent: 0.5, yearly: 0.15 },
+  industrial: { name: 'Industrial', count: 28, rent: 0.1, produce: 0.3 },
+  retail: { name: 'Retail', count: 16, rent: 0.2 },
+  banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.1, interest: 0.03 },
+  residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.15 },
 };
 
 // Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
