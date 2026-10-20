@@ -121,6 +121,9 @@ button.build { display: grid; gap: 2px; padding: 8px 10px; }
 .warn { color: var(--error); }
 .chips, .cards { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip.private { border: 1px dashed var(--accent); }
+.small-head { margin: 12px 0 4px; font-size: 0.9rem; }
+.rival-assets { display: grid; gap: 4px; margin-bottom: 8px; }
+.rival-assets p { display: flex; align-items: center; }
 .chip { background: #222934; border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; }
 
 .statements { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 8px; }

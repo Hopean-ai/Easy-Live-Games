@@ -725,10 +725,24 @@ function renderHand() {
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at $${r.price.toFixed(2)} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
   );
+  // Everyone's personal assets are public, like a Monopoly player's deeds.
+  const others = g.players.map((p, i) => ({ p, i })).filter(({ p, i }) => i !== mySeat && !p.out);
   $('assets').replaceChildren(
     el('p', { class: 'small' }, `Portfolio ${money(me.portfolio)} of the ${money(rules.config.portfolioGoal)} goal.`),
     el('div', { class: 'chips' }, assets),
+    others.length ? el('h3', { class: 'small-head' }, 'Other players') : null,
+    ...others.map(({ p, i }) => el('div', { class: 'rival-assets' },
+      el('p', { class: 'small' }, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}: ${money(p.portfolio)}`),
+      el('div', { class: 'chips' }, p.assets.length ? groupAssets(p.assets) : el('span', { class: 'small' }, 'None yet.')))),
   );
+}
+
+// One chip per kind of card, with a count when a player holds several.
+function groupAssets(ids) {
+  const counts = new Map();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return [...counts].map(([id, n]) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' },
+    `${rules.personal[id].name}${n > 1 ? ` ×${n}` : ''} ${money(rules.personal[id].value * n)}`));
 }
 
 function playControls(id, i) {
