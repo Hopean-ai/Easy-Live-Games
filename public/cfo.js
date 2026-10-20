@@ -909,6 +909,12 @@ function renderBooks() {
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: false }) }, 'Keep my own books'))
     : el('p', { class: 'small' }, `Not an accountant? A bookkeeper records every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} a year, but you give up the clean-books bonus. `,
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: true }) }, 'Hire a bookkeeper')));
+  // Miles: with a bookkeeper there is nothing to record, so the documents stay out of the way.
+  if (me.outsourced) {
+    editing = null;
+    $('docs').replaceChildren(el('p', { class: 'small' }, 'Your bookkeeper records every document at each fiscal year end.'));
+    return;
+  }
   const docs = [...me.docs].reverse();
   if (editing && !docs.some((d) => d.id === editing.id)) editing = null;
   if (editing?.saving) {
