@@ -674,11 +674,8 @@ function personalSquare(g, p) {
   const odds = CONFIG.personalSquareOdds;
   const hit = odds.find((o) => (r -= o.chance) < 0) ?? odds[odds.length - 1];
   if (hit.free) return gainPersonal(g, p, drawPersonal(g), 'is given');
-  if (hit.discount) {
-    p.personalOffer = hit.discount;
-    return log(g, `${p.name} is offered ${Math.round(hit.discount * 100)}% off one personal asset this turn.`);
-  }
-  log(g, `${p.name} finds nothing worth buying.`);
+  p.personalOffer = hit.discount;
+  log(g, `${p.name} is offered ${Math.round(hit.discount * 100)}% off one personal asset this turn.`);
 }
 
 // Island landmarks come with their zone and building, so they are bought whole.
