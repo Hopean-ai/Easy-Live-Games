@@ -332,6 +332,11 @@ const ACTIONS = {
     const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
     g.dice = d;
     log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
+    if (d[0] === d[1] && p.assets.includes('horses') && !p.raced) {
+      p.raced = true;
+      p.personalCash += M(100);
+      log(g, `${p.name}'s horse wins ${money(M(100))} at the races.`);
+    }
     // Step square by square: widgets are picked up, dropped off and shipped along the way.
     for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
       p.pos = nextPos(p.pos);
@@ -342,6 +347,11 @@ const ACTIONS = {
         p.islandLaps = (p.islandLaps ?? 0) + 1;
         p.atTerminal = true;
         log(g, `${p.name} completes a lap of the island.`);
+        const houses = p.assets.filter((a) => a === 'beach').length;
+        if (houses) {
+          p.personalCash += houses * M(100);
+          log(g, `${p.name} collects ${money(houses * M(100))} renting out beach houses.`);
+        }
         fiscalYearEnd(g, p);
       }
       if (!p.out) visit(g, p, p.pos);
@@ -865,6 +875,7 @@ function land(g, p) {
     case 'fye':
       return; // the fiscal year already closed on the way in
     case 'cpe':
+      if (p.assets.includes('cabin')) return log(g, `${p.name} studies at their mountain cabin and carries on.`);
       p.skip = true;
       log(g, `${p.name} is at Continuing Professional Education and will sit out a turn.`);
       return;
@@ -1182,7 +1193,9 @@ function personalYearEnd(g, p) {
   p.yearDraws = 0;
   p.yearTax = 0;
   p.taxFree = false;
+  p.raced = false;
   const count = (id) => p.assets.filter((a) => a === id).length;
+  p.personalCash += count('mansion') * M(100);
   p.deduction = count('intelligent') ? M(100) : 0;
   const wealthy = count('wealthy');
   if (wealthy) p.personalCash += M(10 ** wealthy);

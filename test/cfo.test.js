@@ -843,3 +843,44 @@ test('the Personal Assets square gives a free card, a discount on one card, or n
   }
   for (const [k, n] of Object.entries(seen)) assert.ok(n > 30, `${k} happened ${n} times in 300`);
 });
+
+test('plain personal assets have small effects', () => {
+  const g = createGame(['A', 'B'], 7);
+  const p = g.players[0];
+  // Mountain Cabin: no sitting out at CPE.
+  p.assets = ['cabin'];
+  while (p.pos !== 31) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = 31 - 7;
+    act(g, 0, { a: 'roll' });
+  }
+  assert.equal(Boolean(p.skip), false);
+  // Country Mansion: income each fiscal year.
+  p.assets = ['mansion', 'mansion'];
+  const before = p.personalCash;
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  p.raced = true;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.personalCash - before, M(200));
+  // Horses: one win at the races per fiscal year, on doubles.
+  p.assets = ['horses'];
+  p.raced = false;
+  let wins = 0;
+  for (let i = 0; i < 60; i++) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    p.pos = 2;
+    const cash = p.personalCash;
+    act(g, 0, { a: 'roll' });
+    if (p.personalCash > cash) wins += 1;
+  }
+  assert.equal(wins, 1);
+  // Beach House: rent on each island lap.
+  p.assets = ['beach'];
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = ISLAND_START + 23;
+  p.raced = true;
+  const cash = p.personalCash;
+  act(g, 0, { a: 'roll' });
+  assert.ok(p.personalCash >= cash + M(100));
+});

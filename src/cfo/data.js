@@ -285,10 +285,11 @@ export const PERSONAL_CARDS = {
   },
   wealthy: { name: 'Wealthy Spouse', count: 2, value: M(1000), spouse: true, text: `Receive ${usd(10)} x 10 for each of these you hold beyond the first, each fiscal year.` },
   intelligent: { name: 'Intelligent Spouse', count: 2, value: M(1000), spouse: true, text: `Deduct ${usd(100)} from your personal taxes each fiscal year.` },
-  horses: { name: 'Horses', count: 5, value: M(25) },
-  beach: { name: 'Beach House', count: 5, value: M(250) },
-  cabin: { name: 'Mountain Cabin', count: 5, value: M(250) },
-  mansion: { name: 'Country Mansion', count: 5, value: M(1500) },
+  // Miles: small effects, nothing too disruptive; the Beach House ties to the island. PLACEHOLDER amounts.
+  horses: { name: 'Horses', count: 5, value: M(25), text: `The first time you roll doubles each fiscal year, win ${usd(100)} at the races.` },
+  beach: { name: 'Beach House', count: 5, value: M(250), text: `Rent it to tourists: receive ${usd(100)} each time you complete a lap of the island.` },
+  cabin: { name: 'Mountain Cabin', count: 5, value: M(250), text: 'Study at your cabin: you never sit out a turn at Continuing Professional Education.' },
+  mansion: { name: 'Country Mansion', count: 5, value: M(1500), text: `Host weddings and events: receive ${usd(100)} each fiscal year.` },
 };
 
 export function deckOf(cards) {
