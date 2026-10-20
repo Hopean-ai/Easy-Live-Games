@@ -260,6 +260,7 @@ function render() {
   renderTurn();
   renderPlayers();
   renderTile();
+  renderOffers();
   renderHand();
   renderRows();
   renderStatements();
@@ -566,7 +567,7 @@ function renderTile() {
     if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
-    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here to draw a free Personal Assets card.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
+    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here for a chance at a free Personal Assets card or a discount on one.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
   } else {
     $('tile-title').textContent = CORNER_NAMES[sq.kind][1];
     box.push(el('p', {}, {
@@ -587,7 +588,7 @@ function renderTile() {
       if (tile.zone) box.push(el('p', { class: 'small' }, `Zoned ${rules.zones[tile.zone].name}.`));
       if (tile.building) {
         const r = rules.rarities[tile.building.rarity];
-        box.push(el('p', { class: 'small' }, `${r.name} PP&E, cost ${money(tile.building.cost)}, book value ${money(tile.building.cost - tile.building.dep)}.`));
+        box.push(el('p', { class: 'small' }, `${r.name} PP&E, cost ${money(tile.building.cost)}, book value ${money((tile.building.basis ?? tile.building.cost) - tile.building.dep)}.`));
         if (tile.stock) box.push(el('p', { class: 'small' }, `${tile.stock.toLocaleString('en-US')} widgets ${tile.zone === 'retail' ? 'on the shelves' : 'waiting to be collected'}.`));
       }
     }
@@ -602,9 +603,47 @@ function renderTile() {
       box.push(row);
     }
   }
+  if (tile && tile.owner !== null && g.phase !== 'over' && !g.players[mySeat]?.out) box.push(...dealControls(selected, tile));
   $('tile').replaceChildren(...box);
   // Phones show the board without labels, so name the tapped square under it.
   $('peek').textContent = `${sq.name ?? CORNER_NAMES[sq.kind]?.[0] ?? DECK_NAMES[sq.deck]}${tile?.owner !== null && tile?.owner !== undefined ? `, owned by ${g.players[tile.owner].name}` : sq.price ? `, ${money(sq.price)}` : ''}. Details below.`;
+}
+
+// Property deals between players: sell your own lot to someone, or bid on someone else's.
+function dealControls(pos, tile) {
+  const g = state.game;
+  const name = rules.squares[pos].name;
+  if (tile.owner !== mySeat) {
+    const owner = g.players[tile.owner];
+    if (owner.out) return [];
+    return [amountForm(`Offer for ${name}`, `Offer ${owner.name} a price for ${name} and anything built on it, paid from your company's cash.`,
+      (amount) => actNow({ a: 'offer', pos, target: tile.owner, amount }))];
+  }
+  const others = g.players.map((p, j) => ({ p, j })).filter(({ p, j }) => j !== mySeat && !p.out);
+  if (!others.length) return [];
+  const who = el('select', {}, others.map(({ p, j }) => el('option', { value: j }, p.name)));
+  const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Price', inputMode: 'numeric' });
+  const form = el('form', { class: 'inline', onsubmit: (e) => (e.preventDefault(), actNow({ a: 'offer', pos, target: Number(who.value), amount: Number(input.value) })) },
+    who, input, el('button', { class: 'secondary' }, 'Offer to sell'));
+  return [el('div', {}, form, el('p', { class: 'small hint-left' }, `Sell ${name}, with anything built on it, to another player's company. They can accept or decline.`))];
+}
+
+function renderOffers() {
+  const g = state.game;
+  const mine = (g.offers ?? []).filter((o) => o.from === mySeat || o.to === mySeat);
+  $('offers').replaceChildren(...mine.map((o) => {
+    const from = g.players[o.from];
+    const to = g.players[o.to];
+    const sq = rules.squares[o.pos];
+    if (o.from === mySeat) {
+      const text = o.seller === mySeat ? `You offered ${sq.name} to ${to.name} for ${money(o.amount)}.` : `You offered ${to.name} ${money(o.amount)} for ${sq.name}.`;
+      return el('div', { class: 'row' }, el('span', { class: 'small' }, text), el('button', { class: 'secondary', onclick: () => actNow({ a: 'cancel' }) }, 'Withdraw'));
+    }
+    const text = o.seller === o.from ? `${from.name} offers to sell you ${sq.name} for ${money(o.amount)}.` : `${from.name} offers ${money(o.amount)} for your ${sq.name}.`;
+    return el('div', { class: 'row' }, el('span', {}, text),
+      el('button', { onclick: () => actNow({ a: 'respond', offer: o.id, accept: true }) }, 'Accept'),
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'respond', offer: o.id, accept: false }) }, 'Decline'));
+  }));
 }
 
 function zoneText(id) {
