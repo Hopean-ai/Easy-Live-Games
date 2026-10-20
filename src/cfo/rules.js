@@ -1420,11 +1420,12 @@ function audit(g, p) {
   if (!fraudCheck(g, p, CONFIG.auditFraudChance, 'The Interim Review')) log(g, `Interim Review: ${n ? 'no fraud' : 'nothing wrong'} found at ${p.name}'s company.`);
 }
 
-// The chance that a check finds any of a player's frauds: every fraud committed so far might be
-// the one found, and public companies get twice the scrutiny.
+// The chance that a check finds a player out. Miles: fraud in moderation should be a viable
+// strategy, so the risk grows with the square of the frauds on record: one or two are a small
+// risk, five or more are likely to be found. Public companies get twice the scrutiny.
 export function fraudRisk(p, chance) {
   if (!p.frauds) return 0;
-  return 1 - (1 - Math.min(1, chance * scrutiny(p))) ** p.frauds;
+  return Math.min(1, chance * scrutiny(p) * p.frauds ** 2);
 }
 
 // Miles: being caught is an immediate loss. Returns true if the player was convicted.
