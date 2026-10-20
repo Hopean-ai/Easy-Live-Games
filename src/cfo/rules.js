@@ -257,7 +257,7 @@ export function current(g) {
 
 // Actions come straight from browsers, so keep only the fields actions use, with the right types.
 // Names are looked up as own keys, so 'constructor' or '__proto__' can't reach object internals.
-const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc'];
+const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer'];
 const MAX_AMOUNT = 1e9;
 function cleanAction(action) {
   if (!action || typeof action !== 'object' || typeof action.a !== 'string') return null;
@@ -268,6 +268,7 @@ function cleanAction(action) {
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
+  if (typeof action.accept === 'boolean') out.accept = action.accept;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -292,8 +293,8 @@ export function act(g, who, raw) {
     afterAction(g);
     return null;
   }
-  if (Object.hasOwn(BOOKS, action.a)) {
-    const err = BOOKS[action.a](g, p, action);
+  if (Object.hasOwn(BOOKS, action.a) || Object.hasOwn(DEALS, action.a)) {
+    const err = (BOOKS[action.a] ?? DEALS[action.a])(g, p, action);
     if (!err) afterAction(g); // a clean-books bonus can reach the value target
     return err ?? null;
   }
@@ -993,7 +994,9 @@ function sellLand(g, p, t, pos) {
   if (t.building) sellBuilding(g, p, t, pos);
   const sq = SQUARES[pos];
   const proceeds = Math.round(sq.price * CONFIG.liquidation);
-  post(p, `Sold ${sq.name} to the bank`, { cash: proceeds, land: -sq.price, gain: sq.price - proceeds });
+  const basis = t.landBasis ?? sq.price;
+  post(p, `Sold ${sq.name} to the bank`, { cash: proceeds, land: -basis, gain: basis - proceeds });
+  delete t.landBasis;
   returnZoning(g, t);
   t.owner = null;
   t.zone = null;
@@ -1028,6 +1031,7 @@ function acquireCompany(g, p, q, price) {
   g.tiles.forEach((t) => {
     if (t?.owner === them) t.owner = me;
   });
+  g.offers = (g.offers ?? []).filter((o) => o.from !== them && o.to !== them);
   p.carried += q.carried;
   // The target's own subsidiaries now belong to the buyer.
   for (const c of g.players) {
@@ -1055,7 +1059,9 @@ function bankrupt(g, p, text) {
     if (t?.owner !== idx) return;
     returnZoning(g, t);
     Object.assign(t, { owner: null, zone: null, building: null, stock: 0 });
+    delete t.landBasis;
   });
+  g.offers = (g.offers ?? []).filter((o) => o.from !== idx && o.to !== idx);
   discardHand(g, p);
   p.out = true;
   log(g, text);
@@ -1570,6 +1576,82 @@ function sameEntry(a, b) {
   return true;
 }
 
+// ---- Deals between players ----
+// Miles: players trade property with each other. Either side names a price for one lot or
+// transport tile, with whatever is built on it, and the other side accepts or declines. Deals can
+// be made at any time. Each player has at most one open offer.
+const DEALS = {
+  offer(g, p, { pos, target, amount } = {}) {
+    if (g.phase === 'over') return 'The game is over.';
+    const me = g.players.indexOf(p);
+    const tile = g.tiles[pos];
+    if (!tile || tile.owner === null) return 'Pick a lot or transport tile that a player owns.';
+    const q = g.players[target];
+    if (!q || q === p || q.out) return 'Pick another player.';
+    if (tile.owner !== me && tile.owner !== target) return 'One of you must own it.';
+    amount = Math.round(Number(amount));
+    if (!(amount > 0)) return 'Enter a price.';
+    if (tile.owner === target && amount > companyCash(p)) return 'Your company does not have that much cash.';
+    g.offers = (g.offers ?? []).filter((o) => o.from !== me);
+    g.offerSeq = (g.offerSeq ?? 0) + 1;
+    g.offers.push({ id: g.offerSeq, from: me, to: target, pos, amount, seller: tile.owner });
+    const sq = SQUARES[pos];
+    log(g, tile.owner === me
+      ? `${p.name} offers to sell ${sq.name} to ${q.name} for ${money(amount)}.`
+      : `${p.name} offers ${q.name} ${money(amount)} for ${sq.name}.`);
+    return null;
+  },
+  cancel(g, p) {
+    const me = g.players.indexOf(p);
+    if (!(g.offers ?? []).some((o) => o.from === me)) return 'You have no open offer.';
+    g.offers = g.offers.filter((o) => o.from !== me);
+    return null;
+  },
+  respond(g, p, { offer, accept } = {}) {
+    const me = g.players.indexOf(p);
+    const o = (g.offers ?? []).find((x) => x.id === offer && x.to === me);
+    if (!o) return 'That offer is no longer open.';
+    g.offers = g.offers.filter((x) => x !== o);
+    const from = g.players[o.from];
+    const sq = SQUARES[o.pos];
+    if (!accept) {
+      log(g, `${p.name} turns down ${from.name}'s offer for ${sq.name}.`);
+      return null;
+    }
+    if (from.out || g.tiles[o.pos].owner !== o.seller) return 'That offer is no longer open.';
+    const buyer = o.seller === o.from ? p : from;
+    if (companyCash(buyer) < o.amount) return `${buyer.name}'s company cannot pay ${money(o.amount)}.`;
+    transferProperty(g, o.pos, g.players[o.seller], buyer, o.amount);
+    return null;
+  },
+};
+
+// The seller books the sale against what the lot and building are carried at; the buyer carries
+// them at what was paid, land first up to its list price and the rest as the building.
+function transferProperty(g, pos, seller, buyer, amount) {
+  const sq = SQUARES[pos];
+  const t = g.tiles[pos];
+  const landBasis = t.landBasis ?? sq.price;
+  const b = t.building;
+  const basis = b ? (b.basis ?? b.cost) : 0;
+  const sold = { cash: amount, land: -landBasis, gain: landBasis + basis - (b?.dep ?? 0) - amount };
+  if (b) Object.assign(sold, { ppe: -basis, accDep: b.dep });
+  post(seller, `Sold ${sq.name} to ${buyer.name}`, sold);
+  const land = b ? Math.min(amount, sq.price) : amount;
+  const bought = { land, cash: -amount };
+  if (b && amount > land) bought.ppe = amount - land;
+  post(buyer, `Bought ${sq.name} from ${seller.name}`, bought);
+  // Widgets waiting there stay the seller's; they go onto the seller's token.
+  seller.carried += t.stock;
+  t.stock = 0;
+  t.owner = g.players.indexOf(buyer);
+  t.landBasis = land;
+  if (b) Object.assign(b, { basis: amount - land, dep: 0 });
+  // An offer on this property from before the sale no longer applies.
+  g.offers = (g.offers ?? []).filter((o) => o.pos !== pos);
+  log(g, `${seller.name} sells ${sq.name} to ${buyer.name} for ${money(amount)}.`);
+}
+
 // These may be done at any time, not only on your own turn.
 const BOOKS = {
   // A bookkeeper records every entry and files the statements, for a yearly fee and no clean-books bonus.
@@ -1671,6 +1753,7 @@ export function viewFor(g, who) {
     endReason: g.endReason,
     win: g.win,
     companyValues: g.players.map((p, i) => (open(i) ? companyValue(p) : null)),
+    offers: g.offers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
     log: g.log,

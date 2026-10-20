@@ -966,3 +966,45 @@ test('a discounted building is booked, depreciated and sold at what was paid', (
   if (p.out) return;
   assert.equal(-p.ledger.accDep, Math.round(b.basis * CONFIG.depreciation));
 });
+
+test('players trade property: offers, the books on both sides, and stale offers', () => {
+  const g = createGame(['A', 'B', 'C'], 65);
+  const [a, b] = g.players;
+  const pos = posOfSpace(1);
+  const price = SQUARES[pos].price;
+  Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: M(100), basis: M(100), dep: M(20) }, stock: 50 });
+  post(a, 'Setup', { land: price, ppe: M(100), accDep: -M(20), capital: -(price + M(80)) });
+  // B bids on A's lot; A accepts. Either side can propose, at any time.
+  assert.equal(act(g, 1, { a: 'offer', pos, target: 0, amount: M(10000) }), 'Your company does not have that much cash.');
+  assert.equal(act(g, 1, { a: 'offer', pos, target: 2, amount: M(100) }), 'One of you must own it.');
+  assert.equal(act(g, 1, { a: 'offer', pos, target: 0, amount: M(500) }), null);
+  const offer = viewFor(g, 0).offers[0];
+  assert.equal(offer.from, 1);
+  const aCash = a.ledger.cash;
+  const bCash = b.ledger.cash;
+  assert.equal(act(g, 0, { a: 'respond', offer: offer.id, accept: true }), null);
+  assert.equal(g.tiles[pos].owner, 1);
+  assert.equal(a.ledger.cash, aCash + M(500));
+  assert.equal(b.ledger.cash, bCash - M(500));
+  assert.equal(a.ledger.land, 0);
+  assert.equal(a.ledger.ppe, 0);
+  assert.equal(a.ledger.accDep, 0);
+  assert.equal(-a.ledger.gain, M(500) - (price + M(80)), 'A books the gain over book value');
+  assert.equal(b.ledger.land, price);
+  assert.equal(b.ledger.ppe, M(500) - price);
+  assert.equal(a.carried, 50, 'widgets left at the lot stay the seller\'s');
+  assert.ok(a.docs.some((d) => d.text.startsWith(`Sold ${SQUARES[pos].name} to B`)));
+  assert.ok(b.docs.some((d) => d.text.startsWith(`Bought ${SQUARES[pos].name} from A`)));
+  for (const p of g.players) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
+  // B offers it on to C, then sells it to the bank: C can no longer accept, and declining clears it.
+  assert.equal(act(g, 1, { a: 'offer', pos, target: 2, amount: M(300) }), null);
+  assert.equal(act(g, 1, { a: 'offer', pos, target: 2, amount: M(400) }), null);
+  assert.equal(g.offers.length, 1, 'a new offer replaces your old one');
+  const id = g.offers[0].id;
+  assert.equal(act(g, 2, { a: 'respond', offer: id, accept: false }), null);
+  assert.equal(g.offers.length, 0);
+  assert.equal(act(g, 2, { a: 'respond', offer: id, accept: true }), 'That offer is no longer open.');
+});
