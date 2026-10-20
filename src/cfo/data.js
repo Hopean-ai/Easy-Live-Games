@@ -32,12 +32,12 @@ export const CONFIG = {
   valueTarget: M(45000), // PLACEHOLDER: company value that wins (bot playtests: the best company reaches it around year 14-16)
   maxYears: 16, // room setting: end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
   // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
-  // adds to the chance, but a little fraud should be worth the risk. A check's chance is this x
-  // the square of the frauds on record (PLACEHOLDER). Over a 16-year game, holding 1 fraud is
-  // caught about 8% of the time, 2 about 27%, 3 about 53%, 5 about 91%.
-  auditFraudChance: 0.02, // at an Interim Review (or island Customs)
-  fraudExpiryYears: 4, // PLACEHOLDER: one fraud ages off the record every this many fiscal years (playtests: moderate fraud breaks even)
-  fyeFraudChance: 0.002, // at each fiscal year end
+  // adds to the chance, but fraud should break even at about 3-4 frauds. A check's chance is this
+  // x the square of the frauds on record (PLACEHOLDER), and one fraud ages off every few years.
+  // Bot playtests: holding up to 4 matches a clean player's net worth; 6 or more falls behind.
+  auditFraudChance: 0.006, // at an Interim Review (or island Customs)
+  fraudExpiryYears: 4, // PLACEHOLDER: one fraud ages off the record every this many fiscal years
+  fyeFraudChance: 0.0006, // at each fiscal year end
   misstatementFine: M(100), // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
   cleanBooksBonus: M(200), // PLACEHOLDER: for filing a fiscal year with no misstatements
   ipoYears: 3, // PLACEHOLDER: fiscal years a company needs before it can go public
