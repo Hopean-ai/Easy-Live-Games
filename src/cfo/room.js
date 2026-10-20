@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CONFIG, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
+import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
 import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
 import { sanitizeName } from '../names.js';
 
@@ -213,7 +213,7 @@ const RULES = {
   config: CONFIG, size: BOARD_SIZE, retail: RETAIL, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
   incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS,
-  islandStart: ISLAND_START, islandSize: ISLAND_SIZE, landmarks: LANDMARKS,
+  islandStart: ISLAND_START, islandSize: ISLAND_SIZE, landmarks: LANDMARKS, moneyScale: MONEY_SCALE,
 };
 
 function send(ws, msg) {
