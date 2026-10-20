@@ -592,7 +592,7 @@ function renderTile() {
     if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
-    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here for a chance at a free Personal Assets card or a discount on one.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
+    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here for a free Personal Assets card (1 in 6), or half off one card (1 in 3), or a quarter off one card (1 in 2), bought that turn.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
   } else {
     $('tile-title').textContent = CORNER_NAMES[sq.kind][1];
     box.push(el('p', {}, {

@@ -25,8 +25,7 @@ export const CONFIG = {
   personalSquareOdds: [
     { chance: 1 / 6, free: true },
     { chance: 1 / 3, discount: 0.5 },
-    { chance: 1 / 4, discount: 0.25 },
-    { chance: 1 / 4 },
+    { chance: 1 / 2, discount: 0.25 }, // Miles: no "nothing" result; its 1 in 4 went to the smallest discount
   ],
   portfolioGoal: M(35000), // spreadsheet had $100k (~93 draws); lowered so a player who pays themselves can reach it in a full game
   valueTarget: M(45000), // PLACEHOLDER: company value that wins (bot playtests: the best company reaches it around year 14-16)
