@@ -85,10 +85,11 @@ export function posOfSpace(n) {
   return n + 3;
 }
 
-// Transport squares come from the labels beside the board; deck squares are the three spaces
-// left over once 47 land and 8 transport tiles are placed (PLACEHOLDER positions).
+// Transport squares come from the labels beside the board. The spreadsheet left three spaces for
+// decks; Miles asked for more, so three lots became decks too: one per side gets a Fraud or
+// Market Forces square, and the main board now has 44 lots (PLACEHOLDER positions).
 const TRANSPORT_SPACES = { 5: 'rail', 25: 'rail', 45: 'rail', 11: 'truck', 40: 'truck', 16: 'air', 34: 'air', 54: 'air' };
-const DECK_SPACES = { 8: 'market', 28: 'fraud', 48: 'personal' };
+const DECK_SPACES = { 8: 'market', 18: 'fraud', 28: 'fraud', 37: 'market', 48: 'personal', 57: 'market' };
 
 export const MODES = {
   truck: { name: 'Trucking', companies: ['Iron Mile Logistics', 'Steel Ridge Transport'] },
@@ -103,11 +104,11 @@ export const TRANSPORT_RENT = M(50); // PLACEHOLDER: doubles for each other tile
 // colour; they get placeholder colours so they still form sets.
 export const SETS = [
   { name: 'Brown', color: '#8b5a2b', size: 4, price: M(80) },
-  { name: 'Pink', color: '#e58fb5', size: 4, price: M(100), placeholder: true },
+  { name: 'Pink', color: '#e58fb5', size: 3, price: M(100), placeholder: true },
   { name: 'Baby Blue', color: '#9fd3f0', size: 4, price: M(120) },
-  { name: 'Teal', color: '#2a9d8f', size: 4, price: M(140), placeholder: true },
+  { name: 'Teal', color: '#2a9d8f', size: 3, price: M(140), placeholder: true },
   { name: 'Red', color: '#d64545', size: 3, price: M(160) },
-  { name: 'Lime', color: '#a3c940', size: 4, price: M(180), placeholder: true },
+  { name: 'Lime', color: '#a3c940', size: 3, price: M(180), placeholder: true },
   { name: 'Orange', color: '#f08a24', size: 3, price: M(200) },
   { name: 'Tan', color: '#c9a66b', size: 3, price: M(220), placeholder: true },
   { name: 'Yellow', color: '#f2d33c', size: 3, price: M(240) },
@@ -176,7 +177,7 @@ function buildSquares() {
   return squares;
 }
 
-// ---- Zoning (47 cards from the Assets sheet, plus 16 for the island) ----
+// ---- Zoning (60 cards, one per lot) ----
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
@@ -184,10 +185,10 @@ function buildSquares() {
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
 // - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
-// The spreadsheet's 47 cards cover the main board's lots; Miles: 16 more (2 Industrial, 6 Retail,
-// 2 Banking, 6 Residential) cover the island's lots, so there is one card per lot.
+// One card per lot: the spreadsheet's 47, less 3 Industrial for the lots that became deck squares,
+// plus 16 for the island's lots (2 Industrial, 6 Retail, 2 Banking, 6 Residential).
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 28, rent: 0.1, produce: 0.5 },
+  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.5 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
   residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.3 },
@@ -216,10 +217,10 @@ export const RETAIL = {
 };
 
 
-// ---- PP&E (63 cards, one per lot; the Assets sheet had 47) ----
+// ---- PP&E (60 cards, one per lot; the Assets sheet had 47) ----
 // Each step up costs about 4x the last, so the top cards take saving for (Miles: the right feel).
 export const RARITIES = {
-  common: { name: 'Common', count: 24, price: M(100) },
+  common: { name: 'Common', count: 21, price: M(100) },
   uncommon: { name: 'Uncommon', count: 18, price: M(400) },
   rare: { name: 'Rare', count: 12, price: M(1500) },
   epic: { name: 'Epic', count: 6, price: M(6000) },

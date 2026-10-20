@@ -5,19 +5,20 @@ import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyVa
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
-test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transport', () => {
+test('the board: 58 spaces, 4 corners, 44 land, 8 transport, 6 decks', () => {
   assert.equal(BOARD_SIZE, 62);
   assert.equal(SQUARES.length, 62 + 24);
   assert.equal(SQUARES.filter((s) => s.island).length, 24);
-  assert.equal(count('land'), 47);
+  assert.equal(count('land'), 44);
   assert.equal(count('transport'), 8);
-  assert.equal(count('deck'), 3);
+  assert.equal(count('deck'), 6);
+  assert.deepEqual(['fraud', 'market'].map((d) => SQUARES.filter((s) => s.deck === d).length), [2, 4]);
   assert.deepEqual([0, 21, 31, 52].map((p) => SQUARES[p].kind), ['fye', 'bank', 'cpe', 'review']);
   assert.equal(SQUARES[posOfSpace(5)].mode, 'rail');
   assert.equal(SQUARES[posOfSpace(54)].mode, 'air');
   // One zoning card per lot: the main board's 47 plus the island's, less its pre-zoned landmarks.
   const lots = SQUARES.filter((s) => s.kind === 'land' && !s.landmark).length;
-  assert.equal(lots, 63);
+  assert.equal(lots, 60);
   assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), lots);
   assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), lots, 'one PP&E card per lot too');
 });
