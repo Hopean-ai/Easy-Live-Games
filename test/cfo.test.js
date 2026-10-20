@@ -304,6 +304,7 @@ test('fraud: more of it means likelier to be caught, and being caught is an imme
   p.isPublic = true;
   assert.ok(fraudRisk(p, CONFIG.auditFraudChance) > fraudRisk({ ...p, isPublic: false }, CONFIG.auditFraudChance), 'public companies are watched harder');
   p.isPublic = false;
+  p.frauds = 6;
   // Keep landing on the Interim Review until the frauds are found: the player is out at once.
   for (let i = 0; i < 200 && !p.out; i++) {
     Object.assign(g, { turn: 0, phase: 'roll' });
@@ -933,7 +934,7 @@ test('a whistleblower tip runs a fraud check on a rival and pays a reward on a c
   for (let seed = 0; seed < 40; seed++) {
     const g = createGame(['A', 'B'], 900 + seed, { easyBooks: true });
     const [a, b] = g.players;
-    b.frauds = 5; // a 50% chance at Interim Review odds
+    b.frauds = 9; // about a 50% chance at Interim Review odds
     Object.assign(g, { turn: 0, phase: 'act' });
     a.hand = ['whistle'];
     const cash = a.personalCash;
