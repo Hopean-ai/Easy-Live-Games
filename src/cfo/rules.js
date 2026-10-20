@@ -220,9 +220,15 @@ export function sharePrice(p) {
   return round(companyValue(p) / totalShares(p));
 }
 
-// Shares change hands with personal cash, so they trade in whole $100s.
+// Shares change hands with personal cash, which moves in whole $100s: buyers pay the market
+// price rounded up to the next $100, sellers get it rounded down.
 export function tradePrice(p) {
-  return Math.max(CONFIG.personalUnit, Math.round(sharePrice(p) / CONFIG.personalUnit) * CONFIG.personalUnit);
+  return sharePrice(p);
+}
+
+function tradeTotal(price, count) {
+  const exact = price * Math.abs(count);
+  return (count > 0 ? Math.ceil(exact / CONFIG.personalUnit) : Math.floor(exact / CONFIG.personalUnit + 1e-9)) * CONFIG.personalUnit;
 }
 
 // A subsidiary's parent holds its shares in the company, which shows on the parent's own books.
@@ -236,9 +242,9 @@ export function netWorth(g, p) {
   return round(worth);
 }
 
-// How hard auditors look: public companies get caught and fined more.
+// How hard auditors look: public companies and convicted managers get caught and fined more.
 function scrutiny(p) {
-  return p.isPublic ? CONFIG.publicScrutiny : 1;
+  return (p.isPublic ? CONFIG.publicScrutiny : 1) * (p.convicted ? CONFIG.publicScrutiny : 1);
 }
 
 // ---- Turn flow ----
@@ -247,20 +253,50 @@ export function current(g) {
   return g.players[g.turn];
 }
 
+// Actions come straight from browsers, so keep only the fields actions use, with the right types.
+// Names are looked up as own keys, so 'constructor' or '__proto__' can't reach object internals.
+const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc'];
+const MAX_AMOUNT = 1e9;
+function cleanAction(action) {
+  if (!action || typeof action !== 'object' || typeof action.a !== 'string') return null;
+  const out = { a: action.a };
+  for (const f of INT_FIELDS) if (Number.isInteger(action[f]) && Math.abs(action[f]) <= MAX_AMOUNT) out[f] = action[f];
+  if (Number.isFinite(action.amount) && Math.abs(action.amount) <= MAX_AMOUNT) out.amount = action.amount;
+  if (typeof action.option === 'string' && Object.hasOwn(RETAIL.sales, action.option)) out.option = action.option;
+  if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
+  if (Array.isArray(action.lines)) out.lines = action.lines;
+  for (const k of ['income', 'balance']) {
+    const src = action[k];
+    if (!src || typeof src !== 'object') continue;
+    out[k] = {};
+    for (const f of k === 'income' ? INCOME_FIELDS : BALANCE_FIELDS) {
+      const v = Number(src[f]);
+      if (Number.isFinite(v) && Math.abs(v) <= MAX_AMOUNT) out[k][f] = v;
+    }
+  }
+  return out;
+}
+
 // Applies one player action. Returns null on success or a short error for that player.
-export function act(g, who, action) {
+export function act(g, who, raw) {
   if (g.phase === 'over') return 'The game is over.';
   const p = g.players[who];
   if (!p || p.out) return 'You are not in this game.';
-  if (action?.a === 'resign') {
+  const action = cleanAction(raw);
+  if (!action) return 'Unknown action.';
+  if (action.a === 'resign') {
     bankrupt(g, p, `${p.name} resigns.`);
     afterAction(g);
     return null;
   }
-  if (BOOKS[action?.a]) return BOOKS[action.a](g, p, action) ?? null;
+  if (Object.hasOwn(BOOKS, action.a)) {
+    const err = BOOKS[action.a](g, p, action);
+    if (!err) afterAction(g); // a clean-books bonus can reach the value target
+    return err ?? null;
+  }
   if (g.turn !== who) return 'It is not your turn.';
-  const handler = ACTIONS[action?.a];
-  if (!handler) return 'Unknown action.';
+  if (!Object.hasOwn(ACTIONS, action.a)) return 'Unknown action.';
+  const handler = ACTIONS[action.a];
   const err = handler(g, p, action);
   if (!err) afterAction(g);
   return err ?? null;
@@ -270,6 +306,11 @@ export function act(g, who, action) {
 export function timeout(g) {
   if (g.phase === 'over') return;
   const p = current(g);
+  // Their books are kept for them, so fines don't bankrupt someone who has only stepped away.
+  if (p.manual) {
+    for (const d of p.docs) d.recorded ??= d.lines;
+    if (p.fyePending) BOOKS.statements(g, p, p.fyePending.truth);
+  }
   if (g.phase === 'roll') ACTIONS.roll(g, p);
   if (g.phase === 'buy') ACTIONS.pass(g, p);
   if (g.phase === 'act') {
@@ -440,21 +481,23 @@ const ACTIONS = {
     if (!count) return 'Enter how many shares.';
     const me = String(g.players.indexOf(p));
     const price = tradePrice(c);
+    const total = tradeTotal(price, count);
     if (count > 0) {
       if (count > c.shares.public) return `Only ${c.shares.public} shares are on the market.`;
-      if (count * price > p.personalCash) return 'You do not have enough personal cash.';
-      p.personalCash -= count * price;
+      if (total > p.personalCash) return 'You do not have enough personal cash.';
+      p.personalCash -= total;
       c.shares.public -= count;
       c.shares.holders[me] = (c.shares.holders[me] ?? 0) + count;
-      log(g, `${p.name} buys ${count} shares of ${c.name}'s company at ${money(price)}.`);
+      log(g, `${p.name} buys ${count} shares of ${c.name}'s company for ${money(total)}.`);
     } else {
       if (-count > (c.shares.holders[me] ?? 0)) return 'You do not hold that many shares.';
       if (c.shares.holders[me] + count <= 0 && c === p) return 'You cannot sell all of your own company.';
-      p.personalCash += -count * price;
+      if (!total) return 'Those shares are worth less than $100 together.';
+      p.personalCash += total;
       c.shares.public += -count;
       c.shares.holders[me] += count;
       if (!c.shares.holders[me]) delete c.shares.holders[me];
-      log(g, `${p.name} sells ${-count} shares of ${c.name}'s company at ${money(price)}.`);
+      log(g, `${p.name} sells ${-count} shares of ${c.name}'s company for ${money(total)}.`);
     }
     return null;
   },
@@ -478,6 +521,7 @@ const ACTIONS = {
   hire(g, p, { target, amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
     if (g.players.length < 3) return 'Subsidiaries need a game of three or more.';
+    if (p.parent !== null) return 'A subsidiary cannot hire its own subsidiary.';
     const q = g.players[target];
     if (!q || !q.out) return 'Pick a player who is out of the game.';
     amount = Math.floor(Number(amount));
@@ -486,6 +530,7 @@ const ACTIONS = {
     const parent = g.players.indexOf(p);
     post(p, `Invested in ${q.name}'s new subsidiary`, { investments: amount, cash: -amount });
     restart(g, q, parent, amount);
+    q.invested = amount;
     log(g, `${p.name} hires ${q.name} to run a subsidiary with ${money(amount)} of capital.`);
     return null;
   },
@@ -501,8 +546,8 @@ const ACTIONS = {
 
   play(g, p, msg = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
-    const id = p.hand[msg.card];
-    if (!id) return 'Pick a card from your hand.';
+    const id = Number.isInteger(msg.card) ? p.hand[msg.card] : undefined;
+    if (!id || !Object.hasOwn(PLAYS, id)) return 'Pick a card from your hand.';
     const err = PLAYS[id](g, p, msg);
     if (err) return err;
     p.hand.splice(msg.card, 1);
@@ -679,7 +724,15 @@ function ship(g, p, pos, carry = true) {
     const fee = charge(g, p, units * RETAIL.freight, 'expFreight', `Freight on ${owner.name}'s ${SQUARES[pos].name}`);
     if (fee) post(owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
     if (p.out) return;
+    // Paying the freight may have meant selling widgets, so ship only what is left.
+    return moveToStores(g, p, pos, stores, Math.min(carried, p.carried), factories.filter((t) => t.stock));
   }
+  moveToStores(g, p, pos, stores, carried, factories);
+}
+
+function moveToStores(g, p, pos, stores, carried, factories) {
+  const units = carried + factories.reduce((n, t) => n + t.stock, 0);
+  if (!units) return;
   p.carried -= carried;
   for (const t of factories) t.stock = 0;
   stores.forEach((t, i) => {
@@ -846,12 +899,23 @@ function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
   const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx);
   if (p.ledger.inventory > 0 && companyCash(p) < need) {
-    const stock = p.ledger.inventory;
+    // Only as many widgets as the shortfall needs, from the token first, then the shelves.
+    let units = Math.min(p.ledger.inventory, Math.ceil((need - companyCash(p)) / CONFIG.liquidation));
+    const sold = units;
+    const take = Math.min(p.carried, units);
+    p.carried -= take;
+    units -= take;
+    for (const { t } of owned) {
+      const n = Math.min(t.stock, units);
+      t.stock -= n;
+      units -= n;
+    }
+    const stock = sold - units;
     const proceeds = Math.round(stock * CONFIG.liquidation);
-    post(p, 'Sold widget inventory to the bank', { cash: proceeds, gain: stock - proceeds, inventory: -stock });
-    p.carried = 0;
-    for (const t of owned) t.t.stock = 0;
-    log(g, `${p.name} dumps their widget inventory for ${money(proceeds)}.`);
+    if (stock > 0) {
+      post(p, 'Sold widgets to the bank', { cash: proceeds, gain: stock - proceeds, inventory: -stock });
+      log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
+    }
   }
   const buildings = owned.filter(({ t }) => t.building).sort((a, b) => a.t.building.cost - b.t.building.cost);
   for (const { t, pos } of buildings) {
@@ -881,6 +945,7 @@ function sellLand(g, p, t, pos) {
   const sq = SQUARES[pos];
   const proceeds = Math.round(sq.price * CONFIG.liquidation);
   post(p, `Sold ${sq.name} to the bank`, { cash: proceeds, land: -sq.price, gain: sq.price - proceeds });
+  returnZoning(g, t);
   t.owner = null;
   t.zone = null;
   log(g, `${p.name} sells ${sq.name} for ${money(proceeds)}.`);
@@ -895,18 +960,21 @@ function acquireCompany(g, p, q, price) {
   const me = g.players.indexOf(p);
   const them = g.players.indexOf(q);
   // The buyer takes on the target's assets and debts; anything paid above their book value is goodwill.
+  // Shares the buyer already holds aren't paid for again, and never pay the buyer personally.
+  const total = totalShares(q);
+  const held = q.shares.holders[me] ?? 0;
+  const paid = Math.ceil((price * (total - held)) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
   const lines = {};
   for (const a of ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'loan']) lines[a] = q.ledger[a];
-  lines.cash -= price;
+  lines.cash -= paid;
   const net = Object.values(lines).reduce((a, b) => a + b, 0);
   if (net < 0) lines.goodwill += -net;
   else lines.gain = -net; // a bargain purchase
   post(p, `Bought ${q.name}'s company`, lines);
   // Shareholders are paid in whole $100s of personal cash; the public's shares are bought back.
-  const total = totalShares(q);
   for (const [h, n] of Object.entries(q.shares.holders)) {
     const part = Math.floor((price * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
-    if (part && (!g.players[h].out || Number(h) === them)) g.players[h].personalCash += part;
+    if (part && Number(h) !== me && (!g.players[h].out || Number(h) === them)) g.players[h].personalCash += part;
   }
   g.tiles.forEach((t) => {
     if (t?.owner === them) t.owner = me;
@@ -919,8 +987,9 @@ function acquireCompany(g, p, q, price) {
     c.shares.holders[me] = (c.shares.holders[me] ?? 0) + (c.shares.holders[them] ?? 0);
     delete c.shares.holders[them];
   }
+  discardHand(g, q);
   Object.assign(q, { out: true, carried: 0, docs: [], fyePending: null, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
-  log(g, `${p.name} buys ${q.name}'s company for ${money(price)}. ${q.name} is out of the game.`);
+  log(g, `${p.name} buys ${q.name}'s company for ${money(paid)}. ${q.name} is out of the game.`);
 }
 
 function bankrupt(g, p, text) {
@@ -934,10 +1003,33 @@ function bankrupt(g, p, text) {
     c.parent = null;
   }
   g.tiles.forEach((t) => {
-    if (t?.owner === idx) Object.assign(t, { owner: null, zone: null, building: null, stock: 0 });
+    if (t?.owner !== idx) return;
+    returnZoning(g, t);
+    Object.assign(t, { owner: null, zone: null, building: null, stock: 0 });
   });
+  discardHand(g, p);
   p.out = true;
   log(g, text);
+  // A parent's investment in a failed subsidiary is lost.
+  const host = g.players[p.parent];
+  if (host && !host.out && p.invested) {
+    const lost = Math.min(p.invested, host.ledger.investments);
+    if (lost > 0) post(host, `Wrote off the investment in ${p.name}'s subsidiary`, { expOther: lost, investments: -lost });
+    p.invested = 0;
+  }
+}
+
+// Cards held by a player leaving the game go back to the discard piles.
+function discardHand(g, p) {
+  for (const id of p.hand) (FRAUD_CARDS[id] ? g.fraudDiscard : g.marketDiscard).push(id);
+  p.hand = [];
+}
+
+// Zoning on land that goes back to the bank returns to the bottom of the deck.
+function returnZoning(g, t) {
+  if (!t.zone) return;
+  g.zoningDeck.unshift(t.zone);
+  refill(g.zoningRow, g.zoningDeck);
 }
 
 // Personal income from a company, taxed on the person's running total for the year so splitting
@@ -945,7 +1037,7 @@ function bankrupt(g, p, text) {
 function personalIncome(q, amount) {
   q.yearDraws = (q.yearDraws ?? 0) + amount;
   const due = Math.round((q.yearDraws * CONFIG.personalTax) / CONFIG.personalUnit) * CONFIG.personalUnit;
-  let tax = due - (q.yearTax ?? 0);
+  let tax = q.taxFree ? 0 : Math.max(0, due - (q.yearTax ?? 0));
   q.yearTax = due;
   const relief = Math.min(tax, q.deduction);
   q.deduction -= relief;
@@ -980,6 +1072,13 @@ function fiscalYearEnd(g, p) {
     if (!g.autoStatements) log(g, `${p.name} misses the deadline for fiscal year ${p.fyePending.year}'s statements.`);
     BOOKS.statements(g, p, {});
   }
+  // The PP&E row's priciest card goes to the bottom of the deck each year, so a row of cards
+  // nobody can afford doesn't stall building.
+  if (g.ppeRow.length && g.ppeDeck.length) {
+    const i = g.ppeRow.reduce((m, r, k) => (RARITIES[r].price > RARITIES[g.ppeRow[m]].price ? k : m), 0);
+    g.ppeDeck.unshift(...g.ppeRow.splice(i, 1));
+    refill(g.ppeRow, g.ppeDeck);
+  }
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
@@ -994,14 +1093,6 @@ function fiscalYearEnd(g, p) {
     const earned = Math.round(b.cost * z.yearly);
     if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
   });
-  // Industrial makes widgets as far as the company's cash allows, then Retail sells them.
-  // Industrial makes widgets, as far as the company's cash allows; they wait at the factory.
-  for (const { t, pos } of mine.filter(({ t }) => t.zone === 'industrial')) {
-    const spend = Math.min(Math.round(t.building.cost * ZONES.industrial.produce), Math.max(0, Math.floor(companyCash(p))));
-    if (!spend) continue;
-    post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: spend, cash: -spend });
-    t.stock += spend;
-  }
   for (const { t, pos } of mine) {
     const dep = Math.min(Math.round(t.building.cost * CONFIG.depreciation), t.building.cost - t.building.dep);
     if (dep) {
@@ -1020,6 +1111,15 @@ function fiscalYearEnd(g, p) {
     charge(g, p, preTax * CONFIG.corporateTax, 'expTax', 'Corporate income tax');
   }
   p.taxWaived = false;
+  if (p.out) return;
+
+  // Industrial makes widgets with the cash left after interest and tax; they wait at the factory.
+  for (const { t, pos } of mine.filter(({ t }) => t.owner === idx && t.building && t.zone === 'industrial')) {
+    const spend = Math.min(Math.round(t.building.cost * ZONES.industrial.produce), Math.max(0, Math.floor(companyCash(p))));
+    if (!spend) continue;
+    post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: spend, cash: -spend });
+    t.stock += spend;
+  }
 
   // Miles: fraud can also be caught at FYE.
   if (fraudCheck(g, p, CONFIG.fyeFraudChance, 'Year-end testing')) return;
@@ -1050,6 +1150,7 @@ function fiscalYearEnd(g, p) {
 function personalYearEnd(g, p) {
   p.yearDraws = 0;
   p.yearTax = 0;
+  p.taxFree = false;
   const count = (id) => p.assets.filter((a) => a === id).length;
   p.deduction = count('intelligent') ? 100 : 0;
   const wealthy = count('wealthy');
@@ -1179,19 +1280,19 @@ const PLAYS = {
     const c = g.players[target];
     if (!c || c.out || !c.isPublic) return 'Pick a public company.';
     const count = Math.min(10, c.shares.public);
-    const price = Math.max(CONFIG.personalUnit, Math.round(tradePrice(c) / 2 / CONFIG.personalUnit) * CONFIG.personalUnit);
-    const n = Math.min(count, Math.floor(p.personalCash / price));
+    const price = tradePrice(c) / 2;
+    let n = count;
+    while (n && tradeTotal(price, n) > p.personalCash) n -= 1;
     if (!n) return 'You cannot afford any shares.';
     const me = String(g.players.indexOf(p));
-    p.personalCash -= n * price;
+    p.personalCash -= tradeTotal(price, n);
     c.shares.public -= n;
     c.shares.holders[me] = (c.shares.holders[me] ?? 0) + n;
     log(g, `${p.name} buys ${n} shares of ${c.name}'s company.`);
     return null;
   },
   evasion(g, p) {
-    // Tax is due on the year's total: pretend this year's tax is already settled at a huge figure.
-    p.yearTax = Number.MAX_SAFE_INTEGER / 4;
+    p.taxFree = true;
     return null;
   },
   shell(g, p) {
@@ -1283,15 +1384,15 @@ const PLAYS = {
 };
 
 function audit(g, p) {
-  if (p.misstatements) {
-    const n = p.misstatements;
+  const n = p.misstatements;
+  if (n) {
     p.misstatements = 0;
     const fine = n * CONFIG.misstatementFine * scrutiny(p);
     charge(g, p, fine, 'expOther', 'Audit adjustments');
     log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(fine)} in fines.`);
     if (p.out) return;
   }
-  if (!fraudCheck(g, p, CONFIG.auditFraudChance, 'The Interim Review')) log(g, `Interim Review: nothing wrong found at ${p.name}'s company.`);
+  if (!fraudCheck(g, p, CONFIG.auditFraudChance, 'The Interim Review')) log(g, `Interim Review: ${n ? 'no fraud' : 'nothing wrong'} found at ${p.name}'s company.`);
 }
 
 // The chance that a check finds any of a player's frauds: every fraud committed so far might be
@@ -1304,6 +1405,7 @@ export function fraudRisk(p, chance) {
 // Miles: being caught is an immediate loss. Returns true if the player was convicted.
 function fraudCheck(g, p, chance, who) {
   if (!p.frauds || rand(g) >= fraudRisk(p, chance)) return false;
+  p.convicted = true; // a rehired manager's record follows them
   bankrupt(g, p, `${who} uncovers fraud at ${p.name}'s company. ${p.name} is convicted and out of the game.`);
   return true;
 }
@@ -1378,7 +1480,7 @@ const BOOKS = {
     for (const line of lines) {
       const [acct, amt] = Array.isArray(line) ? line : [];
       const v = round(Number(amt));
-      if (!(acct in ACCOUNTS)) return 'Pick an account for every line.';
+      if (typeof acct !== 'string' || !Object.hasOwn(ACCOUNTS, acct)) return 'Pick an account for every line.';
       if (!Number.isFinite(v) || v === 0 || Math.abs(v) > 1e9) return 'Every line needs a debit or a credit.';
       clean.push([acct, v]);
       sum += v;
@@ -1405,7 +1507,24 @@ const BOOKS = {
     const yearDocs = p.docs.filter((d) => d.year <= pending.year);
     const wrongDocs = yearDocs.filter((d) => !d.recorded || !sameEntry(d.recorded, d.lines));
     p.docs = p.docs.filter((d) => d.year > pending.year);
-    const errors = wrongFields.length + wrongDocs.length;
+    // A wrong entry is one misstatement; with typed statements, each statement with a wrong line
+    // is one more (a single slip throws off several totals, which isn't fined again).
+    const wrongStatements = g.autoStatements ? 0 : ['income', 'balance'].filter((k) => wrongFields.some((f) => (k === 'income' ? INCOME_FIELDS : BALANCE_FIELDS).includes(f))).length;
+    const errors = wrongStatements + wrongDocs.length;
+    // The reviewer's corrections go into the books, so a slip isn't carried into later years.
+    if (g.autoStatements) {
+      const fix = p.bookLedger;
+      for (const d of wrongDocs) {
+        for (const [acct, v] of d.lines) fix[acct] = round(fix[acct] + v);
+        for (const [acct, v] of d.recorded ?? []) fix[acct] = round(fix[acct] - v);
+      }
+      let closed = 0;
+      for (const a of TEMPORARY) {
+        closed += fix[a];
+        fix[a] = 0;
+      }
+      fix.retained = round(fix.retained + closed);
+    }
     p.misstatements += errors;
     p.filed = filed;
     p.fyePending = null;
@@ -1432,6 +1551,8 @@ function log(g, text) {
 
 // Everything is public except other players' hands, unaudited frauds, journals and the decks.
 export function viewFor(g, who) {
+  // With manual books, a rival's company shows only what it filed; market prices stay public.
+  const open = (i) => g.easyBooks || i === who;
   return {
     turn: g.turn,
     phase: g.phase,
@@ -1440,7 +1561,7 @@ export function viewFor(g, who) {
     second: g.second ?? null,
     endReason: g.endReason,
     win: g.win,
-    companyValues: g.players.map((p) => companyValue(p)),
+    companyValues: g.players.map((p, i) => (open(i) ? companyValue(p) : null)),
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
     log: g.log,
@@ -1456,7 +1577,7 @@ export function viewFor(g, who) {
       out: p.out,
       skip: p.skip,
       years: p.years,
-      cash: companyCash(p),
+      cash: open(i) ? companyCash(p) : p.filed?.balance.cash ?? null,
       personalCash: p.personalCash,
       assets: p.assets,
       portfolio: portfolio(p),
@@ -1464,12 +1585,12 @@ export function viewFor(g, who) {
       shares: p.shares,
       isPublic: p.isPublic,
       parent: p.parent,
-      sharePrice: sharePrice(p),
-      tradePrice: tradePrice(p),
+      sharePrice: open(i) || p.isPublic ? sharePrice(p) : null,
+      tradePrice: open(i) || p.isPublic ? tradePrice(p) : null,
       acquisitionPrice: acquisitionPrice(p),
       handCount: p.hand.length,
       // With manual books everyone sees only the statements a player filed; the truth stays hidden.
-      ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: -p.ledger.loan }),
+      ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: open(i) ? -p.ledger.loan : p.filed?.balance.loan ?? null }),
       fyeDue: p.fyePending?.year ?? null,
       atBank: Boolean(p.atBank),
       atTerminal: Boolean(p.atTerminal),
@@ -1477,7 +1598,7 @@ export function viewFor(g, who) {
       flew: Boolean(p.flew),
       islandLaps: p.islandLaps ?? 0,
       sale: p.sale ?? null,
-      inventory: p.ledger.inventory,
+      inventory: open(i) ? p.ledger.inventory : null,
       carried: p.carried,
       retail: retailTerms(g, i),
       ...(i === who && !g.easyBooks ? {

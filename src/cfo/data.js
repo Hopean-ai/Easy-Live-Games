@@ -15,17 +15,17 @@ export const CONFIG = {
   liquidation: 0.5, // PLACEHOLDER: the bank buys assets back at half their cost
   personalAssetPrice: 1000, // PLACEHOLDER: personal cash paid per Personal Assets draw
   portfolioGoal: 100000, // spreadsheet: $100k personal asset portfolio (~93 draws)
-  valueTarget: 50000, // PLACEHOLDER: company value that wins the "company value" game
-  maxYears: 0, // optional room setting: end once every company has closed this many years (0 = no limit)
+  valueTarget: 15000, // PLACEHOLDER: company value that wins the "company value" game (bot playtests: the best company reaches it in about 10 years)
+  maxYears: 12, // room setting: end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
   // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
   // adds to the chance. Each check, every fraud so far has this chance of being found (PLACEHOLDER).
   auditFraudChance: 0.2, // at an Interim Review (or island Customs)
   fyeFraudChance: 0.05, // at each fiscal year end
   misstatementFine: 100, // PLACEHOLDER: per wrong or missing entry or statement line found at an Interim Review
   cleanBooksBonus: 200, // PLACEHOLDER: for filing a fiscal year with no misstatements
-  ipoYears: 2, // PLACEHOLDER: fiscal years a company needs before it can go public
-  ipoShares: 40, // PLACEHOLDER: new shares sold at an IPO (every company starts with 100)
-  publicPremium: 1.5, // PLACEHOLDER: the market values a public company at this x its book equity
+  ipoYears: 3, // PLACEHOLDER: fiscal years a company needs before it can go public
+  ipoShares: 25, // PLACEHOLDER: new shares sold at an IPO (every company starts with 100)
+  publicPremium: 1.2, // PLACEHOLDER: the market values a public company at this x its book equity (1.5 made going public the best move in every playtest)
   publicScrutiny: 2, // PLACEHOLDER: public companies are twice as likely to be caught, and fined twice as much
   acquirePremium: 1.5, // PLACEHOLDER: buying a rival outright costs this x its market value...
   acquireMin: 10000, // ...and never less than this, so an early or nearly broke company isn't a cheap kill
