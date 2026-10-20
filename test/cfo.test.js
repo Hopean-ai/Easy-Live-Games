@@ -295,7 +295,7 @@ test('fraud: more of it means likelier to be caught, and being caught is an imme
   const one = fraudRisk(p, CONFIG.auditFraudChance);
   assert.ok(Math.abs(one - CONFIG.auditFraudChance) < 1e-9);
   p.frauds = 3;
-  assert.ok(fraudRisk(p, CONFIG.auditFraudChance) > one, 'more fraud, more risk');
+  assert.ok(Math.abs(fraudRisk(p, CONFIG.auditFraudChance) - 9 * one) < 1e-9, 'risk grows with the square of the frauds');
   p.isPublic = true;
   assert.ok(fraudRisk(p, CONFIG.auditFraudChance) > fraudRisk({ ...p, isPublic: false }, CONFIG.auditFraudChance), 'public companies are watched harder');
   p.isPublic = false;
@@ -352,12 +352,12 @@ test('frauds can also be found when passing FYE', () => {
   for (let seed = 1; seed <= 200; seed++) {
     const g = createGame(['A', 'B', 'C'], seed, { easyBooks: true });
     const p = g.players[0];
-    p.frauds = 4;
+    p.frauds = 8;
     p.pos = BOARD_SIZE - 2;
     act(g, 0, { a: 'roll' });
     if (p.out) caught += 1;
   }
-  const expected = 200 * (1 - (1 - CONFIG.fyeFraudChance) ** 4);
+  const expected = 200 * CONFIG.fyeFraudChance * 8 ** 2;
   assert.ok(caught > expected / 3 && caught < expected * 2, `about ${Math.round(expected)} of 200 caught, got ${caught}`);
 });
 
