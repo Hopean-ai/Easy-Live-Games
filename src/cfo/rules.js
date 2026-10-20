@@ -78,7 +78,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   g.zoningDeck = shuffle(g, Object.entries(ZONES).flatMap(([id, z]) => Array(z.count).fill(id)));
   g.ppeDeck = shuffle(g, Object.entries(RARITIES).flatMap(([id, r]) => Array(r.count).fill(id)));
   refill(g.zoningRow, g.zoningDeck);
-  refill(g.ppeRow, g.ppeDeck);
+  refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
 
   // Player i is seat i; the room decides the seating order.
   for (const name of names) {
@@ -127,8 +127,8 @@ function shuffle(g, arr) {
   return arr;
 }
 
-function refill(row, deck) {
-  while (row.length < CONFIG.rowSize && deck.length) row.push(deck.pop());
+function refill(row, deck, size = CONFIG.rowSize) {
+  while (row.length < size && deck.length) row.push(deck.pop());
 }
 
 function drawFrom(g, deckKey, discardKey) {
@@ -421,7 +421,7 @@ const ACTIONS = {
     if (companyCash(p) < price) return 'Your company cannot afford it.';
     if (fromRow) {
       g.ppeRow.splice(card, 1);
-      refill(g.ppeRow, g.ppeDeck);
+      refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
     } else {
       g.ppeDeck.splice(g.ppeDeck.length - 1 - (card - g.ppeRow.length), 1);
     }
@@ -1072,12 +1072,12 @@ function fiscalYearEnd(g, p) {
     if (!g.autoStatements) log(g, `${p.name} misses the deadline for fiscal year ${p.fyePending.year}'s statements.`);
     BOOKS.statements(g, p, {});
   }
-  // The PP&E row's priciest card goes to the bottom of the deck each year, so a row of cards
-  // nobody can afford doesn't stall building.
-  if (g.ppeRow.length && g.ppeDeck.length) {
+  // If the PP&E row is nearly all big cards, its priciest goes to the bottom of the deck, so a row
+  // of cards nobody can afford yet doesn't stall building.
+  if (g.ppeDeck.length && g.ppeRow.filter((r) => RARITIES[r].price < RARITIES.epic.price).length < 2) {
     const i = g.ppeRow.reduce((m, r, k) => (RARITIES[r].price > RARITIES[g.ppeRow[m]].price ? k : m), 0);
     g.ppeDeck.unshift(...g.ppeRow.splice(i, 1));
-    refill(g.ppeRow, g.ppeDeck);
+    refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
   }
   post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
@@ -1320,7 +1320,7 @@ const PLAYS = {
     const price = Math.round(RARITIES[rarity].price / 2);
     if (companyCash(p) < price) return 'Your company cannot afford it.';
     g.ppeRow.splice(row, 1);
-    refill(g.ppeRow, g.ppeDeck);
+    refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
     putBuilding(g, p, pos, rarity, price);
     return null;
   },

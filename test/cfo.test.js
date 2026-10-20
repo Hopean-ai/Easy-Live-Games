@@ -19,7 +19,7 @@ test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transp
   const lots = SQUARES.filter((s) => s.kind === 'land' && !s.landmark).length;
   assert.equal(lots, 63);
   assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), lots);
-  assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), 47);
+  assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), lots, 'one PP&E card per lot too');
 });
 
 // Plays a whole game with a simple greedy strategy, checking the books balance after every step.
@@ -170,7 +170,7 @@ test('a fiscal year end makes widgets, depreciates, taxes and closes the books',
   act(g, 0, { a: 'roll' });
   assert.equal(p.years, 1);
   const r = p.report.income;
-  assert.equal(p.ledger.inventory, 300); // Industrial spends 30% of its cost making widgets
+  assert.equal(p.ledger.inventory, 1000 * ZONES.industrial.produce); // Industrial spends part of its cost making widgets
   assert.equal(r.revenue.revOps, CONFIG.baseRevenue);
   assert.equal(r.expenses.expDep, 100);
   assert.equal(r.tax, Math.round(r.preTax * CONFIG.corporateTax));
@@ -273,7 +273,7 @@ test('loans add a liability and charge interest at year end', () => {
   g.phase = 'act';
   assert.match(act(g, 0, { a: 'borrow', amount: 500 }), /Bank/);
   p.atBank = true;
-  assert.match(act(g, 0, { a: 'borrow', amount: 5000 }), /at most/);
+  assert.match(act(g, 0, { a: 'borrow', amount: CONFIG.loanLimit + 100 }), /at most/);
   assert.equal(act(g, 0, { a: 'borrow', amount: 2000 }), null);
   assert.equal(balanceSheet(p).liabilities.loan, 2000);
   assert.equal(act(g, 0, { a: 'repay', amount: 500 }), null);

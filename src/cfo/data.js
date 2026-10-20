@@ -7,15 +7,15 @@ export const CONFIG = {
   maxPlayers: 6, // Miles: 2-6
   startCompanyCash: 3000, // PLACEHOLDER: contributed capital
   startPersonalCash: 500, // PLACEHOLDER
-  baseRevenue: 500, // PLACEHOLDER: every company's core business earns this at each fiscal year end
+  baseRevenue: 1000, // PLACEHOLDER: every company's core business earns this at each fiscal year end
   corporateTax: 0.2, // PLACEHOLDER
   personalTax: 0.2, // PLACEHOLDER: on money paid from your company to yourself
   depreciation: 0.1, // PLACEHOLDER: straight line, 10 years
   landRent: 0.1, // PLACEHOLDER: share of the land price, doubled for a full colour set
   liquidation: 0.5, // PLACEHOLDER: the bank buys assets back at half their cost
   personalAssetPrice: 1000, // PLACEHOLDER: personal cash paid per Personal Assets draw
-  portfolioGoal: 100000, // spreadsheet: $100k personal asset portfolio (~93 draws)
-  valueTarget: 15000, // PLACEHOLDER: company value that wins the "company value" game (bot playtests: the best company reaches it in about 10 years)
+  portfolioGoal: 25000, // spreadsheet had $100k (~93 draws); lowered so a player who pays themselves can reach it in about 12 years
+  valueTarget: 30000, // PLACEHOLDER: company value that wins (bot playtests: the best company reaches it around year 10-12)
   maxYears: 12, // room setting: end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
   // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
   // adds to the chance. Each check, every fraud so far has this chance of being found (PLACEHOLDER).
@@ -32,10 +32,11 @@ export const CONFIG = {
   subsidiaryMin: 1000, // PLACEHOLDER: least a parent must put into a new subsidiary
   managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
   personalUnit: 100, // Miles: personal cash is less granular; it moves in whole $100s
-  loanLimit: 2000, // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
+  loanLimit: 5000, // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
-  rowSize: 3,
-  maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings // PLACEHOLDER: face-up zoning and PP&E cards to choose from
+  rowSize: 3, // face-up zoning cards
+  ppeRowSize: 5, // face-up PP&E cards: more choice, so a row of unaffordable cards is rare
+  maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings
   islandFare: 1500, // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
@@ -180,10 +181,10 @@ function buildSquares() {
 // The spreadsheet's 47 cards cover the main board's lots; Miles: 16 more (2 Industrial, 6 Retail,
 // 2 Banking, 6 Residential) cover the island's lots, so there is one card per lot.
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 28, rent: 0.1, produce: 0.3 },
+  industrial: { name: 'Industrial', count: 28, rent: 0.1, produce: 0.5 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
-  banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.1, interest: 0.03 },
-  residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.15 },
+  banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
+  residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.3 },
 };
 
 // Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
@@ -209,13 +210,13 @@ export const RETAIL = {
 };
 
 
-// ---- PP&E (47 cards, Assets sheet) ----
+// ---- PP&E (63 cards, one per lot; the Assets sheet had 47, priced up to $100k) ----
 export const RARITIES = {
-  common: { name: 'Common', count: 25, price: 100 },
-  uncommon: { name: 'Uncommon', count: 13, price: 200 },
-  rare: { name: 'Rare', count: 5, price: 1000 },
-  epic: { name: 'Epic', count: 3, price: 10000 },
-  legendary: { name: 'Legendary', count: 1, price: 100000 },
+  common: { name: 'Common', count: 24, price: 100 },
+  uncommon: { name: 'Uncommon', count: 18, price: 300 },
+  rare: { name: 'Rare', count: 12, price: 1000 },
+  epic: { name: 'Epic', count: 6, price: 3000 },
+  legendary: { name: 'Legendary', count: 3, price: 8000 },
   landmark: { name: 'Landmark', count: 0, price: 3000 }, // only on the island's landmark squares
 };
 
