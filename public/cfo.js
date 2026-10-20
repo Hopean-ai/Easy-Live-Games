@@ -66,10 +66,26 @@ async function init() {
   const code = params.get('room');
   if (code && /^[A-Za-z0-9]{4,12}$/.test(code)) return enterRoom(code.toUpperCase());
   $('lobby').hidden = false;
+  if (account) showMyGames();
   if (params.has('quick')) {
     history.replaceState(null, '', location.pathname);
     findMatch();
   }
+}
+
+// Games this account is still playing, from any device, each with a button to rejoin.
+async function showMyGames() {
+  let games = [];
+  try {
+    games = (await (await fetch('/api/my-games')).json()).games.filter((g) => g.game === 'cfo');
+  } catch {
+    return;
+  }
+  if (!games.length) return;
+  $('my-games-list').replaceChildren(...games.map((g) => el('li', {},
+    el('span', { class: 'pname' }, `Room ${g.code}: ${g.players}`),
+    el('button', { class: 'secondary', onclick: () => enterRoom(g.code) }, 'Rejoin'))));
+  $('my-games').hidden = false;
 }
 
 $('quick').addEventListener('click', () => findMatch());
@@ -353,14 +369,14 @@ function buildBoard() {
     node.append(el('span', { class: 'sq-name' }, title));
     if (sq.price) node.append(el('span', { class: 'sq-price' }, money(sq.price + (sq.landmark ? rules.landmarks[sq.landmark].building : 0))));
     if (CORNER_NAMES[sq.kind]) node.append(el('span', { class: 'sq-price' }, CORNER_NAMES[sq.kind][1]));
-    node.append(el('span', { class: 'sq-build' }), el('span', { class: 'tokens' }));
+    node.append(el('span', { class: 'sq-tags' }), el('span', { class: 'tokens' }));
     board.append(node);
     return node;
   });
 }
 
-// Empty zoned lots show a short zone mark; built ones show the building's rarity initial.
-const ZONE_MARKS = { industrial: 'ind', retail: 'shop', banking: 'bank', residential: 'res' };
+// Zoned lots show a zone tag, and built ones a rarity tag beside it.
+const ZONE_MARKS = { industrial: 'Ind', retail: 'Shop', banking: 'Bank', residential: 'Res' };
 
 function renderBoard() {
   const g = state.game;
@@ -369,9 +385,16 @@ function renderBoard() {
     node.style.borderColor = tile?.owner !== null && tile?.owner !== undefined ? COLORS[tile.owner] : '';
     node.classList.toggle('owned', Boolean(tile && tile.owner !== null));
     node.classList.toggle('selected', selected === pos);
-    const b = node.querySelector('.sq-build');
-    b.textContent = tile?.building ? rules.rarities[tile.building.rarity].name[0] : tile?.zone ? ZONE_MARKS[tile.zone] ?? '' : '';
-    b.title = tile?.zone ? `${rules.zones[tile.zone].name}${tile.building ? `, ${rules.rarities[tile.building.rarity].name} PP&E` : ''}` : '';
+    const tags = node.querySelector('.sq-tags');
+    const key = `${tile?.zone ?? ''}:${tile?.building?.rarity ?? ''}`;
+    if (tags.dataset.key !== key) {
+      tags.dataset.key = key;
+      const r = tile?.building && rules.rarities[tile.building.rarity];
+      tags.replaceChildren(
+        tile?.zone ? el('span', { class: `tag zone-${tile.zone}`, title: `Zoned ${rules.zones[tile.zone].name}` }, ZONE_MARKS[tile.zone] ?? '') : '',
+        r ? el('span', { class: `tag rar-${tile.building.rarity}`, title: `${r.name} PP&E` }, r.name) : '',
+      );
+    }
     const tokens = node.querySelector('.tokens');
     tokens.replaceChildren(
       ...g.players.map((p, i) => (p.pos === pos && !p.out ? el('span', { class: 'token', title: p.name, style: { background: COLORS[i] } }) : null)).filter(Boolean),

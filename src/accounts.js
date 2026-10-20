@@ -5,6 +5,7 @@ import {
 
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
+const GAME_TTL_MS = 60 * 24 * 60 * 60 * 1000;
 
 // One Durable Object (named "accounts") holds every account and session in its SQLite storage.
 // Durable Objects need no setup in the Cloudflare dashboard, unlike a D1 database. The Worker
@@ -21,6 +22,10 @@ export class Accounts extends DurableObject {
       );
       CREATE TABLE IF NOT EXISTS sessions (
         key TEXT PRIMARY KEY, user TEXT NOT NULL, expires INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS games (
+        user TEXT NOT NULL, game TEXT NOT NULL, code TEXT NOT NULL, players TEXT NOT NULL,
+        updated INTEGER NOT NULL, PRIMARY KEY (user, game, code)
       );
     `);
   }
@@ -70,6 +75,27 @@ export class Accounts extends DurableObject {
 
   async logout(token) {
     if (typeof token === 'string') this.sql.exec('DELETE FROM sessions WHERE key = ?', await tokenKey(token));
+  }
+
+  // Rooms record which accounts are playing in them, so a player can find and rejoin a game.
+  // Games untouched for GAME_TTL_MS are dropped, so abandoned ones don't pile up.
+  async setGame(name, game, code, players, playing) {
+    const key = String(name).toLowerCase();
+    if (playing) {
+      this.sql.exec(
+        'INSERT OR REPLACE INTO games (user, game, code, players, updated) VALUES (?, ?, ?, ?, ?)',
+        key, game, code, String(players).slice(0, 200), Date.now(),
+      );
+    } else {
+      this.sql.exec('DELETE FROM games WHERE user = ? AND game = ? AND code = ?', key, game, code);
+    }
+  }
+
+  async games(name) {
+    this.sql.exec('DELETE FROM games WHERE updated <= ?', Date.now() - GAME_TTL_MS);
+    return this.sql
+      .exec('SELECT game, code, players, updated FROM games WHERE user = ? ORDER BY updated DESC LIMIT 20', String(name).toLowerCase())
+      .toArray();
   }
 
   user(name) {

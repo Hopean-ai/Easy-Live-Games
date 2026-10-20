@@ -31,7 +31,19 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .stripe { position: absolute; left: 0; right: 0; top: 0; height: 8px; }
 .sq-name { font-weight: 600; overflow-wrap: anywhere; }
 .sq-price { color: var(--muted); }
-.sq-build { position: absolute; right: 3px; bottom: 2px; font-weight: 700; font-size: 0.75rem; color: var(--accent); }
+/* Zoning and PP&E rarity tags along the bottom of a lot. */
+.sq-tags { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
+.tag { border-radius: 3px; padding: 0 3px; font-size: 0.58rem; font-weight: 700; line-height: 1.4; color: #0d1117; }
+.tag.zone-industrial { background: #9aa5b1; }
+.tag.zone-retail { background: #f0b429; }
+.tag.zone-banking { background: #5ad1a5; }
+.tag.zone-residential { background: #ff9fb5; }
+.tag.rar-common { background: #d0d4da; }
+.tag.rar-uncommon { background: #6fdc8c; }
+.tag.rar-rare { background: #6ea8ff; }
+.tag.rar-epic { background: #c792ea; }
+.tag.rar-legendary { background: #ff9f43; }
+.tag.rar-landmark { background: #ffe9a8; }
 .tokens { display: flex; flex-wrap: wrap; gap: 2px; margin-top: auto; }
 .token { width: 11px; height: 11px; border-radius: 50%; border: 1px solid #000; }
 .sq.fye, .sq.bank, .sq.cpe, .sq.review { background: #1f2630; }
@@ -42,11 +54,26 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 .sq.landmark .sq-name { color: #ffe9a8; }
 .sq.transport { background: #1b2430; }
 
+/* The selected square and the log fill the main board's middle; the turn controls sit inside
+   the island ring (rows 3 to 9, columns 14 to 20), in its 5 x 5 middle. */
 .centre {
   grid-row: 2 / 11; grid-column: 2 / 13;
-  display: grid; grid-template-rows: auto auto auto 1fr; gap: 8px;
-  padding: 12px 16px; min-height: 0;
+  display: grid; grid-template-rows: auto 1fr; gap: 12px;
+  padding: 12px 16px; min-height: 0; align-content: start;
 }
+.tile-box h2 { margin: 0 0 6px; font-size: 1rem; }
+.tile-box p { margin: 4px 0; }
+.isle {
+  grid-row: 4 / 9; grid-column: 15 / 20;
+  display: grid; gap: 8px; align-content: start;
+  padding: 10px; min-width: 0;
+  background: #0f2224; border: 1px solid #1f4d50; border-radius: 8px;
+  font-size: 0.85rem;
+}
+.isle .turn-line { font-size: 1rem; flex-wrap: wrap; gap: 4px 12px; }
+.isle button { padding: 7px 10px; }
+.isle .error:empty { display: none; }
+.isle .actions p { overflow-wrap: anywhere; }
 .turn-line { display: flex; justify-content: space-between; gap: 12px; font-size: 1.1rem; }
 .dice { font-variant-numeric: tabular-nums; }
 .actions { display: grid; gap: 8px; align-content: start; max-width: 640px; }
@@ -134,21 +161,23 @@ label.field select, label.field input { padding: 8px 10px; }
   .board {
     min-width: 0;
     grid-template-columns: repeat(22, minmax(0, 1fr));
-    grid-template-rows: repeat(11, minmax(0, auto)) auto;
+    grid-template-rows: repeat(11, minmax(0, auto)) auto auto;
     gap: 1px;
   }
   .sq { aspect-ratio: 1 / 1.25; padding: 3px 0 0; border-width: 1px; border-radius: 2px; font-size: 0; }
   .sq.owned { border-width: 2px; }
   .stripe { height: 4px; }
-  .sq-name, .sq-price, .sq-build { display: none; }
+  .sq-name, .sq-price { display: none; }
+  /* Too small for words: the tags shrink to two colour bars, zone then rarity. */
+  .sq-tags { flex-wrap: nowrap; gap: 1px; margin: 1px 1px 0; }
+  .tag { flex: 1; height: 3px; padding: 0; font-size: 0; border-radius: 0; }
   .tokens { margin: auto 0 0; gap: 0; justify-content: center; }
   .token { width: 6px; height: 6px; border-width: 0; }
-  .centre { grid-row: 12; grid-column: 1 / -1; padding: 12px 0 0; }
+  .isle { grid-row: 12; grid-column: 1 / -1; margin-top: 10px; font-size: 1rem; }
+  .centre { grid-row: 13; grid-column: 1 / -1; padding: 12px 0 0; }
   .turn-line { font-size: 1rem; }
-  .peek { display: block; }
   .log { max-height: 160px; }
   .panels { grid-template-columns: 1fr; }
-  .tile-panel { order: -1; }
   .bar { flex-wrap: wrap; gap: 6px 12px; }
   .fye-table input { width: 100px; }
 }

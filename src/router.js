@@ -28,6 +28,12 @@ export async function handleRequest(request, env) {
     return Response.json({ name: await accountName(request, env) });
   }
 
+  // A signed-in player's games still in progress, so they can rejoin from any device.
+  if (path === '/api/my-games') {
+    const name = await accountName(request, env);
+    return Response.json({ games: name ? await accountsStub(env).games(name) : [] });
+  }
+
   if (path === '/api/register' || path === '/api/login') {
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     const body = await readJson(request);
@@ -79,7 +85,9 @@ export async function handleRequest(request, env) {
     if (account) url.searchParams.set('name', account);
     const rooms = env[game.rooms];
     const stub = rooms.get(rooms.idFromName(code.toUpperCase()));
-    return stub.fetch(forward(request, url, account ? { 'X-Player-Account': account } : {}));
+    const identity = { 'X-Room-Code': code.toUpperCase() };
+    if (account) identity['X-Player-Account'] = account;
+    return stub.fetch(forward(request, url, identity));
   }
 
   if (env.ASSETS) return env.ASSETS.fetch(request);
@@ -102,6 +110,7 @@ function forward(request, url, identity) {
   const headers = new Headers(request.headers);
   headers.delete('X-Player');
   headers.delete('X-Player-Account');
+  headers.delete('X-Room-Code');
   headers.delete('Cookie');
   for (const [k, v] of Object.entries(identity)) headers.set(k, v);
   return new Request(url, { method: request.method, headers });

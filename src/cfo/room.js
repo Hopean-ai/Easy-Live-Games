@@ -29,7 +29,9 @@ export class CfoRoom extends DurableObject {
       ? url.searchParams.get('token')
       : crypto.randomUUID();
     const name = sanitizeName(url.searchParams.get('name'));
-    const guest = !request.headers.get('X-Player-Account');
+    const account = request.headers.get('X-Player-Account')?.toLowerCase() ?? null;
+    const guest = !account;
+    this.room.code ??= request.headers.get('X-Room-Code');
     // Quick match says how many players it sent here; the game starts once they have all arrived.
     const expect = Number(url.searchParams.get('expect'));
     if (this.room.status === 'waiting' && !this.room.seats.length && expect >= CONFIG.minPlayers && expect <= CONFIG.maxPlayers) {
@@ -37,7 +39,7 @@ export class CfoRoom extends DurableObject {
     }
 
     const { 0: client, 1: server } = new WebSocketPair();
-    const seat = this.claimSeat(token, name, guest);
+    const seat = this.claimSeat(token, name, account);
     if (seat !== null) {
       for (const ws of this.socketsFor(seat)) {
         send(ws, { t: 'replaced' });
@@ -49,19 +51,26 @@ export class CfoRoom extends DurableObject {
     send(server, { t: 'welcome', seat, token, rules: RULES });
 
     if (this.room.status === 'waiting' && this.room.expect && this.room.seats.length >= this.room.expect) this.start();
+    if (seat !== null && account) this.refreshList = true; // keeps the game fresh in their list
     await this.changed();
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  claimSeat(token, name, guest) {
+  // A player gets their seat back by the same tab's token or, when signed in, by their account,
+  // so they can rejoin from another tab or device. The newest connection takes the seat over.
+  claimSeat(token, name, account) {
     const seats = this.room.seats;
-    const mine = seats.findIndex((s) => s.token === token);
+    const guest = !account;
+    let mine = seats.findIndex((s) => s.token === token);
+    if (mine < 0 && account) mine = seats.findIndex((s) => s.account === account);
     if (mine >= 0) {
-      Object.assign(seats[mine], this.room.status === 'waiting' ? { name, guest } : {});
+      seats[mine].token = token;
+      if (account && !seats[mine].account && seats[mine].name.toLowerCase() === account) seats[mine].account = account;
+      Object.assign(seats[mine], this.room.status === 'waiting' ? { name, guest, account } : {});
       return mine;
     }
     if (this.room.status !== 'waiting' || seats.length >= CONFIG.maxPlayers) return null; // spectate
-    seats.push({ token, name, guest });
+    seats.push({ token, name, guest, account });
     return seats.length - 1;
   }
 
@@ -83,7 +92,7 @@ export class CfoRoom extends DurableObject {
       this.start();
     } else if (msg?.t === 'again') {
       if (this.room.status !== 'over') return;
-      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options };
+      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options, code: this.room.code, listed: this.room.listed };
       this.reseat();
     } else if (msg?.t === 'option') {
       // The host chooses the room's options before the game starts.
@@ -184,8 +193,35 @@ export class CfoRoom extends DurableObject {
 
   async changed() {
     await this.schedule();
+    await this.listGames();
     await this.ctx.storage.put('room', this.room);
     this.broadcast();
+  }
+
+  // Keeps each signed-in player's list of games in progress up to date: a game is listed while
+  // it is being played and the player is still in it.
+  async listGames() {
+    const r = this.room;
+    if (!r.code || !this.env.ACCOUNTS) return;
+    const want = r.status === 'playing'
+      ? [...new Set(r.seats.filter((s, i) => s.account && !r.game?.players[i]?.out).map((s) => s.account))]
+      : [];
+    const prev = r.listed ?? [];
+    const add = this.refreshList ? want : want.filter((a) => !prev.includes(a));
+    const drop = prev.filter((a) => !want.includes(a));
+    if (!add.length && !drop.length) return;
+    const players = r.seats.map((s) => s.name).join(', ');
+    const accounts = this.env.ACCOUNTS.get(this.env.ACCOUNTS.idFromName('accounts'));
+    try {
+      await Promise.all([
+        ...add.map((a) => accounts.setGame(a, 'cfo', r.code, players, true)),
+        ...drop.map((a) => accounts.setGame(a, 'cfo', r.code, players, false)),
+      ]);
+      r.listed = want;
+      this.refreshList = false;
+    } catch (e) {
+      console.error('Could not update the game list', e); // the game itself carries on
+    }
   }
 
   socketsFor(seat, except) {
