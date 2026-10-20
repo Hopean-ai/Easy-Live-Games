@@ -13,7 +13,8 @@ export const CONFIG = {
   maxPlayers: 6, // Miles: 2-6
   startCompanyCash: M(3000), // PLACEHOLDER: contributed capital
   startPersonalCash: M(500), // PLACEHOLDER
-  baseRevenue: M(1000), // PLACEHOLDER: every company's core business earns this at each fiscal year end
+  salary: M(200), // PLACEHOLDER: Miles: at each fiscal year end the company pays you automatically: this base salary...
+  salaryBonus: 0.2, // ...plus this share of the year's profit before your pay (taxed as personal income)
   corporateTax: 0.2, // PLACEHOLDER
   personalTax: 0.2, // PLACEHOLDER: on money paid from your company to yourself
   depreciation: 0.1, // PLACEHOLDER: straight line, 10 years
@@ -194,17 +195,21 @@ function buildSquares() {
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
-// - Industrial: each fiscal year, spends `produce` x cost of company cash making widgets (inventory).
+// - Industrial (Miles): makes widgets whenever its owner passes it, more when they land on it.
+//   A pass makes `produce` x the square root of (PP&E cost x land price) widgets, paid for at $1
+//   each, so the building and the land count equally; landing makes `landing` times that. They
+//   go onto the token.
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
-// - Residential: tenants pay `yearly` x cost each fiscal year, on top of the high visitor rent.
+// - Residential (Miles): passive income. Tenants pay `yearly` x cost at each fiscal year end;
+//   visitors pay only the land rent.
 // - Banking: earns `interest` of the company's cash, plus `yearly` x cost in fees, each fiscal year.
 // One card per lot: the spreadsheet's 47, less 3 Industrial for the lots that became deck squares,
 // plus 16 for the island's lots (2 Industrial, 6 Retail, 2 Banking, 6 Residential).
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.5 },
+  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 4, landing: 3 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
-  residential: { name: 'Residential', count: 13, rent: 0.5, yearly: 0.3 },
+  residential: { name: 'Residential', count: 13, rent: 0, yearly: 0.5 },
 };
 
 // Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
@@ -213,13 +218,11 @@ export const WIDGET_TIERS = [
   ['Platinum', 10000], ['Gold', 1000], ['Silver', 100], ['Bronze', 10], ['Common', 1],
 ];
 
-// Miles: widgets sell throughout the rounds; Retail ownership sets the rate and price, and
-// landing on Retail gives more control that turn. All PLACEHOLDER numbers.
+// Miles: widgets sell throughout the rounds, and landing on Retail gives more control that turn.
+// A store's PP&E sets its price per widget and its land sets how many it sells. PLACEHOLDERS.
 export const RETAIL = {
-  perTurn: 0.15, // each Retail building sells this x its cost in widgets at the end of each of your turns
-  markup: 2, // sale price per widget, as a multiple of its $1 cost...
-  markupPerExtra: 0.25, // ...plus this for each Retail building beyond the first...
-  maxMarkup: 3, // ...up to this
+  perLandDollar: 3, // each store sells up to this x its land price in widgets at the end of each of your turns
+  prices: { common: 2, uncommon: 2.25, rare: 2.5, landmark: 2.5, epic: 2.75, legendary: 3 }, // per widget, by the store's PP&E
   // Choices when you land on your own Retail square, as multiples of a normal turn's volume and price.
   sales: {
     clearance: { name: 'Clearance sale', volume: 3, price: 0.75 },

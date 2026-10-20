@@ -32,13 +32,14 @@ export const ACCOUNTS = {
   revOther: 'Other revenue',
   gain: 'Gain (loss) on asset sales',
   expRent: 'Rent expense',
+  expSalary: 'Salaries',
   expDep: 'Depreciation expense',
   expFreight: 'Freight expense',
   expOther: 'Other expenses',
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
-const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
+const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
 
@@ -149,7 +150,7 @@ export function post(p, text, lines, { doc = true } = {}) {
     sum += amt;
   }
   if (Math.abs(sum) > 1e-6) throw new Error(`unbalanced entry: ${text}`);
-  for (const [acct, amt] of Object.entries(lines)) p.ledger[acct] = round(p.ledger[acct] + amt);
+  for (const [acct, amt] of Object.entries(lines)) p.ledger[acct] = round((p.ledger[acct] ?? 0) + amt);
   const entry = Object.entries(lines).map(([a, v]) => [a, round(v)]).filter(([, v]) => v !== 0);
   p.journal.push({ text, lines: entry });
   if (p.journal.length > JOURNAL_SIZE) p.journal.shift();
@@ -178,7 +179,7 @@ export function companyCash(p) {
 export function incomeStatement(p) {
   const l = p.ledger;
   const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revFreight: -l.revFreight, revDividends: -l.revDividends, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
-  const expenses = { cogs: l.cogs, expFreight: l.expFreight, expRent: l.expRent, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
+  const expenses = { cogs: l.cogs, expFreight: l.expFreight, expRent: l.expRent, expSalary: l.expSalary ?? 0, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
   const preTax = totalRevenue - totalExpenses;
@@ -282,7 +283,13 @@ function cleanAction(action) {
 }
 
 // Applies one player action. Returns null on success or a short error for that player.
+// Games saved before an account existed get it at zero, so their books keep adding up.
+function upgrade(g) {
+  for (const p of g.players) for (const a of Object.keys(ACCOUNTS)) p.ledger[a] ??= 0;
+}
+
 export function act(g, who, raw) {
+  upgrade(g);
   if (g.phase === 'over') return 'The game is over.';
   const p = g.players[who];
   if (!p || p.out) return 'You are not in this game.';
@@ -358,7 +365,7 @@ const ACTIONS = {
         }
         fiscalYearEnd(g, p);
       }
-      if (!p.out) visit(g, p, p.pos);
+      if (!p.out) visit(g, p, p.pos, i === d[0] + d[1] - 1);
     }
     g.phase = 'act';
     if (!p.out && g.phase !== 'over') land(g, p);
@@ -619,8 +626,7 @@ const ACTIONS = {
     const { pos } = p.sale;
     const tile = g.tiles[pos];
     const owner = tile.owner;
-    const units = storeCapacity(tile);
-    const { price } = retailTerms(g, owner);
+    const { units, price } = storeTerms(pos, tile);
     if (owner === g.turn) {
       const s = RETAIL.sales[option];
       if (!s) return 'Pick a kind of sale.';
@@ -651,10 +657,10 @@ const ACTIONS = {
       });
     }
     // Every store sells from its own shelves.
-    const { price } = retailTerms(g, g.turn);
     g.tiles.forEach((t, pos) => {
       if (t?.owner === g.turn && t.zone === 'retail' && t.building && t.stock) {
-        sellWidgets(g, p, t, storeCapacity(t), price, `Widget sales at ${SQUARES[pos].name}`);
+        const { units, price } = storeTerms(pos, t);
+        sellWidgets(g, p, t, units, price, `Widget sales at ${SQUARES[pos].name}`);
       }
     });
     nextTurn(g);
@@ -691,16 +697,32 @@ function buyLandmark(g, p, sq, tile) {
   return null;
 }
 
-// How many widgets a company's stores sell in a normal turn, and at what price each.
-export function retailTerms(g, idx) {
-  const stores = g.tiles.filter((t) => t?.owner === idx && t.zone === 'retail' && t.building);
-  const units = stores.reduce((n, t) => n + storeCapacity(t), 0);
-  const price = Math.min(RETAIL.maxMarkup, RETAIL.markup + RETAIL.markupPerExtra * Math.max(0, stores.length - 1));
-  return { units, price, stores: stores.length };
+// Miles: a factory makes widgets as its owner passes it, more when they land on it, sized by both
+// the building's cost and the land's price so pricier land is better. Each widget costs $1 to
+// make, from company cash; a company short of cash makes what it can afford. They go on the token.
+export function production(pos, cost, landing) {
+  const z = ZONES.industrial;
+  return Math.round(z.produce * Math.sqrt(cost * SQUARES[pos].price)) * (landing ? z.landing : 1);
 }
 
-function storeCapacity(t) {
-  return Math.round(t.building.cost * RETAIL.perTurn);
+function produce(g, p, pos, landing) {
+  const n = Math.min(production(pos, g.tiles[pos].building.cost, landing), Math.max(0, Math.floor(companyCash(p))));
+  if (n <= 0) return;
+  post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: n, cash: -n });
+  p.carried += n;
+  log(g, `${p.name}'s ${SQUARES[pos].name} makes ${n.toLocaleString('en-US')} widgets.`);
+}
+
+// Miles: a store's PP&E sets its price per widget, and its land sets how many it sells a turn.
+export function storeTerms(pos, t) {
+  return { units: Math.round(SQUARES[pos].price * RETAIL.perLandDollar), price: RETAIL.prices[t.building.rarity] ?? RETAIL.prices.common };
+}
+
+// A company's stores: how many widgets they sell in a normal turn, and their prices.
+export function retailTerms(g, idx) {
+  const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.zone === 'retail' && t.building).map(({ t, pos }) => storeTerms(pos, t));
+  const prices = stores.map((s) => s.price);
+  return { units: stores.reduce((n, s) => n + s.units, 0), minPrice: Math.min(...prices, Infinity), maxPrice: Math.max(...prices, 0), stores: stores.length };
 }
 
 // Sells up to `units` widgets (each cost $1 to make) from `from` (a store tile's shelves, or the
@@ -733,10 +755,11 @@ export function sideOf(pos) {
 const isMine = (g, t, kind) => t?.owner === g.turn && t.zone === kind && t.building;
 
 // What happens to a player's widgets as their token passes (or lands on) a square.
-function visit(g, p, pos) {
+function visit(g, p, pos, landing) {
   const t = g.tiles[pos];
-  if (isMine(g, t, 'industrial') && t.stock) {
-    p.carried += t.stock;
+  if (isMine(g, t, 'industrial')) {
+    produce(g, p, pos, landing);
+    p.carried += t.stock ?? 0; // widgets left at the factory by older rules
     t.stock = 0;
   } else if (isMine(g, t, 'retail') && p.carried) {
     t.stock += p.carried;
@@ -1131,7 +1154,6 @@ function fiscalYearEnd(g, p) {
     g.ppeDeck.unshift(...g.ppeRow.splice(i, 1));
     refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
   }
-  post(p, 'Core business revenue', { cash: CONFIG.baseRevenue, revOps: -CONFIG.baseRevenue });
   const idx = g.players.indexOf(p);
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
   const each = (zone, fn) => mine.filter(({ t }) => t.zone === zone).forEach(({ t, pos }) => fn(t.building, SQUARES[pos].name, ZONES[zone]));
@@ -1158,6 +1180,16 @@ function fiscalYearEnd(g, p) {
   if (p.out) return;
   if (p.outsourced) charge(g, p, CONFIG.bookkeeperFee, 'expOther', 'Bookkeeping fees');
   if (p.out) return;
+  // Miles: the year end is payday. The company pays you automatically: a base salary plus a bonus
+  // on the year's profit before your pay, as much as its cash allows. It is a company expense,
+  // and personal income taxed like any other.
+  const due = CONFIG.salary + Math.max(0, incomeStatement(p).preTax) * CONFIG.salaryBonus;
+  const salary = Math.round(Math.min(due, Math.max(0, companyCash(p))));
+  if (salary) {
+    post(p, 'Salary paid to you', { expSalary: salary, cash: -salary });
+    const tax = personalIncome(p, salary);
+    log(g, `${p.name} is paid a ${money(salary)} salary (${money(tax)} personal tax).`);
+  }
 
   const preTax = incomeStatement(p).preTax;
   if (preTax > 0 && p.taxWaived) {
@@ -1167,14 +1199,6 @@ function fiscalYearEnd(g, p) {
   }
   p.taxWaived = false;
   if (p.out) return;
-
-  // Industrial makes widgets with the cash left after interest and tax; they wait at the factory.
-  for (const { t, pos } of mine.filter(({ t }) => t.owner === idx && t.building && t.zone === 'industrial')) {
-    const spend = Math.min(Math.round(t.building.cost * ZONES.industrial.produce), Math.max(0, Math.floor(companyCash(p))));
-    if (!spend) continue;
-    post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: spend, cash: -spend });
-    t.stock += spend;
-  }
 
   // Miles: fraud can also be caught at FYE.
   if (fraudCheck(g, p, CONFIG.fyeFraudChance, 'Year-end testing')) return;
@@ -1304,7 +1328,7 @@ const MARKET_NOW = {
   shortage(g) {
     g.tiles.forEach((t, pos) => {
       if (t?.zone === 'retail' && t.building && t.stock && !g.players[t.owner].out) {
-        sellWidgets(g, g.players[t.owner], t, storeCapacity(t), 3, `Shortage sales at ${SQUARES[pos].name}`);
+        sellWidgets(g, g.players[t.owner], t, storeTerms(pos, t).units, 3, `Shortage sales at ${SQUARES[pos].name}`);
       }
     });
   },
@@ -1336,7 +1360,7 @@ const MARKET_NOW = {
 
 const PLAYS = {
   stuffing(g, p) {
-    const { price, stores } = retailTerms(g, g.turn);
+    const { maxPrice: price, stores } = retailTerms(g, g.turn);
     if (!stores) return 'You need a store to book sales through.';
     if (p.ledger.inventory < 1) return 'You have no widgets.';
     let left = M(500); // widgets
@@ -1518,7 +1542,7 @@ function fraudCheck(g, p, chance, who) {
 // ---- Players' own books ----
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
-export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
 export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
 const TOLERANCE = 1;
@@ -1739,6 +1763,7 @@ function log(g, text) {
 
 // Everything is public except other players' hands, unaudited frauds, journals and the decks.
 export function viewFor(g, who) {
+  upgrade(g);
   // With manual books, a rival's company shows only what it filed; market prices stay public.
   const open = (i) => g.easyBooks || i === who;
   return {
