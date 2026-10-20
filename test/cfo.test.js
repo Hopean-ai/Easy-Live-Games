@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL } from '../src/cfo/data.js';
+import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -165,18 +165,23 @@ test('buying land takes a zoning card and posts a journal entry', () => {
   assert.equal(p.ledger.land, sq.price); // transport routes are carried with land
 });
 
-test('a fiscal year end makes widgets, depreciates, taxes and closes the books', () => {
+test('a fiscal year end pays your salary, depreciates, taxes and closes the books', () => {
   const g = createGame(['A', 'B'], 3);
   const p = g.players[0];
-  Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'industrial', building: { rarity: 'rare', cost: 1000, dep: 0 } });
+  Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'residential', building: { rarity: 'rare', cost: 1000, dep: 0 } });
   p.pos = BOARD_SIZE - 2; // any roll passes FYE
+  const personal = p.personalCash;
   act(g, 0, { a: 'roll' });
   assert.equal(p.years, 1);
   const r = p.report.income;
-  assert.equal(p.ledger.inventory, 1000 * ZONES.industrial.produce); // Industrial spends part of its cost making widgets
-  assert.equal(r.revenue.revOps, CONFIG.baseRevenue);
+  assert.equal(r.revenue.revRent, 1000 * ZONES.residential.yearly, 'Residential pays its tenants\' rent at the year end');
+  // Salary: the base plus a share of the profit before it, paid automatically and taxed.
+  const profitBefore = r.preTax + r.expenses.expSalary;
+  assert.equal(r.expenses.expSalary, CONFIG.salary + Math.round(profitBefore * CONFIG.salaryBonus));
+  assert.equal(p.personalCash - personal, r.expenses.expSalary - p.yearTax);
+  assert.ok(Math.abs(p.yearTax - r.expenses.expSalary * CONFIG.personalTax) <= CONFIG.personalUnit);
   assert.equal(r.expenses.expDep, 100);
-  assert.equal(r.tax, Math.round(r.preTax * CONFIG.corporateTax));
+  assert.equal(r.tax, Math.max(0, Math.round(r.preTax * CONFIG.corporateTax)));
   assert.equal(incomeStatement(p).netIncome, 0, 'income accounts start the new year at zero');
   assert.equal(-p.ledger.retained, r.netIncome);
 });
@@ -191,83 +196,107 @@ function give(p, n) {
 const store = (g, owner, n, rarity, cost, stock = 0) =>
   Object.assign(g.tiles[posOfSpace(n)], { owner, zone: 'retail', building: { rarity, cost, dep: 0 }, stock });
 
-test('stores sell from their own shelves every turn; more stores raise the price', () => {
+test('stores sell from their own shelves every turn: the land sets how many, the PP&E the price', () => {
   const g = createGame(['A', 'B'], 3);
   const p = g.players[0];
-  give(p, 1000);
+  const big = M(100000);
+  give(p, big);
   p.carried = 0;
-  store(g, 0, 1, 'rare', 1000, 900);
-  assert.deepEqual(retailTerms(g, 0), { units: 150, price: 2, stores: 1 });
+  const [l1, l2] = [posOfSpace(1), posOfSpace(2)];
+  const n1 = SQUARES[l1].price * RETAIL.perLandDollar;
+  const n2 = SQUARES[l2].price * RETAIL.perLandDollar;
+  store(g, 0, 1, 'rare', 1000, big - 100);
   store(g, 0, 2, 'uncommon', 200, 100);
-  assert.deepEqual(retailTerms(g, 0), { units: 180, price: 2.25, stores: 2 });
+  assert.deepEqual(retailTerms(g, 0), { units: n1 + n2, minPrice: RETAIL.prices.uncommon, maxPrice: RETAIL.prices.rare, stores: 2 });
   g.phase = 'act';
   act(g, 0, { a: 'end' });
-  assert.equal(p.ledger.inventory, 820);
-  assert.equal(g.tiles[posOfSpace(1)].stock, 750);
-  assert.equal(g.tiles[posOfSpace(2)].stock, 70);
-  assert.equal(incomeStatement(p).revenue.revSales, 406); // $337.50 + $67.50, each rounded
-  assert.equal(incomeStatement(p).expenses.cogs, 180);
+  assert.equal(g.tiles[l1].stock, big - 100 - n1, 'a store sells as many as its land allows');
+  assert.equal(g.tiles[l2].stock, 0, 'and no more than it has');
+  assert.equal(incomeStatement(p).revenue.revSales, Math.round(n1 * RETAIL.prices.rare) + Math.round(100 * RETAIL.prices.uncommon));
+  assert.equal(incomeStatement(p).expenses.cogs, n1 + 100);
 });
 
 test('landing on a store: your own runs a special sale, someone else\'s sells through theirs', () => {
   const g = createGame(['A', 'B'], 3);
   const [a, b] = g.players;
-  give(a, 1000);
-  a.carried = 0;
-  give(b, 1000);
   const pos = posOfSpace(1);
-  store(g, 0, 1, 'rare', 1000, 1000);
+  const n = SQUARES[pos].price * RETAIL.perLandDollar; // a normal turn's sales at this store
+  const price = RETAIL.prices.rare;
+  give(a, 10 * n);
+  a.carried = 0;
+  give(b, 10 * n);
+  store(g, 0, 1, 'rare', 1000, 10 * n);
   g.phase = 'act';
   assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), 'There is no sale to make here.');
   a.sale = { pos };
   assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), null);
-  assert.equal(g.tiles[pos].stock, 550); // 3 x 150 widgets at 75% of $2
-  assert.equal(incomeStatement(a).revenue.revSales, 675);
+  assert.equal(g.tiles[pos].stock, 7 * n); // 3 turns' worth at 75% of the price
+  assert.equal(incomeStatement(a).revenue.revSales, Math.round(3 * n * price * 0.75));
   assert.equal(a.sale, null, 'one sale per landing');
 
   g.turn = 1;
   b.sale = { pos };
   const before = a.ledger.cash;
   assert.equal(act(g, 1, { a: 'sell' }), null);
-  assert.equal(b.carried, 850);
-  assert.equal(incomeStatement(b).revenue.revSales, 300);
-  assert.equal(a.ledger.cash, before + 75, 'the store owner keeps a 25% commission');
+  assert.equal(b.carried, 9 * n);
+  assert.equal(incomeStatement(b).revenue.revSales, Math.round(n * price));
+  assert.equal(a.ledger.cash, before + Math.round(n * price * RETAIL.commission), 'the store owner keeps a commission');
   for (const p of g.players) {
     const s = balanceSheet(p);
     assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
   }
 });
 
-test('tokens carry widgets from factories to stores, and transport tiles ship along a side', () => {
+test('factories make widgets as you pass and more as you land; transport ships them to stores', () => {
   const g = createGame(['A', 'B'], 3);
   const [a, b] = g.players;
-  const factory = posOfSpace(2);
-  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
-  give(a, 300);
-  a.carried = 0;
-  g.tiles[factory].stock = 300;
+  const factory = posOfSpace(12);
+  const cost = M(100);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost, dep: 0 }, stock: 0 });
+  const pass = Math.round(ZONES.industrial.produce * Math.sqrt(cost * SQUARES[factory].price));
+  assert.equal(production(factory, cost, false), pass, 'the building and the land count equally');
+  assert.equal(production(factory, cost, true), pass * ZONES.industrial.landing);
   const shop = posOfSpace(30); // bottom side, like the airport at space 34
   store(g, 0, 30, 'common', 100);
   const airport = posOfSpace(34);
   g.tiles[airport].owner = 1;
 
-  // Walking past the factory picks its widgets up.
+  // Walking past the factory makes widgets, paid for from company cash, onto the token.
+  const cash = a.ledger.cash;
+  Object.assign(g, { turn: 0, phase: 'roll' });
   a.pos = factory - 1;
-  g.phase = 'roll';
+  g.seed = 7;
   act(g, 0, { a: 'roll' });
-  assert.equal(g.tiles[factory].stock, 0);
-  assert.equal(a.carried, 300);
+  assert.notEqual(a.pos, factory);
+  assert.equal(a.carried, pass);
+  assert.equal(a.ledger.inventory, pass);
+  assert.equal(a.ledger.cash, cash - pass);
+
+  // Landing on it makes more.
+  a.carried = 0;
+  a.ledger.inventory = 0;
+  a.ledger.cash = cash;
+  for (let s = 1; ; s++) {
+    Object.assign(g, { turn: 0, phase: 'roll', seed: s });
+    a.pos = factory - 7;
+    const before = a.carried;
+    act(g, 0, { a: 'roll' });
+    if (a.pos === factory) {
+      assert.equal(a.carried - before, pass * ZONES.industrial.landing);
+      break;
+    }
+  }
   assert.equal(sideOf(airport), 'bottom');
 
   // Passing B's airport on the bottom side ships them to A's store there, for a freight fee.
+  const load = a.carried;
   Object.assign(g, { turn: 0, phase: 'roll' });
   a.pos = airport - 1;
   const bCash = b.ledger.cash;
   act(g, 0, { a: 'roll' });
   assert.equal(a.carried, 0);
-  assert.equal(g.tiles[shop].stock, 300);
-  assert.equal(b.ledger.cash, bCash + 30);
-  assert.equal(incomeStatement(a).expenses.expFreight, 30);
+  assert.equal(g.tiles[shop].stock, load);
+  assert.equal(b.ledger.cash, bCash + Math.round(load * RETAIL.freight));
 });
 
 test('loans add a liability and charge interest at year end', () => {
@@ -560,7 +589,7 @@ test('the portfolio win needs a lap of the island', () => {
 test('shipments reach stores on any side with your own transport, and keep moving while you are away', () => {
   const g = createGame(['A', 'B'], 10);
   const a = g.players[0];
-  const factory = posOfSpace(2); // top
+  const factory = posOfSpace(12); // top
   Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
   give(a, 200);
   a.carried = 0;
@@ -604,12 +633,12 @@ test('auto statements are built from the entries players record', () => {
     if (mistake) {
       // Book the starting capital as revenue instead.
       const first = p.docs[0];
-      act(g, 0, { a: 'record', doc: first.id, lines: [['cash', 3000], ['revOps', -3000]] });
+      act(g, 0, { a: 'record', doc: first.id, lines: [['cash', 3000], ['revOther', -3000]] });
     }
-    assert.equal(act(g, 0, { a: 'statements', income: { revOps: 999999 } }), null, 'typed numbers are ignored');
+    assert.equal(act(g, 0, { a: 'statements', income: { revOther: 999999 } }), null, 'typed numbers are ignored');
     if (mistake) {
       assert.ok(p.lastCheck.wrongFields.includes('capital'));
-      assert.ok(p.lastCheck.wrongFields.includes('revOps'));
+      assert.ok(p.lastCheck.wrongFields.includes('revOther'));
       assert.equal(p.lastCheck.corrections.length, 1);
       assert.equal(p.lastCheck.errors, 1, 'one wrong entry is one misstatement');
     } else {
@@ -860,12 +889,15 @@ test('plain personal assets have small effects', () => {
   assert.equal(Boolean(p.skip), false);
   // Country Mansion: income each fiscal year.
   p.assets = ['mansion', 'mansion'];
+  const kept = p.ledger.cash;
+  post(p, 'Test: empty the company so no salary is paid', { cash: -kept, capital: kept });
   const before = p.personalCash;
   Object.assign(g, { turn: 0, phase: 'roll' });
   p.pos = BOARD_SIZE - 2;
   p.raced = true;
   act(g, 0, { a: 'roll' });
   assert.equal(p.personalCash - before, M(200));
+  post(p, 'Test: refill the company', { cash: kept, capital: -kept });
   // Horses: one win at the races per fiscal year, on doubles.
   p.assets = ['horses'];
   p.raced = false;
