@@ -236,7 +236,7 @@ export const RARITIES = {
 export const FRAUD_CARDS = {
   bribe: { name: 'Bribe the Zoning Board', count: 5, keep: true, text: `Pay ${usd(100)} per card to replace the available zoning cards.` },
   embezzle: { name: 'Embezzle', count: 4, keep: true, placeholder: true, text: `Move up to ${usd(2000)} from your company to yourself with no personal tax, booked as an expense.` },
-  cook: { name: 'Cook the Books', count: 3, keep: true, placeholder: true, text: 'Your company pays no tax at its next fiscal year end.' },
+  cook: { name: 'Cook the Books', count: 3, keep: true, placeholder: true, text: `Book up to ${usd(2000)} of this year's expenses as PP&E instead, so profits and the company's value look higher.` },
   kickback: { name: 'Kickback', count: 3, keep: true, placeholder: true, text: `Every other company pays yours ${usd(200)}.` },
   stuffing: { name: 'Channel Stuffing', count: 3, keep: true, placeholder: true, text: `Book next year's sales now: sell up to ${M(500).toLocaleString('en-US')} of your widgets, wherever they are, at your store price.` },
   insider: { name: 'Insider Trading', count: 2, keep: true, placeholder: true, text: 'Buy up to 10 shares of a public company at half the market price.' },
