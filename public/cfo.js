@@ -573,7 +573,7 @@ function renderTile() {
       fye: 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
-      review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${Math.round(rules.config.auditFraudChance * 100)}% of the time, and the chance grows with the square of your frauds: three is ${Math.round(rules.config.auditFraudChance * 900)}%. Being caught is an immediate loss.`,
+      review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${Math.round(rules.config.auditFraudChance * 100)}% of the time, and the chance grows with the square of your frauds: three is ${Math.round(rules.config.auditFraudChance * 900)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
       terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year, and that turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
@@ -640,7 +640,7 @@ function renderHand() {
   });
   if (me.frauds) {
     const pct = (x) => `${Math.round(x * 100)}%`;
-    cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed. Chance of being caught: ${pct(me.fraudRisk.audit)} at an Interim Review or Customs, ${pct(me.fraudRisk.fye)} at each fiscal year end. Getting caught puts you out of the game.`));
+    cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed. Chance of being caught: ${pct(me.fraudRisk.audit)} at an Interim Review or Customs, ${pct(me.fraudRisk.fye)} at each fiscal year end. Getting caught puts you out of the game. One fraud ages off your record every ${rules.config.fraudExpiryYears} fiscal years.`));
   }
   $('hand').replaceChildren(...(cards.length ? cards : [el('p', { class: 'small' }, 'No cards.')]));
 
@@ -663,7 +663,7 @@ function renderHand() {
 function playControls(id, i) {
   const g = state.game;
   const play = (extra = {}) => actNow({ a: 'play', card: i, ...extra });
-  if (id === 'alienation') {
+  if (id === 'alienation' || id === 'whistle') {
     const others = g.players.map((p, j) => ({ p, j })).filter(({ p, j }) => j !== mySeat && !p.out);
     return el('div', { class: 'row' }, others.map(({ p, j }) => el('button', { class: 'secondary', onclick: () => play({ target: j }) }, `Use on ${p.name}`)));
   }
@@ -791,6 +791,11 @@ function renderBooks() {
     ? 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end your statements are built from these entries, and an Interim Review fines every wrong entry.'
     : 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end you fill in your own statements, and an Interim Review fines every wrong entry and every statement with a mistake.';
   renderCheck(me);
+  $('bookkeeper').replaceChildren(me.outsourced
+    ? el('p', { class: 'small' }, `A bookkeeper records your entries and files your statements for ${money(rules.config.bookkeeperFee)} a year. Clean-books bonuses go to people who keep their own books. `,
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: false }) }, 'Keep my own books'))
+    : el('p', { class: 'small' }, `Not an accountant? A bookkeeper records every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} a year, but you give up the clean-books bonus. `,
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: true }) }, 'Hire a bookkeeper')));
   const docs = [...me.docs].reverse();
   if (editing && !docs.some((d) => d.id === editing.id)) editing = null;
   if (editing?.saving) {
