@@ -72,7 +72,10 @@ body.cfo #waiting, body.cfo #lobby { margin-top: 10vh; }
 }
 .isle .turn-line { font-size: 1rem; flex-wrap: wrap; gap: 4px 12px; }
 .isle button { padding: 7px 10px; }
-.isle .error:empty { display: none; }
+.isle .error:empty, .isle .cash-line:empty { display: none; }
+button.build { display: grid; gap: 2px; padding: 8px 10px; }
+.build-after { font-size: 0.75rem; font-weight: 500; opacity: 0.8; }
+.cash-line { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
 .isle .actions p { overflow-wrap: anywhere; }
 /* Everything in the island box shrinks to fit it: inputs drop their default width, button
    labels wrap, and side-by-side controls stack when there's no room. */
