@@ -15,7 +15,10 @@ test('the board matches the spreadsheet: 58 spaces, 4 corners, 47 land, 8 transp
   assert.deepEqual([0, 21, 31, 52].map((p) => SQUARES[p].kind), ['fye', 'bank', 'cpe', 'review']);
   assert.equal(SQUARES[posOfSpace(5)].mode, 'rail');
   assert.equal(SQUARES[posOfSpace(54)].mode, 'air');
-  assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), 47);
+  // One zoning card per lot: the main board's 47 plus the island's, less its pre-zoned landmarks.
+  const lots = SQUARES.filter((s) => s.kind === 'land' && !s.landmark).length;
+  assert.equal(lots, 63);
+  assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), lots);
   assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), 47);
 });
 
