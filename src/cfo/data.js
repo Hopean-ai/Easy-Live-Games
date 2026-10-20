@@ -50,7 +50,9 @@ export const CONFIG = {
   managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
   bookkeeperFee: M(100), // PLACEHOLDER: yearly fee for a bookkeeper who records entries and files statements (no clean-books bonus)
   seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
-  personalUnit: M(100), // Miles: personal cash is less granular; it moves in whole units of this
+  personalUnit: 1, // Miles: personal cash is as granular as company cash (one cent); this used to be $10,000
+  salvage: 0.5, // PLACEHOLDER: Miles: destroyed PP&E (upgrading or rezoning) returns this share of its book value
+  rezoneFee: 0.25, // PLACEHOLDER: Miles: rezoning costs this share of the land's price, and the PP&E on it must be rebuilt
   loanLimit: M(5000), // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
   rowSize: 3, // face-up zoning cards

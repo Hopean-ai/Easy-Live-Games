@@ -223,8 +223,8 @@ export function sharePrice(p) {
   return round(companyValue(p) / totalShares(p));
 }
 
-// Shares change hands with personal cash, which moves in whole personal units: buyers pay the
-// market price rounded up to the next unit, sellers get it rounded down.
+// Shares change hands with personal cash: buyers pay the market price rounded up to the cent,
+// sellers get it rounded down.
 export function tradePrice(p) {
   return sharePrice(p);
 }
@@ -431,9 +431,12 @@ const ACTIONS = {
     return null;
   },
 
+  // Builds on empty zoned land, or upgrades PP&E already there (Miles): the old building is
+  // destroyed for its salvage value, which goes toward the new one.
   build(g, p, { pos, card } = {}) {
     if (g.phase !== 'act') return 'Roll first.';
-    const err = canBuild(g, pos);
+    const upgrade = Boolean(g.tiles[pos]?.building);
+    const err = upgrade ? canUpgrade(g, pos) : canBuild(g, pos);
     if (err) return err;
     // Cards past the face-up row are the private extras that Banking buildings show you.
     const extras = bankOptions(g, g.turn);
@@ -441,7 +444,10 @@ const ACTIONS = {
     const rarity = fromRow ? g.ppeRow[card] : extras[card - g.ppeRow.length];
     if (!Number.isInteger(card) || card < 0 || !rarity) return 'Pick a PP&E card.';
     const price = RARITIES[rarity].price;
-    if (companyCash(p) < price) return 'Your company cannot afford it.';
+    const old = g.tiles[pos].building;
+    if (upgrade && price <= old.cost) return `An upgrade must cost more than the ${money(old.cost)} PP&E there now.`;
+    if (companyCash(p) + (upgrade ? salvageValue(old) : 0) < price) return 'Your company cannot afford it.';
+    if (upgrade) scrapBuilding(g, p, g.tiles[pos], pos, 'upgrade');
     if (fromRow) {
       g.ppeRow.splice(card, 1);
       refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
@@ -452,13 +458,32 @@ const ACTIONS = {
     return null;
   },
 
+  // Miles: rezoning swaps the land's zoning for a face-up zoning card, for a fee. Any PP&E on it
+  // is destroyed for its salvage value and has to be rebuilt.
+  rezone(g, p, { pos, zone } = {}) {
+    if (g.phase !== 'act') return 'Roll first.';
+    const t = g.tiles[pos];
+    if (!t || t.owner !== g.turn || SQUARES[pos].kind !== 'land') return 'Rezone land you own.';
+    if (SQUARES[pos].landmark) return 'Landmarks keep their zoning.';
+    if (!Number.isInteger(zone) || !g.zoningRow[zone]) return 'Pick a zoning card.';
+    if (g.zoningRow[zone] === t.zone) return `It is already zoned ${ZONES[t.zone].name}.`;
+    const fee = rezoneFee(pos);
+    if (companyCash(p) + (t.building ? salvageValue(t.building) : 0) < fee) return 'Your company cannot afford the fee.';
+    if (t.building) scrapBuilding(g, p, t, pos, 'rezoning');
+    post(p, `Rezoning fee for ${SQUARES[pos].name}`, { expOther: fee, cash: -fee });
+    const was = t.zone;
+    returnZoning(g, t);
+    t.zone = g.zoningRow.splice(zone, 1)[0];
+    refill(g.zoningRow, g.zoningDeck);
+    log(g, `${p.name} rezones ${SQUARES[pos].name}${was ? ` from ${ZONES[was].name}` : ''} to ${ZONES[t.zone].name} for ${money(fee)}.`);
+    return null;
+  },
+
   // Pay yourself: company cash becomes personal cash, less personal tax.
   pay(g, p, { amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
     amount = Math.floor(Number(amount));
     if (!(amount > 0)) return 'Enter an amount.';
-    // Miles: personal cash is less granular than company cash.
-    if (amount % CONFIG.personalUnit) return `Pay yourself in multiples of ${money(CONFIG.personalUnit)}.`;
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     post(p, 'Owner distribution', { draws: amount, cash: -amount });
     // Every shareholder gets their share of a distribution. A parent company's share goes to its
@@ -550,7 +575,7 @@ const ACTIONS = {
     const q = g.players[target];
     if (!q || !q.out) return 'Pick a player who is out of the game.';
     amount = Math.floor(Number(amount));
-    if (!(amount >= CONFIG.subsidiaryMin) || amount % CONFIG.personalUnit) return `Fund it with at least ${money(CONFIG.subsidiaryMin)}, in ${money(CONFIG.personalUnit)}s.`;
+    if (!(amount >= CONFIG.subsidiaryMin) || amount % CONFIG.personalUnit) return `Fund it with at least ${money(CONFIG.subsidiaryMin)}.`;
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     const parent = g.players.indexOf(p);
     post(p, `Invested in ${q.name}'s new subsidiary`, { investments: amount, cash: -amount });
@@ -823,6 +848,29 @@ export function canBuild(g, pos) {
   return null;
 }
 
+export function canUpgrade(g, pos) {
+  const tile = g.tiles[pos];
+  if (!tile || tile.owner !== g.turn) return 'Upgrade PP&E you own.';
+  if (!tile.building) return 'There is no PP&E there to upgrade.';
+  if (SQUARES[pos].landmark) return 'Landmarks cannot be upgraded.';
+  return null;
+}
+
+export const salvageValue = (b) => Math.round(((b.basis ?? b.cost) - b.dep) * CONFIG.salvage);
+export const rezoneFee = (pos) => Math.round(SQUARES[pos].price * CONFIG.rezoneFee);
+
+// Destroys a building for its salvage value; anything above that on the books is a loss.
+function scrapBuilding(g, p, t, pos, why) {
+  const b = t.building;
+  const basis = b.basis ?? b.cost;
+  const salvage = salvageValue(b);
+  post(p, `Destroyed PP&E on ${SQUARES[pos].name} for ${why}: ${money(salvage)} salvage`, { cash: salvage, accDep: b.dep, ppe: -basis, gain: basis - b.dep - salvage });
+  t.building = null;
+  p.carried += t.stock ?? 0;
+  t.stock = 0;
+  log(g, `${p.name} destroys the ${RARITIES[b.rarity].name} PP&E on ${SQUARES[pos].name} for ${why}, salvaging ${money(salvage)}.`);
+}
+
 function putBuilding(g, p, pos, rarity, price) {
   post(p, `Built ${RARITIES[rarity].name} PP&E on ${SQUARES[pos].name}`, { ppe: price, cash: -price });
   // `cost` sizes what the building produces; `basis` is what was paid, which the books carry.
@@ -1043,7 +1091,7 @@ function acquireCompany(g, p, q, price) {
   if (net < 0) lines.goodwill += -net;
   else lines.gain = -net; // a bargain purchase
   post(p, `Bought ${q.name}'s company`, lines);
-  // Shareholders are paid in whole units of personal cash; the public's shares are bought back.
+  // Shareholders are paid in personal cash; the public's shares are bought back.
   for (const [h, n] of Object.entries(q.shares.holders)) {
     const part = Math.floor((price * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
     if (part && Number(h) !== me && (!g.players[h].out || Number(h) === them)) g.players[h].personalCash += part;

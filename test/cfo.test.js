@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production } from '../src/cfo/rules.js';
+import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -126,15 +126,17 @@ test('easy books record everything automatically', () => {
   assert.ok(viewFor(g, 0).players[0].income);
 });
 
-test('personal cash moves in whole units and is taxed on the year\'s total', () => {
+test('personal cash moves to the cent and is taxed on the year\'s total', () => {
   const g = createGame(['A', 'B'], 21);
   const p = g.players[0];
   g.phase = 'act';
-  const unit = CONFIG.personalUnit;
-  assert.match(act(g, 0, { a: 'pay', amount: unit * 1.5 }), /multiples of \$10,000/);
-  const start = p.personalCash;
-  for (let i = 0; i < 5; i++) assert.equal(act(g, 0, { a: 'pay', amount: unit }), null);
-  assert.equal(p.personalCash - start, 4 * unit, '20% of five units, however it is split');
+  let start = p.personalCash;
+  assert.equal(act(g, 0, { a: 'pay', amount: 12345 }), null);
+  assert.equal(p.personalCash - start, 12345 - Math.round(12345 * CONFIG.personalTax), 'any amount, less tax');
+  start = p.personalCash;
+  for (let i = 0; i < 5; i++) assert.equal(act(g, 0, { a: 'pay', amount: 101 }), null);
+  const total = 12345 + 505;
+  assert.equal(p.personalCash - start, 505 - (Math.round(total * CONFIG.personalTax) - Math.round(12345 * CONFIG.personalTax)), 'splitting a payout saves no tax');
 });
 
 test('only the player whose turn it is may act, and only in order', () => {
@@ -178,8 +180,7 @@ test('a fiscal year end pays your salary, depreciates, taxes and closes the book
   // Salary: the base plus a share of the profit before it, paid automatically and taxed.
   const profitBefore = r.preTax + r.expenses.expSalary;
   assert.equal(r.expenses.expSalary, CONFIG.salary + Math.round(profitBefore * CONFIG.salaryBonus));
-  assert.equal(p.personalCash - personal, r.expenses.expSalary - p.yearTax);
-  assert.ok(Math.abs(p.yearTax - r.expenses.expSalary * CONFIG.personalTax) <= CONFIG.personalUnit);
+  assert.equal(p.personalCash - personal, r.expenses.expSalary - Math.round(r.expenses.expSalary * CONFIG.personalTax));
   assert.equal(r.expenses.expDep, 100);
   assert.equal(r.tax, Math.max(0, Math.round(r.preTax * CONFIG.corporateTax)));
   assert.equal(incomeStatement(p).netIncome, 0, 'income accounts start the new year at zero');
@@ -379,7 +380,7 @@ test('each Banking building shows its owner one more private PP&E option', () =>
   assert.equal(g.tiles[empty].building.rarity, extra);
   assert.equal(g.ppeDeck.length, left - 1);
   assert.deepEqual(g.ppeRow, row, 'the face-up row is untouched');
-  assert.equal(act(g, 0, { a: 'build', pos: empty, card: 9 }), 'That land already has a building.');
+  assert.equal(act(g, 0, { a: 'build', pos: empty, card: 9 }), 'Pick a PP&E card.');
 });
 
 test('frauds can also be found when passing FYE', () => {
@@ -413,20 +414,25 @@ test('going public raises cash, prices the company above its books, and doubles 
 
   // B buys shares with personal cash, then gets a cut of A's distributions.
   g.turn = 1;
+  const bStart = b.personalCash;
+  const price = tradePrice(a);
   assert.equal(act(g, 1, { a: 'trade', target: 0, count: 2 }), null);
-  // Two shares at about $3,700 cost $7,500, rounded up to one $10,000 unit of personal cash.
-  assert.equal(b.personalCash, M(500 - 100));
+  // Two shares cost their market price, rounded up to the cent.
+  assert.equal(b.personalCash, bStart - Math.ceil(2 * price));
   assert.equal(a.shares.holders[1], 2);
   g.turn = 0;
   const aPersonal = a.personalCash;
+  const bPersonal = b.personalCash;
   assert.equal(act(g, 0, { a: 'pay', amount: M(1400) }), null);
-  // A holds 100 of 125 shares: $110,000 in whole units, less $20,000 tax. B's 2 shares earn $2,200, under one unit.
-  assert.equal(a.personalCash, aPersonal + M(900));
-  assert.equal(b.personalCash, M(400));
+  // A holds 100 of 125 shares and B holds 2; each share of the payout is taxed at 20%.
+  const net = (x) => x - Math.round(x * CONFIG.personalTax);
+  assert.equal(a.personalCash, aPersonal + net(M(1400) * 100 / 125));
+  assert.equal(b.personalCash, bPersonal + net(M(1400) * 2 / 125));
   g.turn = 1;
-  // After the payout, two shares are worth about $4,800, which rounds down to nothing.
-  assert.match(act(g, 1, { a: 'trade', target: 0, count: -2 }), /less than \$10,000/);
-  assert.equal(b.personalCash, M(400));
+  // Small holdings can still be sold, at the price rounded down to the cent.
+  const sell = tradePrice(a);
+  assert.equal(act(g, 1, { a: 'trade', target: 0, count: -2 }), null);
+  assert.equal(b.personalCash, bPersonal + net(M(1400) * 2 / 125) + Math.floor(2 * sell));
 });
 
 test('a knocked-out player can be hired to run a subsidiary', () => {
@@ -449,7 +455,7 @@ test('a knocked-out player can be hired to run a subsidiary', () => {
   const cPersonal = c.personalCash;
   assert.equal(act(g, 2, { a: 'pay', amount: M(400) }), null);
   assert.equal(a.ledger.revDividends, -M(300));
-  assert.equal(c.personalCash, cPersonal + M(100));
+  assert.equal(c.personalCash, cPersonal + M(100) - Math.round(M(100) * CONFIG.personalTax));
   for (const p of [a, b, c]) {
     const s = balanceSheet(p);
     assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
@@ -721,21 +727,22 @@ test('a fire sale for fees sells only the widgets it needs, and never ones alrea
   assert.ok(a.ledger.inventory >= 0);
 });
 
-test('shares trade at the market price in whole personal units, so nearly worthless shares cannot be sold for one', () => {
+test('shares trade at the market price to the cent, so even cheap shares can be sold', () => {
   const g = createGame(['A', 'B'], 53, { easyBooks: true });
   const [a, b] = g.players;
   a.years = CONFIG.ipoYears;
   g.phase = 'act';
   assert.equal(act(g, 0, { a: 'ipo' }), null);
   // Pay nearly everything out: shares are now worth a few dollars each.
-  assert.equal(act(g, 0, { a: 'pay', amount: Math.floor(a.ledger.cash / M(100)) * M(100) - M(100) }), null);
+  assert.equal(act(g, 0, { a: 'pay', amount: a.ledger.cash - M(100) }), null);
+  const price = tradePrice(a);
   const before = a.personalCash;
-  assert.match(act(g, 0, { a: 'trade', target: 0, count: -1 }), /less than \$10,000/);
-  assert.equal(a.personalCash, before);
+  assert.equal(act(g, 0, { a: 'trade', target: 0, count: -1 }), null);
+  assert.equal(a.personalCash, before + Math.floor(price));
   g.turn = 1;
   const bCash = b.personalCash;
   assert.equal(act(g, 1, { a: 'trade', target: 0, count: 1 }), null);
-  assert.equal(b.personalCash, bCash - M(100), 'a cheap share still costs one whole unit');
+  assert.equal(b.personalCash, bCash - Math.ceil(tradePrice(a)));
 });
 
 test('subsidiaries: no nested hires, failed ones are written off, and cards and zoning go back', () => {
@@ -1042,4 +1049,60 @@ test('players trade property: offers, the books on both sides, and stale offers'
   assert.equal(act(g, 2, { a: 'respond', offer: id, accept: false }), null);
   assert.equal(g.offers.length, 0);
   assert.equal(act(g, 2, { a: 'respond', offer: id, accept: true }), 'That offer is no longer open.');
+});
+
+test('upgrading PP&E puts its salvage value toward the new building', () => {
+  const g = createGame(['A', 'B'], 12, { easyBooks: true });
+  const p = g.players[0];
+  g.phase = 'act';
+  const pos = posOfSpace(12);
+  Object.assign(g.tiles[pos], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: RARITIES.common.price, basis: RARITIES.common.price, dep: M(20) }, stock: 50 });
+  const old = g.tiles[pos].building;
+  const salvage = salvageValue(old);
+  assert.equal(salvage, Math.round((old.basis - old.dep) * CONFIG.salvage));
+  const pricier = g.ppeRow.findIndex((r) => RARITIES[r].price > old.cost);
+  const cheaper = g.ppeRow.findIndex((r) => RARITIES[r].price <= old.cost);
+  if (cheaper >= 0) assert.match(act(g, 0, { a: 'build', pos, card: cheaper }), /must cost more/);
+  const rarity = g.ppeRow[pricier];
+  const price = RARITIES[rarity].price;
+  // Enough cash only with the salvage counted.
+  p.ledger.capital += p.ledger.cash - (price - salvage);
+  p.ledger.cash = price - salvage;
+  const carried = p.carried;
+  assert.equal(act(g, 0, { a: 'build', pos, card: pricier }), null);
+  assert.equal(g.tiles[pos].building.rarity, rarity);
+  assert.equal(g.tiles[pos].building.dep, 0);
+  assert.equal(p.ledger.cash, 0, 'the upgrade costs the new price less the salvage');
+  assert.equal(p.carried, carried + 50, 'widgets left in the old building are kept');
+  assert.equal(p.ledger.ppe, price - old.basis);
+  assert.equal(-p.ledger.gain, salvage - (old.basis - old.dep), 'the rest of its book value is a loss');
+  const s = balanceSheet(p);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('rezoning costs a fee and the PP&E must be rebuilt', () => {
+  const g = createGame(['A', 'B'], 13, { easyBooks: true });
+  const p = g.players[0];
+  g.phase = 'act';
+  const pos = posOfSpace(12);
+  Object.assign(g.tiles[pos], { owner: 0, zone: 'industrial', building: { rarity: 'rare', cost: RARITIES.rare.price, basis: RARITIES.rare.price, dep: 0 }, stock: 0 });
+  const card = g.zoningRow.findIndex((z) => z !== 'industrial');
+  const to = g.zoningRow[card];
+  const same = g.zoningRow.indexOf('industrial');
+  if (same >= 0) assert.match(act(g, 0, { a: 'rezone', pos, zone: same }), /already zoned/);
+  const salvage = salvageValue(g.tiles[pos].building);
+  const cash = p.ledger.cash;
+  const deck = g.zoningDeck.length;
+  assert.equal(act(g, 0, { a: 'rezone', pos, zone: card }), null);
+  assert.equal(g.tiles[pos].zone, to);
+  assert.equal(g.tiles[pos].building, null, 'the PP&E is gone and must be rebuilt');
+  assert.equal(p.ledger.cash, cash + salvage - rezoneFee(pos));
+  assert.equal(rezoneFee(pos), Math.round(SQUARES[pos].price * CONFIG.rezoneFee));
+  assert.equal(g.zoningRow.length, CONFIG.rowSize);
+  assert.equal(g.zoningDeck.length, deck, 'the old zoning goes back as the new card comes off');
+  assert.equal(act(g, 1, { a: 'rezone', pos, zone: 0 }), 'It is not your turn.');
+  g.turn = 1;
+  assert.equal(act(g, 1, { a: 'rezone', pos, zone: 0 }), 'Rezone land you own.');
+  const s = balanceSheet(p);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
