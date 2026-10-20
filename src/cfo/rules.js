@@ -325,6 +325,7 @@ const ACTIONS = {
     p.atBank = false;
     p.atTerminal = false;
     p.atExchange = false;
+    p.atCustoms = false;
     p.flew = false;
     p.sale = null;
     const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
@@ -557,6 +558,18 @@ const ACTIONS = {
     } else {
       g.marketDiscard.push(id);
     }
+    return null;
+  },
+
+  // Miles: a few scarce ways to clear a fraud. At island Customs you can quietly settle one.
+  settle(g, p) {
+    if (g.phase !== 'act' || !p.atCustoms) return 'You can only settle at island Customs.';
+    if (!p.frauds) return 'You have no frauds to settle.';
+    if (companyCash(p) < CONFIG.settlement) return `Settling costs ${money(CONFIG.settlement)}.`;
+    post(p, 'Legal settlement', { expOther: CONFIG.settlement, cash: -CONFIG.settlement });
+    p.frauds -= 1;
+    p.atCustoms = false;
+    log(g, `${p.name} pays ${money(CONFIG.settlement)} in legal fees at Customs.`);
     return null;
   },
 
@@ -852,7 +865,9 @@ function land(g, p) {
       return drawCard(g, p, 'fraud');
     case 'customs':
       log(g, `${p.name} is held at Customs while auditors go through the books.`);
-      return audit(g, p);
+      audit(g, p);
+      if (!p.out) p.atCustoms = true;
+      return;
     case 'exchange':
       p.atExchange = true;
       return log(g, `${p.name} visits the Exchange, where personal assets are half price this turn.`);
@@ -1291,6 +1306,16 @@ const PLAYS = {
     log(g, `${p.name} buys ${n} shares of ${c.name}'s company.`);
     return null;
   },
+  shred(g, p) {
+    if (!p.frauds) return 'You have no frauds to cover up.';
+    p.frauds -= Math.min(2, p.frauds); // playing the card then adds one back
+    return null;
+  },
+  limitations(g, p) {
+    if (!p.frauds) return 'You have no frauds on record.';
+    p.frauds -= 1;
+    return null;
+  },
   evasion(g, p) {
     p.taxFree = true;
     return null;
@@ -1595,6 +1620,7 @@ export function viewFor(g, who) {
       atBank: Boolean(p.atBank),
       atTerminal: Boolean(p.atTerminal),
       atExchange: Boolean(p.atExchange),
+      atCustoms: Boolean(p.atCustoms),
       flew: Boolean(p.flew),
       islandLaps: p.islandLaps ?? 0,
       sale: p.sale ?? null,

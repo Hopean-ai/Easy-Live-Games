@@ -43,6 +43,7 @@ export const CONFIG = {
   rowSize: 3, // face-up zoning cards
   ppeRowSize: 5, // face-up PP&E cards: more choice, so a row of unaffordable cards is rare
   maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings
+  settlement: M(5000), // PLACEHOLDER: paid at island Customs to settle one fraud and clear it from your record
   islandFare: M(1500), // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
@@ -240,6 +241,7 @@ export const FRAUD_CARDS = {
   evasion: { name: 'Tax Evasion', count: 3, keep: true, placeholder: true, text: 'Pay no personal tax on what you take out of companies for the rest of this fiscal year.' },
   shell: { name: 'Shell Company', count: 2, keep: true, placeholder: true, text: `Borrow ${usd(1500)} through a front, on top of your Bank loan limit.` },
   ponzi: { name: 'Ponzi Scheme', count: 2, keep: true, placeholder: true, text: `Every other player pays you ${usd(100)} of personal cash.` },
+  shred: { name: 'Shred the Evidence', count: 2, keep: true, placeholder: true, text: 'Clear two frauds from your record. Shredding is itself a fraud, so it counts as one.' },
   backdate: { name: 'Backdated Invoice', count: 3, keep: true, placeholder: true, text: 'Build one of the available PP&E cards for half its price.' },
 };
 
@@ -248,6 +250,7 @@ export const MARKET_CARDS = {
     name: 'Alienation of Affection', count: 5, keep: true,
     text: `Pay ${usd(1000)} to the bank to take all "Spouse" cards from another player. If you already have Spouse cards, discard them.`,
   },
+  limitations: { name: 'Statute of Limitations', count: 2, keep: true, placeholder: true, text: 'Clear one fraud from your record.' },
   contractor: { name: 'Contractor Connections', count: 5, keep: true, text: 'Search the PP&E deck and build any card for 90% of its price.' },
   recession: { name: 'Recession', count: 3, placeholder: true, text: 'Every company loses 10% of its cash.' },
   boom: { name: 'Boom', count: 3, placeholder: true, text: `Every company earns ${usd(500)}.` },
