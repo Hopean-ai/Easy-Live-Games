@@ -4,9 +4,8 @@ import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS,
 import { sanitizeName } from '../names.js';
 
 const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is about 600 bytes
-// An absent player's turn is played for them after this long, so one closed tab can't stall a
-// game. A separate, optional turn timer (CONFIG.turnSeconds) applies to everyone when set.
-export const ABSENT_TURN_MS = 30_000;
+// Miles: no turn time limits. A player can take as long as they like, even with the tab closed.
+// An optional turn timer (CONFIG.turnSeconds) can be switched back on; it is off.
 
 // One Durable Object per CFO room. Turn-based, so unlike Pong there is no loop: each action is
 // applied, the state is saved, and every player is sent their own view of it. The state lives in
@@ -161,14 +160,12 @@ export class CfoRoom extends DurableObject {
     await this.changed();
   }
 
-  // Sets the alarm for the current turn: the turn timer if one is configured, otherwise only
-  // when the player whose turn it is has gone.
+  // Sets the alarm for the current turn when a turn timer is configured.
   async schedule() {
     const g = this.room.game;
     let ms = 0;
     if (this.room.status === 'playing' && g) {
       if (CONFIG.turnSeconds > 0) ms = CONFIG.turnSeconds * 1000;
-      if (!this.socketsFor(g.turn).length) ms = ms ? Math.min(ms, ABSENT_TURN_MS) : ABSENT_TURN_MS;
     }
     const key = g ? `${g.turn}:${g.phase}:${g.log.length}:${g.log.at(-1)}` : '';
     if (!ms) {
