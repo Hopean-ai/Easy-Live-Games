@@ -25,6 +25,10 @@
         <button type="submit" class="secondary">Join</button>
       </form>
       <p id="lobby-error" class="error" role="alert"></p>
+      <div id="my-games" class="stack" hidden>
+        <h2>Your games in progress</h2>
+        <ul id="my-games-list" class="seats"></ul>
+      </div>
     </section>
 
     <section id="waiting" class="narrow stack" hidden>
@@ -48,7 +52,8 @@
     <section id="play" hidden>
       <div class="board-wrap">
         <div id="board" class="board">
-          <div id="centre" class="centre">
+          <!-- The turn controls sit in the middle of the island, where they are easy to find. -->
+          <div id="isle" class="isle">
             <div class="turn-line">
               <strong id="turn-text"></strong>
               <span id="dice" class="dice"></span>
@@ -57,6 +62,12 @@
             <div id="actions" class="actions"></div>
             <div id="offers" class="actions"></div>
             <p id="error" class="error" role="alert"></p>
+          </div>
+          <div id="centre" class="centre">
+            <section class="tile-box">
+              <h2 id="tile-title">Board</h2>
+              <div id="tile"><p class="small">Tap a square to see it. Tap your own zoned land to build on it.</p></div>
+            </section>
             <ul id="log" class="log"></ul>
           </div>
         </div>
@@ -74,10 +85,6 @@
         <section class="panel players-panel">
           <h2>Players</h2>
           <table id="players" class="players"></table>
-        </section>
-        <section class="panel tile-panel">
-          <h2 id="tile-title">Board</h2>
-          <div id="tile"><p class="small">Tap a square to see it. Tap your own zoned land to build on it.</p></div>
         </section>
         <section class="panel">
           <h2>Your hand</h2>
