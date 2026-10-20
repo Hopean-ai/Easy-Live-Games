@@ -1106,3 +1106,27 @@ test('rezoning costs a fee and the PP&E must be rebuilt', () => {
   const s = balanceSheet(p);
   assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
+
+test('the island Terminal ships your widgets to your stores across the island', () => {
+  const g = createGame(['A', 'B'], 14, { easyBooks: true });
+  const p = g.players[0];
+  const shops = [ISLAND_START + 3, ISLAND_START + 15];
+  for (const pos of shops) Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
+  // Flying in lands you at the Terminal, which ships what you carry.
+  give(p, 1000);
+  Object.assign(g, { turn: 0, phase: 'act' });
+  const airport = posOfSpace(34);
+  g.tiles[airport].owner = 0;
+  p.pos = airport;
+  assert.equal(act(g, 0, { a: 'fly' }), null);
+  assert.equal(p.pos, ISLAND_START);
+  assert.equal(p.carried, 0);
+  assert.deepEqual(shops.map((s) => g.tiles[s].stock), [500, 500]);
+  // Passing it on a lap does the same.
+  give(p, 600);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = ISLAND_START + 23;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.carried, 0);
+  assert.equal(shops.reduce((n, s) => n + g.tiles[s].stock, 0), 1600);
+});
