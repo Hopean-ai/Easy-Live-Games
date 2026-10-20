@@ -437,7 +437,7 @@ function renderTurn() {
       `Buy a personal asset (${money(assetPrice)})`));
     box.append(row);
     box.append(...flightControls(me));
-    box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in $${rules.config.personalUnit}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    box.append(amountForm('Pay yourself', `Moves company cash to your personal cash in ${money(rules.config.personalUnit)}s, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : me.carried > 0)) box.append(saleControls(me));
     const cfg = rules.config;
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
@@ -671,7 +671,7 @@ function playControls(id, i) {
       el('button', { class: 'secondary', disabled: g.players[mySeat].cash < rules.rarities[r].price * 0.9, onclick: () => play({ pos: selected, rarity: r }) },
         `${rules.rarities[r].name} ×${counts[r]} (${money(rules.rarities[r].price * 0.9)})`)));
   }
-  if (id === 'embezzle') return amountForm('Embezzle', 'Up to $2,000.', (amount) => play({ amount }));
+  if (id === 'embezzle') return amountForm('Embezzle', `Up to ${money(2000 * rules.moneyScale)}.`, (amount) => play({ amount }));
   if (id === 'insider') {
     const targets = g.players.map((p, j) => ({ p, j })).filter(({ p }) => p.isPublic && !p.out);
     if (!targets.length) return el('p', { class: 'small' }, 'No company is public yet.');
@@ -927,7 +927,7 @@ function renderMarket() {
     const status = c.isPublic ? `Public, ${c.shares.public} of ${total} shares on the market` : c.parent !== null ? `Subsidiary of ${g.players[c.parent].name}` : 'Private';
     const row = el('div', { class: 'stock' },
       el('strong', {}, `${c.name}'s company`),
-      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}${c.isPublic ? ', paid in whole $100s' : ''}.`} You hold ${mine}.`));
+      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}${c.isPublic ? `, paid in whole ${money(rules.config.personalUnit)}s` : ''}.`} You hold ${mine}.`));
     if (canTrade && c.isPublic) {
       const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Shares', inputMode: 'numeric' });
       row.append(el('div', { class: 'inline3' }, input,

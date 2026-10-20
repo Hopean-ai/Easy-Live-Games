@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS } from '../src/cfo/data.js';
 import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
@@ -74,16 +74,16 @@ test('players record their own entries and file their own statements', () => {
   // The starting capital is the first document to record.
   assert.equal(p.docs.length, 1);
   const [doc] = p.docs;
-  assert.equal(doc.text, 'Owner invests starting capital: $3,000 received');
+  assert.equal(doc.text, 'Owner invests starting capital: $300,000 received');
   const view = viewFor(g, 0).players[0];
   assert.equal(view.docs[0].lines, undefined, 'the right answer is not sent');
   assert.equal(view.income, undefined, 'true statements are hidden');
   assert.equal(viewFor(g, 1).players[0].docs, undefined, 'others cannot see your documents');
 
-  assert.equal(act(g, 0, { a: 'record', doc: 99, lines: [['cash', 3000]] }), 'Pick a document to record.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['capital', -2000]] }), 'Debits must equal credits.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['nonsense', -3000]] }), 'Pick an account for every line.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', 3000], ['revOps', -3000]] }), null);
+  assert.equal(act(g, 0, { a: 'record', doc: 99, lines: [['cash', M(3000)]] }), 'Pick a document to record.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['capital', -M(2000)]] }), 'Debits must equal credits.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['nonsense', -M(3000)]] }), 'Pick an account for every line.');
+  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['revOps', -M(3000)]] }), null);
 
   // Pass FYE: statements are due by the next year end, so the turn can go on.
   p.pos = BOARD_SIZE - 2;
@@ -92,7 +92,7 @@ test('players record their own entries and file their own statements', () => {
   assert.ok(p.fyePending);
   assert.equal(act(g, 0, { a: 'end' }), null);
   const truth = p.fyePending.truth;
-  assert.equal(truth.balance.capital, 3000);
+  assert.equal(truth.balance.capital, CONFIG.startCompanyCash);
   assert.equal(truth.balance.cash, p.ledger.cash);
   // File with one wrong line; the miscoded capital entry counts too, as do unrecorded year-end documents.
   const unrecorded = p.docs.filter((d) => d.year === 1 && !d.recorded).length;
@@ -124,14 +124,15 @@ test('easy books record everything automatically', () => {
   assert.ok(viewFor(g, 0).players[0].income);
 });
 
-test('personal cash moves in $100s and is taxed on the year\'s total', () => {
+test('personal cash moves in whole units and is taxed on the year\'s total', () => {
   const g = createGame(['A', 'B'], 21);
   const p = g.players[0];
   g.phase = 'act';
-  assert.match(act(g, 0, { a: 'pay', amount: 150 }), /multiples of \$100/);
+  const unit = CONFIG.personalUnit;
+  assert.match(act(g, 0, { a: 'pay', amount: unit * 1.5 }), /multiples of \$10,000/);
   const start = p.personalCash;
-  for (let i = 0; i < 5; i++) assert.equal(act(g, 0, { a: 'pay', amount: 100 }), null);
-  assert.equal(p.personalCash - start, 400, '20% of $500, however it is split');
+  for (let i = 0; i < 5; i++) assert.equal(act(g, 0, { a: 'pay', amount: unit }), null);
+  assert.equal(p.personalCash - start, 4 * unit, '20% of five units, however it is split');
 });
 
 test('only the player whose turn it is may act, and only in order', () => {
@@ -366,9 +367,9 @@ test('going public raises cash, prices the company above its books, and doubles 
   a.years = CONFIG.ipoYears;
   const worth = netWorth(g, a);
   assert.equal(act(g, 0, { a: 'ipo' }), null);
-  // Equity $3,000 x 1.2 / 100 shares = $36 a share; 25 new shares raise $900.
+  // Equity $300,000 x 1.2 / 100 shares = $3,600 a share; 25 new shares raise $90,000.
   assert.equal(CONFIG.publicPremium, 1.2);
-  assert.equal(a.ledger.cash, 3900);
+  assert.equal(a.ledger.cash, M(3900));
   assert.equal(a.shares.public, 25);
   assert.equal(act(g, 0, { a: 'ipo' }), 'Your company is already public.');
   assert.ok(netWorth(g, a) > worth, 'the market premium counts toward net worth');
@@ -376,19 +377,19 @@ test('going public raises cash, prices the company above its books, and doubles 
   // B buys shares with personal cash, then gets a cut of A's distributions.
   g.turn = 1;
   assert.equal(act(g, 1, { a: 'trade', target: 0, count: 2 }), null);
-  // Two shares at about $37 cost $75, rounded up to $100 of personal cash.
-  assert.equal(b.personalCash, 500 - 100);
+  // Two shares at about $3,700 cost $7,500, rounded up to one $10,000 unit of personal cash.
+  assert.equal(b.personalCash, M(500 - 100));
   assert.equal(a.shares.holders[1], 2);
   g.turn = 0;
   const aPersonal = a.personalCash;
-  assert.equal(act(g, 0, { a: 'pay', amount: 1400 }), null);
-  // A holds 100 of 125 shares: $1,100 in $100s, less $200 tax. B's 2 shares earn $22, under the $100 unit.
-  assert.equal(a.personalCash, aPersonal + 900);
-  assert.equal(b.personalCash, 400);
+  assert.equal(act(g, 0, { a: 'pay', amount: M(1400) }), null);
+  // A holds 100 of 125 shares: $110,000 in whole units, less $20,000 tax. B's 2 shares earn $2,200, under one unit.
+  assert.equal(a.personalCash, aPersonal + M(900));
+  assert.equal(b.personalCash, M(400));
   g.turn = 1;
-  // After the payout, two shares are worth about $48, which rounds down to nothing.
-  assert.match(act(g, 1, { a: 'trade', target: 0, count: -2 }), /less than \$100/);
-  assert.equal(b.personalCash, 400);
+  // After the payout, two shares are worth about $4,800, which rounds down to nothing.
+  assert.match(act(g, 1, { a: 'trade', target: 0, count: -2 }), /less than \$10,000/);
+  assert.equal(b.personalCash, M(400));
 });
 
 test('a knocked-out player can be hired to run a subsidiary', () => {
@@ -397,21 +398,21 @@ test('a knocked-out player can be hired to run a subsidiary', () => {
   assert.equal(act(g, 2, { a: 'resign' }), null);
   assert.ok(c.out);
   g.phase = 'act';
-  assert.match(act(g, 0, { a: 'hire', target: 1, amount: 1000 }), /out of the game/);
-  assert.match(act(g, 0, { a: 'hire', target: 2, amount: 500 }), /at least/);
-  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: 1000 }), null);
+  assert.match(act(g, 0, { a: 'hire', target: 1, amount: M(1000) }), /out of the game/);
+  assert.match(act(g, 0, { a: 'hire', target: 2, amount: M(500) }), /at least/);
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: M(1000) }), null);
   assert.equal(c.out, false);
   assert.equal(c.parent, 0);
-  assert.equal(c.ledger.cash, 1000);
-  assert.equal(a.ledger.investments, 1000);
+  assert.equal(c.ledger.cash, M(1000));
+  assert.equal(a.ledger.investments, M(1000));
   assert.deepEqual(c.shares.holders, { 0: 75, 2: 25 });
 
   // The subsidiary's distribution goes 75% to A's company, 25% to C personally.
   g.turn = 2;
   const cPersonal = c.personalCash;
-  assert.equal(act(g, 2, { a: 'pay', amount: 400 }), null);
-  assert.equal(a.ledger.revDividends, -300);
-  assert.equal(c.personalCash, cPersonal + 100);
+  assert.equal(act(g, 2, { a: 'pay', amount: M(400) }), null);
+  assert.equal(a.ledger.revDividends, -M(300));
+  assert.equal(c.personalCash, cPersonal + M(100));
   for (const p of [a, b, c]) {
     const s = balanceSheet(p);
     assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
@@ -428,18 +429,18 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     act(g, 0, { a: 'ipo' });
     const land = posOfSpace(1);
     Object.assign(g.tiles[land], { owner: 0, zone: 'industrial', building: null });
-    Object.assign(g.tiles[posOfSpace(2)], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 50 });
-    Object.assign(g.tiles[posOfSpace(3)], { owner: 1, zone: 'residential', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
-    a.ledger.inventory += 50;
-    a.ledger.capital -= 50;
+    Object.assign(g.tiles[posOfSpace(2)], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: M(50) });
+    Object.assign(g.tiles[posOfSpace(3)], { owner: 1, zone: 'residential', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+    a.ledger.inventory += M(50);
+    a.ledger.capital -= M(50);
     b.assets.push('wealthy');
-    a.personalCash = 2000;
+    a.personalCash = M(2000);
     a.atBank = true;
-    act(g, 0, { a: 'borrow', amount: 500 });
+    act(g, 0, { a: 'borrow', amount: M(500) });
     const keep = (FRAUD_CARDS[id] ?? MARKET_CARDS[id]).keep;
     if (keep) {
       a.hand = [id];
-      const err = act(g, 0, { a: 'play', card: 0, target: id === 'insider' ? 0 : 1, pos: land, row: 1, rarity: 'common', amount: 500 });
+      const err = act(g, 0, { a: 'play', card: 0, target: id === 'insider' ? 0 : 1, pos: land, row: 1, rarity: 'common', amount: M(500) });
       assert.equal(err, null, `${id}: ${err}`);
       assert.equal(a.hand.length, 0, id);
     } else {
@@ -461,20 +462,20 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
 });
 
 test('win conditions: company value, a year limit, and second place for the largest subsidiary', () => {
-  const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, valueTarget: 5000 });
+  const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, valueTarget: M(5000) });
   const [a] = g.players;
   g.phase = 'act';
-  post(a, 'Windfall', { cash: 2000, revOther: -2000 });
+  post(a, 'Windfall', { cash: M(2000), revOther: -M(2000) });
   act(g, 0, { a: 'end' });
   assert.equal(g.phase, 'over');
   assert.equal(g.winner, 0);
-  assert.match(g.endReason, /company worth \$5,000/);
+  assert.match(g.endReason, /company worth \$500,000/);
 
   const h = createGame(['A', 'B', 'C'], 52, { easyBooks: true });
   assert.deepEqual(h.win, { valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears });
   act(h, 2, { a: 'resign' });
   h.phase = 'act';
-  act(h, 0, { a: 'hire', target: 2, amount: 1000 });
+  act(h, 0, { a: 'hire', target: 2, amount: M(1000) });
   act(h, 1, { a: 'resign' });
   assert.equal(h.phase, 'over');
   assert.equal(h.winner, 0);
@@ -485,10 +486,10 @@ test('win conditions: company value, a year limit, and second place for the larg
 });
 
 test('the island: fly in for a fare, loop it, buy a landmark, and fly home from the Terminal', () => {
-  const g = createGame(['A', 'B'], 8, { valueTarget: 1e6 });
+  const g = createGame(['A', 'B'], 8, { valueTarget: M(1e6) });
   const [a, b] = g.players;
   const airport = posOfSpace(34);
-  post(a, 'Test capital', { cash: 20000, capital: -20000 });
+  post(a, 'Test capital', { cash: M(20000), capital: -M(20000) });
 
   // Nobody owns the airport yet, so there are no flights.
   Object.assign(g, { turn: 0, phase: 'act' });
@@ -617,17 +618,17 @@ test('auto statements are built from the entries players record', () => {
 });
 
 test('buying a rival company takes it out of the game; public companies cost more', () => {
-  const g = createGame(['A', 'B', 'C'], 24, { easyBooks: true, valueTarget: 1e6 });
+  const g = createGame(['A', 'B', 'C'], 24, { easyBooks: true, valueTarget: M(1e6) });
   const [a, b, c] = g.players;
-  post(a, 'Test capital', { cash: 20000, capital: -20000 });
+  post(a, 'Test capital', { cash: M(20000), capital: -M(20000) });
   const lot = posOfSpace(1);
   g.tiles[lot].owner = 1;
   post(b, 'Bought land', { land: 80, cash: -80 });
-  post(b, 'Test capital', { cash: 10000, capital: -10000 });
+  post(b, 'Test capital', { cash: M(10000), capital: -M(10000) });
   Object.assign(g, { turn: 0, phase: 'act' });
 
   const privatePrice = acquisitionPrice(b);
-  assert.equal(privatePrice, Math.ceil(Math.max(CONFIG.acquireMin, companyValue(b) * CONFIG.acquirePremium) / 100) * 100);
+  assert.equal(privatePrice, Math.ceil(Math.max(CONFIG.acquireMin, companyValue(b) * CONFIG.acquirePremium) / CONFIG.personalUnit) * CONFIG.personalUnit);
   b.isPublic = true;
   assert.ok(acquisitionPrice(b) > privatePrice, 'public companies cost more');
   b.isPublic = false;
@@ -643,7 +644,7 @@ test('buying a rival company takes it out of the game; public companies cost mor
   assert.match(act(g, 0, { a: 'acquire', target: 1 }), /rival/);
   assert.notEqual(g.phase, 'over');
   // Buying the last rival wins.
-  post(a, 'More capital', { cash: 40000, capital: -40000 });
+  post(a, 'More capital', { cash: M(40000), capital: -M(40000) });
   assert.equal(act(g, 0, { a: 'acquire', target: 2 }), null);
   assert.equal(g.phase, 'over');
   assert.equal(g.winner, 0);
@@ -666,8 +667,8 @@ test('crafted actions get a plain error and never touch object internals', () =>
 test('a fire sale for fees sells only the widgets it needs, and never ones already shipped', () => {
   const g = createGame(['A', 'B'], 52, { easyBooks: true });
   const a = g.players[0];
-  post(a, 'Made widgets', { inventory: 1000, cash: -1000 });
-  a.carried = 1000;
+  post(a, 'Made widgets', { inventory: M(1000), cash: -M(1000) });
+  a.carried = M(1000);
   post(a, 'Spent', { expOther: a.ledger.cash, cash: -a.ledger.cash });
   Object.assign(g, { turn: 1, phase: 'act' });
   // B's store stands to receive nothing; A owes B rent it can only pay by selling widgets.
@@ -681,21 +682,21 @@ test('a fire sale for fees sells only the widgets it needs, and never ones alrea
   assert.ok(a.ledger.inventory >= 0);
 });
 
-test('shares trade at the market price in whole $100s, so nearly worthless shares cannot be sold for $100', () => {
+test('shares trade at the market price in whole personal units, so nearly worthless shares cannot be sold for one', () => {
   const g = createGame(['A', 'B'], 53, { easyBooks: true });
   const [a, b] = g.players;
   a.years = CONFIG.ipoYears;
   g.phase = 'act';
   assert.equal(act(g, 0, { a: 'ipo' }), null);
   // Pay nearly everything out: shares are now worth a few dollars each.
-  assert.equal(act(g, 0, { a: 'pay', amount: Math.floor(a.ledger.cash / 100) * 100 - 100 }), null);
+  assert.equal(act(g, 0, { a: 'pay', amount: Math.floor(a.ledger.cash / M(100)) * M(100) - M(100) }), null);
   const before = a.personalCash;
-  assert.match(act(g, 0, { a: 'trade', target: 0, count: -1 }), /less than \$100/);
+  assert.match(act(g, 0, { a: 'trade', target: 0, count: -1 }), /less than \$10,000/);
   assert.equal(a.personalCash, before);
   g.turn = 1;
   const bCash = b.personalCash;
   assert.equal(act(g, 1, { a: 'trade', target: 0, count: 1 }), null);
-  assert.equal(b.personalCash, bCash - 100, 'a $2 share still costs one $100 unit');
+  assert.equal(b.personalCash, bCash - M(100), 'a cheap share still costs one whole unit');
 });
 
 test('subsidiaries: no nested hires, failed ones are written off, and cards and zoning go back', () => {
@@ -713,14 +714,14 @@ test('subsidiaries: no nested hires, failed ones are written off, and cards and 
   assert.equal(g.zoningDeck.length + g.zoningRow.length, zoningBefore + 1, 'zoning goes back to the deck');
   assert.equal(g.tiles[lot].zone, null);
   Object.assign(g, { turn: 0, phase: 'act' });
-  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: 1000 }), null);
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: M(1000) }), null);
   Object.assign(g, { turn: 2, phase: 'act' });
-  assert.match(act(g, 2, { a: 'hire', target: 3, amount: 1000 }), /cannot hire/);
+  assert.match(act(g, 2, { a: 'hire', target: 3, amount: M(1000) }), /cannot hire/);
   assert.equal(d.out, true);
   // C's subsidiary fails: A's investment in it is written off.
   act(g, 2, { a: 'resign' });
   assert.equal(a.ledger.investments, 0);
-  assert.equal(a.ledger.expOther, 1000);
+  assert.equal(a.ledger.expOther, M(1000));
 });
 
 test('a convicted manager is watched more closely when hired back', () => {
@@ -731,7 +732,7 @@ test('a convicted manager is watched more closely when hired back', () => {
   c.convicted = true;
   act(g, 2, { a: 'resign' });
   Object.assign(g, { turn: 0, phase: 'act' });
-  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: 1000 }), null);
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: M(1000) }), null);
   assert.equal(c.frauds, 0, 'the new company starts with clean books');
   c.frauds = 1;
   assert.ok(Math.abs(fraudRisk(c, 0.2) - 0.4) < 1e-9, 'but the record doubles the scrutiny');
@@ -762,9 +763,9 @@ test('with manual books, rivals see only filed figures and market prices', () =>
   assert.equal(v.players[0].inventory, null);
   assert.equal(v.players[0].sharePrice, null);
   assert.equal(v.companyValues[0], null);
-  assert.equal(v.players[1].cash, 3000);
+  assert.equal(v.players[1].cash, CONFIG.startCompanyCash);
   assert.ok(v.players[0].acquisitionPrice > 0);
-  assert.equal(viewFor(createGame(['A', 'B'], 57, { easyBooks: true }), 1).players[0].cash, 3000);
+  assert.equal(viewFor(createGame(['A', 'B'], 57, { easyBooks: true }), 1).players[0].cash, CONFIG.startCompanyCash);
 });
 
 test('buying a company you hold shares in pays only the other holders', () => {
@@ -772,12 +773,12 @@ test('buying a company you hold shares in pays only the other holders', () => {
   const [a, b] = g.players;
   b.shares.holders[0] = 20;
   b.shares.holders[1] = 80;
-  post(a, 'Raised', { cash: 20000, capital: -20000 });
+  post(a, 'Raised', { cash: M(20000), capital: -M(20000) });
   Object.assign(g, { turn: 0, phase: 'act' });
   const price = acquisitionPrice(b);
   const personal = a.personalCash;
   const cash = a.ledger.cash;
   assert.equal(act(g, 0, { a: 'acquire', target: 1 }), null);
   assert.equal(a.personalCash, personal, 'the buyer is not paid for their own shares');
-  assert.equal(a.ledger.cash, cash - price * 0.8 + 3000);
+  assert.equal(a.ledger.cash, cash - price * 0.8 + CONFIG.startCompanyCash);
 });

@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -104,7 +104,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
 export function winOptions(o = {}) {
   const num = (v, lo, hi, d) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Math.round(Number(v)) : d);
   return {
-    valueTarget: num(o.valueTarget, 5000, 10_000_000, CONFIG.valueTarget),
+    valueTarget: num(o.valueTarget, M(5000), M(1_000_000), CONFIG.valueTarget),
     maxYears: num(o.maxYears, 0, 50, CONFIG.maxYears),
   };
 }
@@ -220,8 +220,8 @@ export function sharePrice(p) {
   return round(companyValue(p) / totalShares(p));
 }
 
-// Shares change hands with personal cash, which moves in whole $100s: buyers pay the market
-// price rounded up to the next $100, sellers get it rounded down.
+// Shares change hands with personal cash, which moves in whole personal units: buyers pay the
+// market price rounded up to the next unit, sellers get it rounded down.
 export function tradePrice(p) {
   return sharePrice(p);
 }
@@ -492,7 +492,7 @@ const ACTIONS = {
     } else {
       if (-count > (c.shares.holders[me] ?? 0)) return 'You do not hold that many shares.';
       if (c.shares.holders[me] + count <= 0 && c === p) return 'You cannot sell all of your own company.';
-      if (!total) return 'Those shares are worth less than $100 together.';
+      if (!total) return `Those shares are worth less than ${money(CONFIG.personalUnit)} together.`;
       p.personalCash += total;
       c.shares.public += -count;
       c.shares.holders[me] += count;
@@ -525,7 +525,7 @@ const ACTIONS = {
     const q = g.players[target];
     if (!q || !q.out) return 'Pick a player who is out of the game.';
     amount = Math.floor(Number(amount));
-    if (!(amount >= CONFIG.subsidiaryMin) || amount % CONFIG.personalUnit) return `Fund it with at least ${money(CONFIG.subsidiaryMin)}, in $100s.`;
+    if (!(amount >= CONFIG.subsidiaryMin) || amount % CONFIG.personalUnit) return `Fund it with at least ${money(CONFIG.subsidiaryMin)}, in ${money(CONFIG.personalUnit)}s.`;
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     const parent = g.players.indexOf(p);
     post(p, `Invested in ${q.name}'s new subsidiary`, { investments: amount, cash: -amount });
@@ -971,7 +971,7 @@ function acquireCompany(g, p, q, price) {
   if (net < 0) lines.goodwill += -net;
   else lines.gain = -net; // a bargain purchase
   post(p, `Bought ${q.name}'s company`, lines);
-  // Shareholders are paid in whole $100s of personal cash; the public's shares are bought back.
+  // Shareholders are paid in whole units of personal cash; the public's shares are bought back.
   for (const [h, n] of Object.entries(q.shares.holders)) {
     const part = Math.floor((price * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
     if (part && Number(h) !== me && (!g.players[h].out || Number(h) === them)) g.players[h].personalCash += part;
@@ -1152,12 +1152,12 @@ function personalYearEnd(g, p) {
   p.yearTax = 0;
   p.taxFree = false;
   const count = (id) => p.assets.filter((a) => a === id).length;
-  p.deduction = count('intelligent') ? 100 : 0;
+  p.deduction = count('intelligent') ? M(100) : 0;
   const wealthy = count('wealthy');
-  if (wealthy) p.personalCash += 10 ** wealthy;
+  if (wealthy) p.personalCash += M(10 ** wealthy);
   let attractive = count('attractive');
   while (attractive) {
-    const cost = count('loyal') && attractive > 1 ? 25 : 10 ** attractive;
+    const cost = M(count('loyal') && attractive > 1 ? 25 : 10 ** attractive);
     if (p.personalCash >= cost) {
       p.personalCash -= cost;
       break;
@@ -1208,15 +1208,15 @@ const MARKET_NOW = {
     for (const q of alive(g)) charge(g, q, companyCash(q) * 0.1, 'expOther', 'Recession losses');
   },
   boom(g) {
-    for (const q of alive(g)) post(q, 'Economic boom', { cash: 500, revOther: -500 });
+    for (const q of alive(g)) post(q, 'Economic boom', { cash: M(500), revOther: -M(500) });
   },
   lawsuit(g, p) {
-    charge(g, p, 750, 'expOther', 'Lawsuit settlement');
+    charge(g, p, M(750), 'expOther', 'Lawsuit settlement');
   },
   shipping(g) {
     g.players.forEach((q, i) => {
       const n = g.tiles.filter((t, pos) => t?.owner === i && SQUARES[pos].kind === 'transport').length;
-      if (n && !q.out) post(q, 'Higher shipping rates', { cash: 150 * n, revOther: -150 * n });
+      if (n && !q.out) post(q, 'Higher shipping rates', { cash: M(150) * n, revOther: -M(150) * n });
     });
   },
   rates(g) {
@@ -1268,7 +1268,7 @@ const PLAYS = {
     const { price, stores } = retailTerms(g, g.turn);
     if (!stores) return 'You need a store to book sales through.';
     if (p.ledger.inventory < 1) return 'You have no widgets.';
-    let left = 500;
+    let left = M(500); // widgets
     left -= sellWidgets(g, p, p, left, price, 'Early widget sales') / price;
     for (const [i, t] of g.tiles.entries()) {
       if (left < 1) break;
@@ -1296,14 +1296,14 @@ const PLAYS = {
     return null;
   },
   shell(g, p) {
-    post(p, 'Loan from an affiliate', { cash: 1500, loan: -1500 });
+    post(p, 'Loan from an affiliate', { cash: M(1500), loan: -M(1500) });
     return null;
   },
   ponzi(g, p) {
     let got = 0;
     for (const q of alive(g)) {
       if (q === p) continue;
-      const take = Math.min(100, q.personalCash);
+      const take = Math.min(M(100), q.personalCash);
       q.personalCash -= take;
       got += take;
     }
@@ -1325,7 +1325,7 @@ const PLAYS = {
     return null;
   },
   bribe(g, p) {
-    const cost = 100 * g.zoningRow.length;
+    const cost = M(100) * g.zoningRow.length;
     if (!g.zoningRow.length) return 'There are no zoning cards to replace.';
     if (companyCash(p) < cost) return 'Your company cannot afford it.';
     post(p, 'Consulting fees', { expOther: cost, cash: -cost }); // the bribe, as it appears in the books
@@ -1335,7 +1335,7 @@ const PLAYS = {
     return null;
   },
   embezzle(g, p, { amount }) {
-    amount = Math.min(2000, Math.floor(Number(amount) || 2000), Math.floor(companyCash(p)));
+    amount = Math.min(M(2000), Math.floor(Number(amount) || M(2000)), Math.floor(companyCash(p)));
     if (!(amount > 0)) return 'Your company has no cash to take.';
     post(p, 'Miscellaneous expenses', { expOther: amount, cash: -amount });
     p.personalCash += amount;
@@ -1350,10 +1350,10 @@ const PLAYS = {
   kickback(g, p) {
     for (const q of alive(g)) {
       if (q === p) continue;
-      const paid = charge(g, q, 200, 'expOther', `Fees to ${p.name}`);
+      const paid = charge(g, q, M(200), 'expOther', `Fees to ${p.name}`);
       if (paid) post(p, `Fees from ${q.name}`, { cash: paid, revOther: -paid });
     }
-    log(g, `Every company pays ${p.name} a $200 fee.`);
+    log(g, `Every company pays ${p.name} a ${money(M(200))} fee.`);
     return null;
   },
   alienation(g, p, { target }) {
@@ -1362,12 +1362,12 @@ const PLAYS = {
     if (q.assets.includes('loyal')) return `${q.name} has a Loyal Spouse; their spouses can't be taken.`;
     const spouses = q.assets.filter((a) => PERSONAL_CARDS[a].spouse);
     if (!spouses.length) return `${q.name} has no Spouse cards.`;
-    if (p.personalCash < 1000) return 'You need $1,000 of personal cash.';
-    p.personalCash -= 1000;
+    if (p.personalCash < M(1000)) return `You need ${money(M(1000))} of personal cash.`;
+    p.personalCash -= M(1000);
     q.assets = q.assets.filter((a) => !PERSONAL_CARDS[a].spouse);
     p.assets = p.assets.filter((a) => !PERSONAL_CARDS[a].spouse || a === 'loyal');
     p.assets.push(...spouses);
-    log(g, `${p.name} pays $1,000 and takes ${q.name}'s spouse cards.`);
+    log(g, `${p.name} pays ${money(M(1000))} and takes ${q.name}'s spouse cards.`);
     return null;
   },
   contractor(g, p, { pos, rarity }) {
