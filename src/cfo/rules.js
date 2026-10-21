@@ -72,7 +72,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     winner: null,
     endReason: null,
     easyBooks: Boolean(options.easyBooks),
-    autoStatements: Boolean(options.autoStatements) && !options.easyBooks,
+    autoStatements: !options.easyBooks, // Miles: statements are always built from your own entries
     win: winOptions(options),
     second: null,
   };
@@ -169,7 +169,7 @@ function describe(text, entry) {
   return `${text}: ${money(amount)}`;
 }
 
-const round = (n) => Math.round(n * 100) / 100;
+const round = (n) => Math.round(n * 100) / 100 || 0; // never -0
 const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`;
 
 export function companyCash(p) {
@@ -286,6 +286,20 @@ function cleanAction(action) {
 // Games saved before an account existed get it at zero, so their books keep adding up.
 function upgrade(g) {
   for (const p of g.players) for (const a of Object.keys(ACCOUNTS)) p.ledger[a] ??= 0;
+  // Games begun with typed statements switch to statements built from entries. Their books so far
+  // are the true ledger without the documents not yet filed, closed into retained earnings.
+  if (!g.easyBooks && !g.autoStatements) {
+    g.autoStatements = true;
+    for (const p of g.players) {
+      const book = { ...p.ledger };
+      for (const d of p.docs ?? []) for (const [a, v] of d.lines) book[a] = round(book[a] - v);
+      for (const a of TEMPORARY) {
+        book.retained = round(book.retained + book[a]);
+        book[a] = 0;
+      }
+      p.bookLedger = book;
+    }
+  }
 }
 
 export function act(g, who, raw) {
@@ -1856,6 +1870,7 @@ export function viewFor(g, who) {
       // With manual books everyone sees only the statements a player filed; the truth stays hidden.
       ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: open(i) ? -p.ledger.loan : p.filed?.balance.loan ?? null }),
       fyeDue: p.fyePending?.year ?? null,
+      ...(i === who && p.fyePending && g.autoStatements ? { preview: (({ income, balance }) => ({ income, balance }))(statementsFromEntries(p, p.fyePending.year)) } : {}),
       atBank: Boolean(p.atBank),
       atTerminal: Boolean(p.atTerminal),
       atExchange: Boolean(p.atExchange),

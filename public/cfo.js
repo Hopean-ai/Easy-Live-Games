@@ -175,7 +175,6 @@ $('copy').addEventListener('click', async () => {
 });
 
 $('start').addEventListener('click', () => send({ t: 'start' }));
-$('auto-statements').addEventListener('change', (e) => send({ t: 'option', autoStatements: e.target.checked }));
 $('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
 $('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
 $('resign').addEventListener('click', () => {
@@ -301,8 +300,6 @@ function renderWaiting() {
   else if (mySeat === 0) text = n < 2 ? 'Share the invite link. You need at least one more player.' : `Start when everyone is here (up to ${max}).`;
   else text = 'Waiting for the host to start.';
   $('wait-text').textContent = text;
-  $('auto-statements').checked = Boolean(state.options?.autoStatements);
-  $('auto-statements').disabled = mySeat !== 0;
   renderWinOptions();
   $('start').hidden = mySeat !== 0;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
@@ -917,9 +914,7 @@ function renderBooks() {
   const manual = !g.easyBooks && me?.docs && g.phase !== 'over';
   $('books-panel').hidden = !manual;
   if (!manual) return;
-  $('books-intro').textContent = g.autoStatements
-    ? 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end your statements are built from these entries, and an Interim Review fines every wrong entry.'
-    : 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end you fill in your own statements, and an Interim Review fines every wrong entry and every statement with a mistake.';
+  $('books-intro').textContent = 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end your statements are built from these entries for you to review and submit, and an Interim Review fines every wrong entry.';
   renderCheck(me);
   $('bookkeeper').replaceChildren(me.outsourced
     ? el('p', { class: 'small' }, `A bookkeeper records your entries and files your statements for ${money(rules.config.bookkeeperFee)} a year. Clean-books bonuses go to people who keep their own books. `,
@@ -1069,41 +1064,25 @@ function renderFye() {
     fyeForm = null;
     return;
   }
-  if (g.autoStatements && fyeForm?.year !== due) {
+  // Miles: the statements are built from your own journal entries; you review them and submit.
+  const preview = me.preview ?? { income: {}, balance: {} };
+  const table = (title, fields, values) => el('table', { class: 'fs fye-table' }, el('caption', {}, title),
+    el('tbody', {}, fields.map((f) => el('tr', { class: /^total|netIncome/.test(f) ? 'total' : '' }, el('td', {}, fieldLabel(f)), el('td', { class: 'num' }, money(values[f] ?? 0))))));
+  const open = me.docs.filter((d) => d.year <= due && !d.recorded).length;
+  if (fyeForm?.year !== due) {
+    const statements = el('div', { class: 'statements' });
     const todo = el('p', { class: 'small warn' });
     const node = el('div', {},
-      el('h2', {}, `Fiscal year ${due} is over`),
-      el('p', { class: 'small' }, 'Your statements are built from the journal entries you recorded, so any mistakes there carry into them. Record the rest of this year\'s documents, then file. Anything not filed by your next fiscal year end is filed as it stands.'),
+      el('h2', {}, `Fiscal year ${due} is over: review and submit your statements`),
+      el('p', { class: 'small' }, 'These are built from the journal entries you recorded, so a mistake in an entry shows up here too. You can fix entries below until you submit. Play goes on meanwhile, and anything not submitted by your next fiscal year end is submitted as it stands.'),
       todo,
-      el('button', { onclick: () => actNow({ a: 'statements' }) }, 'File statements from my entries'));
-    fyeForm = { year: due, node, todo, sending: false };
+      statements,
+      el('button', { onclick: () => { fyeForm.sending = true; actNow({ a: 'statements' }); } }, 'Submit statements'),
+      el('p', { class: 'error' }));
+    fyeForm = { year: due, node, todo, statements, sending: false };
     $('fye').replaceChildren(node);
   }
-  if (fyeForm?.year !== due) {
-    const inputs = {};
-    const table = (title, fields) => el('table', { class: 'fs fye-table' }, el('caption', {}, title),
-      el('tbody', {}, fields.map((f) => {
-        inputs[f] = el('input', { type: 'number', step: 'any', inputMode: 'decimal', placeholder: '0' });
-        return el('tr', { class: /^total|netIncome/.test(f) ? 'total' : '' }, el('td', {}, fieldLabel(f)), el('td', {}, inputs[f]));
-      })));
-    const todo = el('p', { class: 'small warn' });
-    const node = el('form', { onsubmit: (e) => {
-      e.preventDefault();
-      const read = (fields) => Object.fromEntries(fields.map((f) => [f, Number(inputs[f].value) || 0]));
-      fyeForm.sending = true;
-      actNow({ a: 'statements', income: read(rules.incomeFields), balance: read(rules.balanceFields) });
-    } },
-    el('h2', {}, `Fiscal year ${due} is over: file your statements`),
-    el('p', { class: 'small' }, 'Play goes on while you work. You can file at any time, even on other players\' turns, but anything not filed by your next fiscal year end is filed blank.'),
-    el('p', { class: 'small' }, 'Work them out from your own journal entries. Enter amounts as positive numbers, except net income, which is negative for a loss. Retained earnings are after this year\'s closing entries. Leave lines you don\'t use blank.'),
-    todo,
-    el('div', { class: 'statements' }, table('Income statement', rules.incomeFields), table('Balance sheet', rules.balanceFields)),
-    el('button', {}, 'File statements'),
-    el('p', { class: 'error' }));
-    fyeForm = { year: due, node, todo, sending: false };
-    $('fye').replaceChildren(node);
-  }
-  const open = me.docs.filter((d) => d.year <= due && !d.recorded).length;
+  fyeForm.statements.replaceChildren(table('Income statement', rules.incomeFields, preview.income), table('Balance sheet', rules.balanceFields, preview.balance));
   fyeForm.todo.textContent = open ? `${open} document${open > 1 ? 's' : ''} from this year still to record. Anything left unrecorded counts as a misstatement.` : '';
 }
 
