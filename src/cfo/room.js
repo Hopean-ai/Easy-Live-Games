@@ -14,7 +14,7 @@ const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is abo
 export class CfoRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears } };
+    this.room = { status: 'waiting', seats: [], expect: 0, game: null, options: defaultOptions() };
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get('room')) ?? this.room;
@@ -97,8 +97,8 @@ export class CfoRoom extends DurableObject {
       this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options, code: this.room.code, listed: this.room.listed };
       this.reseat();
     } else if (msg?.t === 'option') {
-      // The host chooses the room's options before the game starts.
-      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats)) return;
+      // Only an admin host can change the room's options; everyone else plays with the defaults.
+      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats) || !this.room.seats[seat]?.admin) return;
       const o = { ...this.room.options };
       if ('autoStatements' in msg) o.autoStatements = Boolean(msg.autoStatements);
       for (const k of ['valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
@@ -159,6 +159,8 @@ export class CfoRoom extends DurableObject {
 
   start() {
     this.room.status = 'playing';
+    // An admin may have set options and then left the lobby; without one, the defaults apply.
+    if (!this.room.seats.some((s) => s.admin)) this.room.options = defaultOptions();
     this.room.game = createGame(this.room.seats.map((s) => s.name), undefined, this.room.options ?? {});
   }
 
@@ -233,7 +235,7 @@ export class CfoRoom extends DurableObject {
   }
 
   broadcast() {
-    const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, connected: this.socketsFor(i).length > 0 }));
+    const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, admin: Boolean(s.admin), connected: this.socketsFor(i).length > 0 }));
     const base = { t: 'state', status: this.room.status, seats, host: hostSeat(this.room.seats), expect: this.room.expect, options: this.room.options ?? {}, deadline: this.room.deadline ?? null };
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
@@ -257,4 +259,8 @@ function send(ws, msg) {
   } catch {
     // Socket already gone.
   }
+}
+
+function defaultOptions() {
+  return { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears };
 }

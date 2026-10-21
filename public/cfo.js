@@ -323,7 +323,7 @@ function renderWinOptions() {
   // Don't overwrite a number the host is in the middle of typing.
   if (document.activeElement !== $('value-target')) $('value-target').value = o.valueTarget ?? rules?.config.valueTarget ?? '';
   if (document.activeElement !== $('max-years')) $('max-years').value = o.maxYears ?? 0;
-  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== (state.host ?? 0);
+  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== (state.host ?? 0) || !state.seats[mySeat]?.admin; // admins only
 }
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
