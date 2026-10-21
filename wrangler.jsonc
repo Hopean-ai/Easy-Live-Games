@@ -32,5 +32,7 @@
       ]
     }
   },
+  // Accounts that can use admin-only features in any game (comma-separated). See src/admin.js.
+  "vars": { "ADMIN_USERS": "Miles_Pitts" },
   "observability": { "enabled": true }
 }

@@ -1,6 +1,7 @@
 import { readCookie, sessionCookie, SESSION_COOKIE } from './auth.js';
 import { newRoomCode } from './codes.js';
 import { findGame, publicGames, tableSize } from './games.js';
+import { isAdmin } from './admin.js';
 
 export { newRoomCode };
 
@@ -25,7 +26,8 @@ export async function handleRequest(request, env) {
   }
 
   if (path === '/api/me') {
-    return Response.json({ name: await accountName(request, env) });
+    const name = await accountName(request, env);
+    return Response.json({ name, admin: isAdmin(env, name) });
   }
 
   // A signed-in player's games still in progress, so they can rejoin from any device.

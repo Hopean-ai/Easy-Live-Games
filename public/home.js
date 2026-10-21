@@ -6,6 +6,7 @@ const params = new URLSearchParams(location.search);
 
 let games = [];
 let account = null;
+let admin = false;
 
 // Invite links used to point at the home page; send them on to the game.
 const oldInvite = params.get('room');
@@ -14,6 +15,7 @@ if (oldInvite && /^[A-Za-z0-9]{4,12}$/.test(oldInvite)) location.replace(`/pong?
 async function init() {
   const [me, list] = await Promise.all([getJson('/api/me'), getJson('/api/games')]);
   account = me?.name ?? null;
+  admin = Boolean(me?.admin);
   games = list?.games ?? [];
   $('guest-name').value = localStorage.getItem('guest-name') || localStorage.getItem('pong-name') || '';
   render();
@@ -28,6 +30,7 @@ function render() {
   if (!name) return;
   $('who').textContent = name;
   $('who-guest').hidden = Boolean(account);
+  $('who-admin').hidden = !(account && admin);
   $('logout').textContent = account ? 'Log out' : 'Sign in instead';
   $('games').replaceChildren(...games.map(gameCard));
 }
