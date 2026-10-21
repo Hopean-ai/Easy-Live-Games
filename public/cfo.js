@@ -386,7 +386,7 @@ function renderBoard() {
     const key = `${tile?.zone ?? ''}:${tile?.building?.rarity ?? ''}`;
     if (tags.dataset.key !== key) {
       tags.dataset.key = key;
-      const r = tile?.building && rules.rarities[tile.building.rarity];
+      const r = tile?.building && tile.building.rarity !== 'transport' && rules.rarities[tile.building.rarity];
       tags.replaceChildren(
         tile?.zone ? el('span', { class: `tag zone-${tile.zone}`, title: `Zoned ${rules.zones[tile.zone].name}` }, ZONE_MARKS[tile.zone] ?? '') : '',
         r ? el('span', { class: `tag rar-${tile.building.rarity}`, title: `${r.name} PP&E` }, r.name) : '',

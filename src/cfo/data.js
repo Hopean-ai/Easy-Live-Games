@@ -52,6 +52,7 @@ export const CONFIG = {
   seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
   personalUnit: 1, // Miles: personal cash is as granular as company cash (one cent); this used to be $10,000
   salvage: 0.5, // PLACEHOLDER: Miles: destroyed PP&E (upgrading or rezoning) returns this share of its book value
+  transportLand: 0.3, // PLACEHOLDER: Miles: a transport tile's price is 30% land, 70% PP&E (track, depots, runways) that depreciates
   rezoneFee: 0.25, // PLACEHOLDER: Miles: rezoning costs this share of the land's price, and the PP&E on it must be rebuilt
   loanLimit: M(5000), // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
@@ -244,6 +245,7 @@ export const RARITIES = {
   epic: { name: 'Epic', count: 6, price: M(6000) },
   legendary: { name: 'Legendary', count: 3, price: M(15000) },
   landmark: { name: 'Landmark', count: 0, price: M(3000) }, // only on the island's landmark squares
+  transport: { name: 'Transport', count: 0, price: 0 }, // the structures on a transport tile, bought with it
 };
 
 // ---- Draw decks (Draw Decks sheet) ----
