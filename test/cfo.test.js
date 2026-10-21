@@ -317,15 +317,24 @@ test('factories make what the stores need each turn, and logistics ship it to th
   assert.ok(a.ledger.inventory < stocked, 'idle makes nothing');
   act(g, 0, { a: 'production', level: 'demand' });
 
-  // With no transport on the factory's side, goods for another side wait in the factory.
+  // With no line on the factory's side, a hired carrier takes them, and its freight goes to no one.
   g.tiles[rail].owner = null;
   give(a, -g.tiles[shop].stock);
   a.carried = 0;
   g.tiles[shop].stock = 0;
+  const bBefore = b.ledger.cash;
+  const aBefore = a.ledger.cash;
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
-  assert.equal(g.tiles[factory].stock, cap);
-  assert.equal(g.tiles[shop].stock, 0);
+  assert.equal(b.ledger.cash, bBefore);
+  assert.equal(a.ledger.cash, aBefore - cap - Math.round(cap * RETAIL.freight) + cap * RETAIL.prices.common);
+
+  // Your own line on the factory's side ships free.
+  g.tiles[rail].owner = 0;
+  const own = a.ledger.cash;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.equal(a.ledger.cash, own - cap + cap * RETAIL.prices.common);
 
   // Landing on your own factory runs an overtime shift.
   for (let s = 1; ; s++) {

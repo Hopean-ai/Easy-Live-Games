@@ -822,14 +822,15 @@ function makeWidgets(g, p, pos, want, why = 'Widgets made') {
   return n;
 }
 
-// The carrier that takes goods off a side: your own transport there (free), else the first
-// rival's line there (freight), else none. Island goods go through the Terminal (free).
+// Who carries goods out of a factory on `side`: your own transport line there carries them free;
+// otherwise you pay freight per widget, to a rival whose line is there or, with none, to a hired
+// carrier (the bank). Goods made on the island move through its Terminal free.
 function carrierOn(g, side) {
   if (side === 'island') return { free: true };
   const lines = g.tiles.map((t, i) => ({ t, i })).filter(({ t, i }) => SQUARES[i].kind === 'transport' && sideOf(i) === side && t.owner !== null && !g.players[t.owner].out);
   const mine = lines.find(({ t }) => t.owner === g.turn);
-  if (mine) return { free: true, pos: mine.i };
-  return lines[0] ? { owner: g.players[lines[0].t.owner], pos: lines[0].i } : null;
+  if (mine) return { free: true };
+  return lines[0] ? { owner: g.players[lines[0].t.owner], pos: lines[0].i } : { hired: true };
 }
 
 // The island is reached by air: you need an airport of your own to ship to or from it.
@@ -840,9 +841,9 @@ const ownsAirport = (g) => g.tiles.some((t, i) => t?.owner === g.turn && SQUARES
 // 1. Production follows the company's dial (SUPPLY.levels): matching demand, factories make only
 //    what the stores need to hold `cover` turns of sales, up to each factory's capacity for a
 //    turn; at full capacity they make all they can; idle, nothing.
-// 2. Logistics fill each store up to that target from the factories, nearest first. The same side
-//    of the board goes by local truck; another side needs a transport line on the factory's side
-//    (your own is free, a rival's charges freight per widget); the island needs your own airport.
+// 2. Logistics fill each store up to that target from the factories, nearest first. Shipping is
+//    free from a factory on a side where you own a transport line; otherwise it costs freight per
+//    widget (see `carrierOn`). The island and the main board are linked only by your own airport.
 function operate(g, p) {
   const factories = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'industrial'));
   const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'retail'));
@@ -865,14 +866,15 @@ function operate(g, p) {
   for (const f of factories) {
     const side = sideOf(f.pos);
     const carrier = carrierOn(g, side);
-    const reach = stores.filter((s) => sideOf(s.pos) === side || (carrier && ((side === 'island') === (sideOf(s.pos) === 'island') || airport)))
+    const reach = stores.filter((s) => (side === 'island') === (sideOf(s.pos) === 'island') || airport)
       .sort((a, b) => (sideOf(a.pos) === side ? 0 : 1) - (sideOf(b.pos) === side ? 0 : 1));
     for (const s of reach) {
       const n = Math.min(f.t.stock, need.get(s));
       if (n <= 0) continue;
-      if (sideOf(s.pos) !== side && carrier.owner) {
-        const fee = charge(g, p, n * RETAIL.freight, 'expFreight', `Freight on ${carrier.owner.name}'s ${SQUARES[carrier.pos].name}`);
-        if (fee) post(carrier.owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
+      if (!carrier.free) {
+        const by = carrier.owner ? `${carrier.owner.name}'s ${SQUARES[carrier.pos].name}` : 'a hired carrier';
+        const fee = charge(g, p, n * RETAIL.freight, 'expFreight', `Freight on ${by} to ${SQUARES[s.pos].name}`);
+        if (fee && carrier.owner) post(carrier.owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
         if (p.out) return;
       }
       const m = Math.min(n, f.t.stock); // paying the freight may have meant selling widgets

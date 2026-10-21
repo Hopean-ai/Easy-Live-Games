@@ -602,7 +602,7 @@ function renderTile() {
     box.push(el('p', {}, `${set.name} set of ${set.size}${set.placeholder ? ' (placeholder colour)' : ''}. Price ${money(sq.price)}.`));
   } else if (sq.kind === 'transport') {
     $('tile-title').textContent = sq.name;
-    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds. Your factories on this side ship over it to stores on other sides: free on your own line, freight on someone else's.`));
+    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds. Owning it lets your factories on this side ship free; other players' factories here pay you $${rules.retail.freight.toFixed(2)} a widget in freight.`));
     if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
@@ -779,7 +779,7 @@ function renderHand() {
     el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
     el('p', { class: 'small' }, placesText(me)),
     productionDial(me),
-    el('p', { class: 'small' }, `At the end of each of your turns your factories make widgets at the production level you set, and your company ships them to your stores. Stores on the factory's side of the board are reached by truck. Other sides need a transport line on the factory's side: your own is free, someone else's charges $${rules.retail.freight.toFixed(2)} a widget. The island needs an airport of your own.`),
+    el('p', { class: 'small' }, `At the end of each of your turns your factories make widgets at the production level you set, and your company ships them to your stores. Shipping is free from a factory on a side of the board where you own a transport line. Otherwise it costs $${rules.retail.freight.toFixed(2)} a widget, paid to whoever owns a line on that side or to a hired carrier. Island factories ship free across the island, and goods move between the island and the main board only through an airport of your own.`),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at ${r.minPrice === r.maxPrice ? `$${r.maxPrice.toFixed(2)}` : `$${r.minPrice.toFixed(2)} to $${r.maxPrice.toFixed(2)}`} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
