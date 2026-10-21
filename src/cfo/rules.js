@@ -56,6 +56,8 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   if (names.length < CONFIG.minPlayers || names.length > CONFIG.maxPlayers) throw new Error('bad player count');
   const g = {
     seed: seed >>> 0,
+    // What a widget goes into inventory at. Games begun before factory overhead keep $1 widgets.
+    widgetCost: ZONES.industrial.variableCost + ZONES.industrial.overhead,
     turn: 0,
     phase: 'roll', // roll | buy | act | over
     dice: null,
@@ -272,7 +274,7 @@ function cleanAction(action) {
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
   if (typeof action.accept === 'boolean') out.accept = action.accept;
-  if (typeof action.level === 'string' && Object.hasOwn(SUPPLY.levels, action.level)) out.level = action.level;
+  if (typeof action.level === 'string' && (Object.hasOwn(SUPPLY.levels, action.level) || Object.hasOwn(RETAIL.pricing, action.level))) out.level = action.level;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -323,8 +325,27 @@ export function act(g, who, raw) {
     return null;
   }
   // Miles: a production dial, which a company can turn at any time.
+  // Miles: a pricing dial for the company's stores, also turned at any time.
+  if (action.a === 'pricing') {
+    if (!Object.hasOwn(RETAIL.pricing, action.level ?? '')) return 'Pick a price level.';
+    p.pricing = action.level;
+    log(g, `${p.name} sets ${RETAIL.pricing[action.level].name.toLowerCase()} at their stores.`);
+    return null;
+  }
+  // The owner puts personal cash into the company as more capital, at any time.
+  if (action.a === 'invest') {
+    const amount = Math.floor(Number(action.amount) * 100) / 100;
+    if (!(amount > 0)) return 'Enter an amount.';
+    if (p.parent !== null) return 'Your company is a subsidiary; its parent company funds it.';
+    if (amount > p.personalCash) return 'You do not have that much personal cash.';
+    p.personalCash = round(p.personalCash - amount);
+    post(p, 'Owner invests more capital', { cash: amount, capital: -amount });
+    log(g, `${p.name} invests ${money(amount)} of their own money in their company.`);
+    afterAction(g);
+    return null;
+  }
   if (action.a === 'production') {
-    if (!action.level) return 'Pick a production level.';
+    if (!Object.hasOwn(SUPPLY.levels, action.level ?? '')) return 'Pick a production level.';
     p.production = action.level;
     log(g, `${p.name} sets production to ${SUPPLY.levels[action.level].name.toLowerCase()}.`);
     return null;
@@ -374,8 +395,9 @@ const ACTIONS = {
     log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
     if (d[0] === d[1] && p.assets.includes('horses') && !p.raced) {
       p.raced = true;
-      p.personalCash += M(100);
-      log(g, `${p.name}'s horse wins ${money(M(100))} at the races.`);
+      const prize = p.assets.filter((x) => x === 'horses').length * PERSONAL_CARDS.horses.prize;
+      p.personalCash += prize;
+      log(g, `${p.name}'s horses win ${money(prize)} at the races.`);
     }
     // Step square by square: widgets are picked up, dropped off and shipped along the way.
     for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
@@ -389,8 +411,8 @@ const ACTIONS = {
         log(g, `${p.name} completes a lap of the island.`);
         const houses = p.assets.filter((a) => a === 'beach').length;
         if (houses) {
-          p.personalCash += houses * M(100);
-          log(g, `${p.name} collects ${money(houses * M(100))} renting out beach houses.`);
+          p.personalCash += houses * PERSONAL_CARDS.beach.lap;
+          log(g, `${p.name} collects ${money(houses * PERSONAL_CARDS.beach.lap)} renting out beach houses.`);
         }
         fiscalYearEnd(g, p);
       }
@@ -691,7 +713,7 @@ const ACTIONS = {
     const { pos } = p.sale;
     const tile = g.tiles[pos];
     const owner = tile.owner;
-    const { units, price } = storeTerms(pos, tile);
+    const { units, price } = storeSales(g, pos, tile);
     if (owner === g.turn) {
       const s = RETAIL.sales[option];
       if (!s) return 'Pick a kind of sale.';
@@ -721,7 +743,7 @@ const ACTIONS = {
     // Every store sells from its own shelves.
     g.tiles.forEach((t, pos) => {
       if (t?.owner === g.turn && t.zone === 'retail' && t.building && t.stock) {
-        const { units, price } = storeTerms(pos, t);
+        const { units, price } = storeSales(g, pos, t);
         sellWidgets(g, p, t, units, price, `Widget sales at ${SQUARES[pos].name}`);
       }
     });
@@ -760,7 +782,7 @@ function buyLandmark(g, p, sq, tile) {
 }
 
 // A factory's capacity for one turn, sized by both the building's cost and the land's price so
-// pricier land is better (Miles). Each widget costs $1 of company cash to make.
+// pricier land is better (Miles). See ZONES.industrial for what the widgets cost.
 export function production(pos, cost) {
   return Math.round(ZONES.industrial.produce * Math.sqrt(cost * SQUARES[pos].price));
 }
@@ -770,14 +792,30 @@ export function storeTerms(pos, t) {
   return { units: Math.round(SQUARES[pos].price * RETAIL.perLandDollar), price: RETAIL.prices[t.building.rarity] ?? RETAIL.prices.common };
 }
 
+// What a store sells in a normal turn once its owner's pricing dial and the competition on its
+// side of the board are counted: each rival store there priced lower takes RETAIL.competition of
+// its customers, and each priced higher sends as many more.
+const PRICE_RANK = { low: 0, normal: 1, premium: 2 };
+export function storeSales(g, pos, t) {
+  const base = storeTerms(pos, t);
+  const level = g.players[t.owner]?.pricing ?? 'normal';
+  const dial = RETAIL.pricing[level];
+  let share = 1;
+  g.tiles.forEach((r, i) => {
+    if (i === pos || r?.zone !== 'retail' || !r.building || r.owner === null || r.owner === t.owner || sideOf(i) !== sideOf(pos) || g.players[r.owner].out) return;
+    share += RETAIL.competition * Math.sign(PRICE_RANK[g.players[r.owner].pricing ?? 'normal'] - PRICE_RANK[level]);
+  });
+  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share)), price: round(base.price * dial.price) };
+}
+
 // A company's stores: how many widgets they sell in a normal turn, and their prices.
 export function retailTerms(g, idx) {
-  const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.zone === 'retail' && t.building).map(({ t, pos }) => storeTerms(pos, t));
+  const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.zone === 'retail' && t.building).map(({ t, pos }) => storeSales(g, pos, t));
   const prices = stores.map((s) => s.price);
   return { units: stores.reduce((n, s) => n + s.units, 0), minPrice: Math.min(...prices, Infinity), maxPrice: Math.max(...prices, 0), stores: stores.length };
 }
 
-// Sells up to `units` widgets (each cost $1 to make) from `from` (a store tile's shelves, or the
+// Sells up to `units` widgets (at the game's widget cost) from `from` (a store tile's shelves, or the
 // player's storage, with a count in .stock / .carried) at `price` each; returns the revenue.
 function sellWidgets(g, p, from, units, price, text) {
   const key = from === p ? 'carried' : 'stock';
@@ -787,7 +825,8 @@ function sellWidgets(g, p, from, units, price, text) {
   if (n <= 0) return 0;
   const revenue = Math.round(n * price);
   post(p, text, { cash: revenue, revSales: -revenue });
-  post(p, `Cost of widgets sold (${n.toLocaleString('en-US')})`, { cogs: n, inventory: -n });
+  const cost = widgetValue(g, n);
+  post(p, `Cost of widgets sold (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`, { cogs: cost, inventory: -cost });
   log(g, `${p.name} sells ${n.toLocaleString('en-US')} widgets for ${money(revenue)}.`);
   return revenue;
 }
@@ -813,10 +852,19 @@ function visit(g, p, pos, landing) {
   if (landing && isMine(g, t, 'industrial')) makeWidgets(g, p, pos, production(pos, t.building.cost) * ZONES.industrial.overtime, 'Overtime shift');
 }
 
+// What widgets cost: `widgetCost` a unit (ZONES.industrial), or $1 in games begun before overhead.
+export const widgetCost = (g) => g.widgetCost ?? 1;
+const widgetValue = (g, n) => round(n * widgetCost(g));
+export function widgetsHeld(g, p) {
+  const idx = g.players.indexOf(p);
+  return p.carried + g.tiles.reduce((n, t) => n + (t?.owner === idx ? t.stock : 0), 0);
+}
+
 function makeWidgets(g, p, pos, want, why = 'Widgets made') {
-  const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p))));
+  const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p) / widgetCost(g))));
   if (n <= 0) return 0;
-  post(p, `${why} at ${SQUARES[pos].name}`, { inventory: n, cash: -n });
+  const cost = widgetValue(g, n);
+  post(p, `${why} at ${SQUARES[pos].name} (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`, { inventory: cost, cash: -cost });
   g.tiles[pos].stock = (g.tiles[pos].stock ?? 0) + n;
   log(g, `${p.name}'s ${SQUARES[pos].name} makes ${n.toLocaleString('en-US')} widgets.`);
   return n;
@@ -854,19 +902,28 @@ function operate(g, p) {
     p.carried = 0;
   }
   const level = SUPPLY.levels[p.production] ?? SUPPLY.levels.demand;
-  const target = ({ t, pos }) => storeTerms(pos, t).units * level.cover;
+  const target = ({ t, pos }) => storeSales(g, pos, t).units * level.cover;
   const onHand = p.carried + [...factories, ...stores].reduce((n, { t }) => n + t.stock, 0);
   let budget = !level.make ? 0 : level.flatOut ? Infinity : Math.max(0, stores.reduce((n, s) => n + target(s), 0) - onHand);
   for (const { t, pos } of factories) {
-    if (budget <= 0) break;
-    budget -= makeWidgets(g, p, pos, Math.min(budget, production(pos, t.building.cost)));
+    if (!isMine(g, t, 'industrial')) continue; // sold to cover an earlier factory's idle overhead
+    const cap = production(pos, t.building.cost);
+    const made = budget > 0 ? makeWidgets(g, p, pos, Math.min(budget, cap)) : 0;
+    budget -= made;
+    // The overhead on capacity left idle isn't absorbed by any widget, so it is a cost of the turn.
+    const idle = g.widgetCost === undefined ? 0 : round((cap - made) * ZONES.industrial.overhead);
+    if (idle > 0) charge(g, p, idle, 'cogs', `Idle capacity at ${SQUARES[pos].name}: overhead on ${(cap - made).toLocaleString('en-US')} widgets not made`);
+    if (p.out) return;
   }
-  const need = new Map(stores.map((s) => [s, Math.max(0, target(s) - s.t.stock)]));
+  // Paying for idle capacity may have meant selling buildings, so ship only between what is left.
+  const open = (list, kind) => list.filter(({ t }) => isMine(g, t, kind));
+  const shops = open(stores, 'retail');
+  const need = new Map(shops.map((s) => [s, Math.max(0, target(s) - s.t.stock)]));
   const airport = ownsAirport(g);
-  for (const f of factories) {
+  for (const f of open(factories, 'industrial')) {
     const side = sideOf(f.pos);
     const carrier = carrierOn(g, side);
-    const reach = stores.filter((s) => (side === 'island') === (sideOf(s.pos) === 'island') || airport)
+    const reach = shops.filter((s) => (side === 'island') === (sideOf(s.pos) === 'island') || airport)
       .sort((a, b) => (sideOf(a.pos) === side ? 0 : 1) - (sideOf(b.pos) === side ? 0 : 1));
     for (const s of reach) {
       const n = Math.min(f.t.stock, need.get(s));
@@ -1072,9 +1129,9 @@ function charge(g, p, amount, account, text) {
 function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
   const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx);
-  if (p.ledger.inventory > 0 && companyCash(p) < need) {
+  if (widgetsHeld(g, p) > 0 && companyCash(p) < need) {
     // Only as many widgets as the shortfall needs, from storage first, then factories and shelves.
-    let units = Math.min(p.ledger.inventory, Math.ceil((need - companyCash(p)) / CONFIG.liquidation));
+    let units = Math.min(widgetsHeld(g, p), Math.ceil((need - companyCash(p)) / CONFIG.liquidation));
     const sold = units;
     const take = Math.min(p.carried, units);
     p.carried -= take;
@@ -1087,7 +1144,8 @@ function liquidate(g, p, need) {
     const stock = sold - units;
     const proceeds = Math.round(stock * CONFIG.liquidation);
     if (stock > 0) {
-      post(p, `Cash shortfall: the bank bought ${stock.toLocaleString('en-US')} widgets (cost $1 each, ${money(stock)} in all) at $${CONFIG.liquidation.toFixed(2)} each`, { cash: proceeds, gain: stock - proceeds, inventory: -stock });
+      const cost = widgetValue(g, stock);
+      post(p, `Cash shortfall: the bank bought ${stock.toLocaleString('en-US')} widgets (cost ${money(widgetCost(g))} each, ${money(cost)} in all) at $${CONFIG.liquidation.toFixed(2)} each`, { cash: proceeds, gain: round(cost - proceeds), inventory: -cost });
       log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
     }
   }
@@ -1358,7 +1416,7 @@ function personalYearEnd(g, p) {
   p.taxFree = false;
   p.raced = false;
   const count = (id) => p.assets.filter((a) => a === id).length;
-  p.personalCash += count('mansion') * M(100);
+  p.personalCash += count('mansion') * PERSONAL_CARDS.mansion.yearly + count('cabin') * PERSONAL_CARDS.cabin.yearly;
   p.deduction = count('intelligent') ? M(100) : 0;
   const wealthy = count('wealthy');
   if (wealthy) p.personalCash += M(10 ** wealthy);
@@ -1440,7 +1498,7 @@ const MARKET_NOW = {
   shortage(g) {
     g.tiles.forEach((t, pos) => {
       if (t?.zone === 'retail' && t.building && t.stock && !g.players[t.owner].out) {
-        sellWidgets(g, g.players[t.owner], t, storeTerms(pos, t).units, 3, `Shortage sales at ${SQUARES[pos].name}`);
+        sellWidgets(g, g.players[t.owner], t, storeSales(g, pos, t).units, 3, `Shortage sales at ${SQUARES[pos].name}`);
       }
     });
   },
@@ -1453,7 +1511,7 @@ const MARKET_NOW = {
   },
   spoilage(g) {
     g.players.forEach((q, i) => {
-      if (q.out || q.ledger.inventory < 1) return;
+      if (q.out || widgetsHeld(g, q) < 1) return;
       // Take 10% from each place the widgets sit, then book the loss.
       let lost = 0;
       const cut = (n) => Math.floor(n / 10);
@@ -1465,7 +1523,7 @@ const MARKET_NOW = {
           t.stock -= cut(t.stock);
         }
       }
-      if (lost) post(q, 'Widgets lost to supply chain disruption', { expOther: lost, inventory: -lost });
+      if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expOther: widgetValue(g, lost), inventory: -widgetValue(g, lost) });
     });
   },
 };
@@ -1474,7 +1532,7 @@ const PLAYS = {
   stuffing(g, p) {
     const { maxPrice: price, stores } = retailTerms(g, g.turn);
     if (!stores) return 'You need a store to book sales through.';
-    if (p.ledger.inventory < 1) return 'You have no widgets.';
+    if (widgetsHeld(g, p) < 1) return 'You have no widgets.';
     let left = M(500); // widgets
     left -= sellWidgets(g, p, p, left, price, 'Early widget sales') / price;
     for (const [i, t] of g.tiles.entries()) {
@@ -1882,6 +1940,7 @@ export function viewFor(g, who) {
     turn: g.turn,
     phase: g.phase,
     dice: g.dice,
+    widgetCost: widgetCost(g),
     winner: g.winner,
     second: g.second ?? null,
     endReason: g.endReason,
@@ -1930,6 +1989,8 @@ export function viewFor(g, who) {
       inventory: open(i) ? p.ledger.inventory : null,
       carried: p.carried,
       production: p.production ?? 'demand',
+      pricing: p.pricing ?? 'normal',
+      widgets: open(i) ? widgetsHeld(g, p) : null,
       retail: retailTerms(g, i),
       ...(i === who && !g.easyBooks ? {
         docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),

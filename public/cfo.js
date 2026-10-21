@@ -465,6 +465,7 @@ function renderTurn() {
       box.append(el('button', { class: 'secondary', disabled: me.cash < rules.config.settlement, onclick: () => actNow({ a: 'settle' }) },
         `Settle one fraud quietly (${money(rules.config.settlement)} in legal fees)`));
     }
+    if (me.parent === null) box.append(amountForm('Invest in your company', 'Put your own personal cash into your company as more capital, at any time. It is not taxed and cannot be taken back out except as pay.', (amount) => actNow({ a: 'invest', amount })));
     box.append(amountForm('Pay yourself extra', `Your salary is paid automatically at each fiscal year end. This pays you more now from company cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : g.tiles.some((t) => t?.owner === mySeat && t.zone === 'industrial' && t.stock > 0))) box.append(saleControls(me));
     const cfg = rules.config;
@@ -509,7 +510,7 @@ function saleControls(me) {
   const owner = g.players[tile.owner];
   const box = el('div', { class: 'sale' });
   if (tile.owner === mySeat) {
-    const { units, price } = storeTerms(me.sale.pos, tile.building);
+    const { units, price } = storeSales(g, me.sale.pos, tile);
     box.append(el('p', {}, `Your store at ${rules.squares[me.sale.pos].name}: run a sale this turn?`));
     const row = el('div', { class: 'row' });
     for (const [id, s] of Object.entries(rules.retail.sales)) {
@@ -518,7 +519,7 @@ function saleControls(me) {
     }
     box.append(row);
   } else {
-    const { units, price } = storeTerms(me.sale.pos, tile.building);
+    const { units, price } = storeSales(g, me.sale.pos, tile);
     box.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'sell' }) },
       `Sell up to ${units.toLocaleString('en-US')} widgets from your factories through ${owner.name}'s store at $${price.toFixed(2)} (they keep ${Math.round(rules.retail.commission * 100)}%)`));
   }
@@ -539,13 +540,25 @@ function productionDial(me) {
   const hint = {
     idle: 'make nothing and save cash; stores keep selling what they have',
     demand: `make only what your stores need to hold ${levels.demand.cover} turns of sales`,
-    full: `run flat out; stores hold ${levels.full.cover} turns of sales and the rest waits in your factories`,
+    full: `run flat out, making the cheapest widgets; stores hold ${levels.full.cover} turns of sales and the rest waits in your factories`,
   };
   const current = me.production ?? 'demand';
   return el('div', {},
     el('p', { class: 'small' }, `Production: ${levels[current].name}. Factories ${hint[current]}.`),
     el('div', { class: 'row' }, Object.entries(levels).map(([id, l]) =>
       el('button', { class: 'secondary', disabled: id === current, onclick: () => actNow({ a: 'production', level: id }) }, l.name))));
+}
+
+// Miles: a pricing dial for the company's stores, also turned at any time.
+function pricingDial(me) {
+  const levels = rules.retail.pricing;
+  const current = me.pricing ?? 'normal';
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const hint = (l) => (l.price === 1 ? 'list prices and normal volume' : `${pct(l.price)} of list price, ${pct(l.volume)} of normal volume`);
+  return el('div', {},
+    el('p', { class: 'small' }, `Pricing: ${levels[current].name}, ${hint(levels[current])}. Each rival store on the same side of the board with lower prices takes ${pct(rules.retail.competition)} of a store's customers; each with higher prices sends it ${pct(rules.retail.competition)} more.`),
+    el('div', { class: 'row' }, Object.entries(levels).map(([id, l]) =>
+      el('button', { class: 'secondary', disabled: id === current, onclick: () => actNow({ a: 'pricing', level: id }) }, l.name))));
 }
 
 function widgetText(n) {
@@ -720,14 +733,28 @@ function storeTerms(pos, building) {
   const r = rules.retail;
   return { units: Math.round(rules.squares[pos].price * r.perLandDollar), price: r.prices[building.rarity] ?? r.prices.common };
 }
+// Mirrors storeSales(): the owner's pricing dial and rival stores on the same side.
+const PRICE_RANK = { low: 0, normal: 1, premium: 2 };
+const sideOf = (pos) => (pos >= 1 && pos <= 20 ? 'top' : pos >= 22 && pos <= 30 ? 'right' : pos >= 32 && pos <= 51 ? 'bottom' : pos >= 53 && pos < rules.size ? 'left' : pos >= rules.size ? 'island' : null);
+function storeSales(g, pos, tile) {
+  const base = storeTerms(pos, tile.building);
+  const level = g.players[tile.owner]?.pricing ?? 'normal';
+  const dial = rules.retail.pricing[level];
+  let share = 1;
+  g.tiles.forEach((r, i) => {
+    if (i === pos || r?.zone !== 'retail' || !r.building || r.owner === null || r.owner === tile.owner || sideOf(i) !== sideOf(pos) || g.players[r.owner].out) return;
+    share += rules.retail.competition * Math.sign(PRICE_RANK[g.players[r.owner].pricing ?? 'normal'] - PRICE_RANK[level]);
+  });
+  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share)), price: Math.round(base.price * dial.price * 100) / 100 };
+}
 
 function zoneText(id) {
   const z = rules.zones[id];
   const pct = (x) => `${Math.round(x * 100)}%`;
   const r = rules.retail;
   const yearly = {
-    industrial: `makes widgets at the end of each of your turns, only as many as your stores need, up to ${z.produce} × √(PP&E cost × land price) a turn, so both the PP&E's price and the land's price count. Each widget costs $1 of company cash. Landing on it runs an overtime shift of ${z.overtime} turns' worth`,
-    retail: `at the end of each of your turns sells up to ${r.perLandDollar} widgets per dollar of land price from its shelves, so pricier land sells more. Pricier PP&E sells at a better price, $${r.prices.common.toFixed(2)} to $${r.prices.legendary.toFixed(2)} a widget. Landing on it lets you run a special sale`,
+    industrial: `makes widgets at the end of each of your turns, only as many as your stores need, up to ${z.produce} × √(PP&E cost × land price) a turn, so both the PP&E's price and the land's price count. Each widget takes $${z.variableCost.toFixed(2)} of materials and labour, and the factory carries $${z.overhead.toFixed(2)} of overhead per widget of capacity every turn: a full factory makes widgets for $${(z.variableCost + z.overhead).toFixed(2)}, and overhead on capacity left idle is still paid. Landing on it runs an overtime shift of ${z.overtime} turns' worth`,
+    retail: `at the end of each of your turns sells up to ${r.perLandDollar} widgets per dollar of land price from its shelves, so pricier land sells more. Pricier PP&E sells at a better price, $${r.prices.common.toFixed(2)} to $${r.prices.legendary.toFixed(2)} a widget at normal prices. Your pricing dial and rival stores on the same side change both. Landing on it lets you run a special sale`,
     residential: `pays you passive income at each fiscal year end of ${pct(z.yearly)} of its cost`,
     banking: `each fiscal year earns ${pct(z.interest)} interest on your company's cash plus fees of ${pct(z.yearly)} of its cost`,
   }[id];
@@ -742,7 +769,7 @@ function buildingText(pos, tile) {
     return `Makes up to ${n.toLocaleString('en-US')} widgets a turn, ${(n * rules.zones.industrial.overtime).toLocaleString('en-US')} in an overtime shift when its owner lands here.`;
   }
   if (tile.zone === 'retail') {
-    const { units, price } = storeTerms(pos, b);
+    const { units, price } = storeSales(state.game, pos, tile);
     return `Sells up to ${units.toLocaleString('en-US')} widgets a turn at $${price.toFixed(2)}.`;
   }
   if (tile.zone === 'residential') return `Pays ${money(b.cost * rules.zones.residential.yearly)} at each of its owner's fiscal year ends.`;
@@ -777,9 +804,10 @@ function renderHand() {
   const assets = me.assets.map((id) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' }, `${rules.personal[id].name} ${money(rules.personal[id].value)}`));
   const r = me.retail;
   $('widgets').replaceChildren(
-    el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
+    el('p', {}, `${me.widgets.toLocaleString('en-US')} widgets${me.widgets >= 1 ? `: ${widgetText(me.widgets)}` : ''}, carried at ${money(me.inventory)}.`),
     el('p', { class: 'small' }, placesText(me)),
     productionDial(me),
+    pricingDial(me),
     el('p', { class: 'small' }, `At the end of each of your turns your factories make widgets at the production level you set, and your company ships them to your stores. Shipping is free from a factory on a side of the board where you own a transport line. Otherwise it costs $${rules.retail.freight.toFixed(2)} a widget, paid to whoever owns a line on that side or to a hired carrier. Island factories ship free across the island, and goods move between the island and the main board only through an airport of your own.`),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at ${r.minPrice === r.maxPrice ? `$${r.maxPrice.toFixed(2)}` : `$${r.minPrice.toFixed(2)} to $${r.maxPrice.toFixed(2)}`} each.`

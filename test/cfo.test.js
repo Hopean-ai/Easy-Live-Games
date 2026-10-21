@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS } from '../src/cfo/data.js';
+import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -55,7 +55,7 @@ function playOut(seed, players = 4, options = {}) {
       assert.ok(Math.abs(b.totalAssets - b.totalLiabilitiesAndEquity) < 0.01, 'assets = liabilities + equity');
       assert.equal(b.assets.cash, q.ledger.cash);
       const held = q.carried + g.tiles.reduce((n, t) => n + (t && t.owner === g.players.indexOf(q) ? t.stock : 0), 0);
-      if (!q.out) assert.equal(held, q.ledger.inventory, 'every widget is somewhere');
+      if (!q.out) assert.ok(Math.abs(held * g.widgetCost - q.ledger.inventory) < 0.01, 'every widget is somewhere');
     }
   }
   return g;
@@ -201,9 +201,11 @@ test('a fiscal year end pays your salary, depreciates, taxes and closes the book
 });
 
 // Gives player i `n` widgets on their token, keeping the books balanced.
+// Widgets go into inventory at their cost; see ZONES.industrial.
+const COST = ZONES.industrial.variableCost + ZONES.industrial.overhead;
 function give(p, n) {
-  p.ledger.inventory += n;
-  p.ledger.capital -= n;
+  p.ledger.inventory += n * COST;
+  p.ledger.capital -= n * COST;
   p.carried += n;
 }
 
@@ -227,7 +229,7 @@ test('stores sell from their own shelves every turn: the land sets how many, the
   assert.equal(g.tiles[l1].stock, big - 100 - n1, 'a store sells as many as its land allows');
   assert.equal(g.tiles[l2].stock, 0, 'and no more than it has');
   assert.equal(incomeStatement(p).revenue.revSales, Math.round(n1 * RETAIL.prices.rare) + Math.round(100 * RETAIL.prices.uncommon));
-  assert.equal(incomeStatement(p).expenses.cogs, n1 + 100);
+  assert.equal(incomeStatement(p).expenses.cogs, Math.round((n1 + 100) * COST * 100) / 100);
 });
 
 test('landing on a store: your own runs a special sale, someone else\'s sells through theirs', () => {
@@ -284,10 +286,11 @@ test('factories make what the stores need each turn, and logistics ship it to th
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
   const freight = Math.round(cap * RETAIL.freight);
+  const made = Math.round(cap * COST * 100) / 100; // a full factory absorbs all its overhead
   assert.equal(b.ledger.cash, bCash + freight);
   assert.equal(g.tiles[factory].stock, 0);
   assert.equal(a.ledger.inventory, 0, 'everything shipped and sold');
-  assert.equal(a.ledger.cash, cash - cap - freight + cap * RETAIL.prices.common);
+  assert.equal(a.ledger.cash, cash - made - freight + cap * RETAIL.prices.common);
 
   // Production is planned to demand: a store already holding its target gets nothing more made.
   const target = SQUARES[shop].price * RETAIL.perLandDollar * SUPPLY.levels.demand.cover;
@@ -295,8 +298,12 @@ test('factories make what the stores need each turn, and logistics ship it to th
   a.carried = 0;
   g.tiles[shop].stock = 2 * target;
   Object.assign(g, { turn: 0, phase: 'act' });
+  const beforeIdle = a.ledger.cash;
   act(g, 0, { a: 'end' });
-  assert.equal(a.ledger.inventory, g.tiles[shop].stock, 'nothing new was made');
+  const sold = 2 * target - g.tiles[shop].stock;
+  assert.ok(Math.abs(a.ledger.inventory - g.tiles[shop].stock * COST) < 0.01, 'nothing new was made');
+  const overhead = Math.round(cap * ZONES.industrial.overhead * 100) / 100;
+  assert.equal(a.ledger.cash, beforeIdle + sold * RETAIL.prices.common - overhead, 'the idle factory\'s overhead is still paid');
 
   // The dial: idle makes nothing; full capacity makes all it can, even with stores stocked.
   assert.equal(act(g, 1, { a: 'production', level: 'idle' }), null, 'any company can turn its own dial, on any turn');
@@ -306,7 +313,7 @@ test('factories make what the stores need each turn, and logistics ship it to th
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
   const turnSales = SQUARES[shop].price * RETAIL.perLandDollar;
-  assert.equal(a.ledger.inventory, held + cap - turnSales, 'a full shift is made though the store was stocked');
+  assert.ok(Math.abs(a.ledger.inventory - (held + (cap - turnSales) * COST)) < 0.01, 'a full shift is made though the store was stocked');
   act(g, 0, { a: 'production', level: 'idle' });
   const stocked = a.ledger.inventory;
   g.tiles[shop].stock -= 1; // room on the shelves
@@ -327,14 +334,14 @@ test('factories make what the stores need each turn, and logistics ship it to th
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
   assert.equal(b.ledger.cash, bBefore);
-  assert.equal(a.ledger.cash, aBefore - cap - Math.round(cap * RETAIL.freight) + cap * RETAIL.prices.common);
+  assert.equal(a.ledger.cash, aBefore - made - Math.round(cap * RETAIL.freight) + cap * RETAIL.prices.common);
 
   // Your own line on the factory's side ships free.
   g.tiles[rail].owner = 0;
   const own = a.ledger.cash;
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
-  assert.equal(a.ledger.cash, own - cap + cap * RETAIL.prices.common);
+  assert.equal(a.ledger.cash, own - made + cap * RETAIL.prices.common);
 
   // Landing on your own factory runs an overtime shift.
   for (let s = 1; ; s++) {
@@ -961,7 +968,7 @@ test('the Personal Assets square always gives a free card or a discount on one c
   for (const [k, n] of Object.entries(seen)) assert.ok(n > 30, `${k} happened ${n} times in 300`);
 });
 
-test('plain personal assets have small effects', () => {
+test('plain personal assets pay perks', () => {
   const g = createGame(['A', 'B'], 7);
   const p = g.players[0];
   // Mountain Cabin: no sitting out at CPE.
@@ -981,7 +988,7 @@ test('plain personal assets have small effects', () => {
   p.pos = BOARD_SIZE - 2;
   p.raced = true;
   act(g, 0, { a: 'roll' });
-  assert.equal(p.personalCash - before, M(200));
+  assert.equal(p.personalCash - before, 2 * PERSONAL_CARDS.mansion.yearly);
   post(p, 'Test: refill the company', { cash: kept, capital: -kept });
   // Horses: one win at the races per fiscal year, on doubles.
   p.assets = ['horses'];
@@ -1002,7 +1009,7 @@ test('plain personal assets have small effects', () => {
   p.raced = true;
   const cash = p.personalCash;
   act(g, 0, { a: 'roll' });
-  assert.ok(p.personalCash >= cash + M(100));
+  assert.ok(p.personalCash >= cash + PERSONAL_CARDS.beach.lap);
 });
 
 test('frauds age off the record, one every few fiscal years', () => {
@@ -1278,4 +1285,48 @@ test('over whole games, statements built from correct entries match the true boo
       }
     }
   }
+});
+
+test('owners can invest personal cash in their company as capital', () => {
+  const g = createGame(['A', 'B'], 31);
+  const p = g.players[0];
+  const [cash, personal, capital] = [p.ledger.cash, p.personalCash, p.ledger.capital];
+  assert.equal(act(g, 0, { a: 'invest', amount: personal + 1 }), 'You do not have that much personal cash.');
+  assert.equal(act(g, 0, { a: 'invest', amount: 1234.5 }), null);
+  assert.equal(p.ledger.cash, cash + 1234.5);
+  assert.equal(p.ledger.capital, capital - 1234.5);
+  assert.equal(p.personalCash, personal - 1234.5);
+  assert.equal(act(g, 1, { a: 'invest', amount: 100 }), null, 'any time, not only on your turn');
+});
+
+test('the pricing dial trades price for volume, and rival stores on a side compete', () => {
+  const g = createGame(['A', 'B'], 32);
+  const shop = posOfSpace(1);
+  const rival = posOfSpace(2); // same side
+  store(g, 0, 1, 'common', 100);
+  const base = SQUARES[shop].price * RETAIL.perLandDollar;
+  assert.deepEqual(storeSales(g, shop, g.tiles[shop]), { units: base, price: RETAIL.prices.common });
+  assert.equal(act(g, 0, { a: 'pricing', level: 'premium' }), null);
+  const p = RETAIL.pricing.premium;
+  assert.deepEqual(storeSales(g, shop, g.tiles[shop]), { units: Math.round(base * p.volume), price: RETAIL.prices.common * p.price });
+  // B's store on the same side at normal prices undercuts A's premium store.
+  store(g, 1, 2, 'common', 100);
+  assert.equal(storeSales(g, shop, g.tiles[shop]).units, Math.round(base * p.volume * (1 - RETAIL.competition)));
+  assert.equal(storeSales(g, rival, g.tiles[rival]).units, Math.round(SQUARES[rival].price * RETAIL.perLandDollar * (1 + RETAIL.competition)));
+  assert.equal(act(g, 0, { a: 'pricing', level: 'cheap' }), 'Pick a price level.');
+});
+
+test('games begun before factory overhead keep $1 widgets', () => {
+  const g = createGame(['A', 'B'], 33);
+  delete g.widgetCost;
+  const p = g.players[0];
+  const factory = posOfSpace(12);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  Object.assign(g, { turn: 0, phase: 'act' });
+  p.production = 'full';
+  const cash = p.ledger.cash;
+  act(g, 0, { a: 'end' });
+  const made = production(factory, M(100));
+  assert.equal(p.ledger.inventory, made);
+  assert.equal(p.ledger.cash, cash - made, 'no idle overhead either');
 });
