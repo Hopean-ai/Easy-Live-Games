@@ -465,7 +465,7 @@ function renderTurn() {
         `Settle one fraud quietly (${money(rules.config.settlement)} in legal fees)`));
     }
     box.append(amountForm('Pay yourself extra', `Your salary is paid automatically at each fiscal year end. This pays you more now from company cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
-    if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : me.carried > 0)) box.append(saleControls(me));
+    if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : g.tiles.some((t) => t?.owner === mySeat && t.zone === 'industrial' && t.stock > 0))) box.append(saleControls(me));
     const cfg = rules.config;
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
       box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? You will own less of your company, and auditors will look twice as hard.`) && actNow({ a: 'ipo' }) },
@@ -519,7 +519,7 @@ function saleControls(me) {
   } else {
     const { units, price } = storeTerms(me.sale.pos, tile.building);
     box.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'sell' }) },
-      `Sell up to ${units.toLocaleString('en-US')} widgets through ${owner.name}'s store at $${price.toFixed(2)} (they keep ${Math.round(rules.retail.commission * 100)}%)`));
+      `Sell up to ${units.toLocaleString('en-US')} widgets from your factories through ${owner.name}'s store at $${price.toFixed(2)} (they keep ${Math.round(rules.retail.commission * 100)}%)`));
   }
   return box;
 }
@@ -527,7 +527,9 @@ function saleControls(me) {
 function placesText(me) {
   const g = state.game;
   const where = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === mySeat && t.stock > 0);
-  return where.map(({ t, pos }) => `${t.stock.toLocaleString('en-US')} at ${rules.squares[pos].name}`).join(', ');
+  const places = where.map(({ t, pos }) => `${t.stock.toLocaleString('en-US')} at ${rules.squares[pos].name}`);
+  if (me.carried > 0) places.push(`${me.carried.toLocaleString('en-US')} in storage until you have a factory or store`);
+  return places.join(', ');
 }
 
 function widgetText(n) {
@@ -585,7 +587,7 @@ function renderTile() {
     box.push(el('p', {}, `${set.name} set of ${set.size}${set.placeholder ? ' (placeholder colour)' : ''}. Price ${money(sq.price)}.`));
   } else if (sq.kind === 'transport') {
     $('tile-title').textContent = sq.name;
-    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds. Passing it ships your widgets to your stores on this side, or on any side where you own transport.`));
+    box.push(el('p', {}, `${rules.modes[sq.mode].name}. Price ${money(sq.price)}. Rent doubles for each other ${rules.modes[sq.mode].name.toLowerCase()} tile the owner holds. Your factories on this side ship over it to stores on other sides: free on your own line, freight on someone else's.`));
     if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
@@ -597,7 +599,7 @@ function renderTile() {
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year, charged on the most you owe during the year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
-      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year. Like any transport tile, it ships the widgets you carry to your stores across the island. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
+      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
       exchange: `The Exchange. Land here and personal assets cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,
@@ -613,7 +615,7 @@ function renderTile() {
         box.push(el('p', { class: 'small' }, `${r.name} PP&E, cost ${money(tile.building.cost)}, book value ${money((tile.building.basis ?? tile.building.cost) - tile.building.dep)}.`));
         const what = buildingText(selected, tile);
         if (what) box.push(el('p', { class: 'small' }, what));
-        if (tile.stock) box.push(el('p', { class: 'small' }, `${tile.stock.toLocaleString('en-US')} widgets ${tile.zone === 'retail' ? 'on the shelves' : 'waiting to be collected'}.`));
+        if (tile.stock) box.push(el('p', { class: 'small' }, `${tile.stock.toLocaleString('en-US')} widgets ${tile.zone === 'retail' ? 'on the shelves' : 'waiting to ship'}.`));
       }
     }
     const mine = tile.owner === mySeat && myTurn() && g.phase === 'act' && sq.kind === 'land';
@@ -695,9 +697,8 @@ function renderOffers() {
 const salvageValue = (b) => Math.round(((b.basis ?? b.cost) - b.dep) * rules.config.salvage);
 
 // Mirrors production() and storeTerms() in src/cfo/rules.js: the land price and the PP&E both count.
-function production(pos, cost, landing) {
-  const z = rules.zones.industrial;
-  return Math.round(z.produce * Math.sqrt(cost * rules.squares[pos].price)) * (landing ? z.landing : 1);
+function production(pos, cost) {
+  return Math.round(rules.zones.industrial.produce * Math.sqrt(cost * rules.squares[pos].price));
 }
 function storeTerms(pos, building) {
   const r = rules.retail;
@@ -709,7 +710,7 @@ function zoneText(id) {
   const pct = (x) => `${Math.round(x * 100)}%`;
   const r = rules.retail;
   const yearly = {
-    industrial: `makes widgets each time your token passes it, and ${z.landing} times as many when you land on it. The amount grows with both the PP&E's price and the land's price (${z.produce} × √(PP&E cost × land price)); each widget costs $1 of company cash`,
+    industrial: `makes widgets at the end of each of your turns, only as many as your stores need, up to ${z.produce} × √(PP&E cost × land price) a turn, so both the PP&E's price and the land's price count. Each widget costs $1 of company cash. Landing on it runs an overtime shift of ${z.overtime} turns' worth`,
     retail: `at the end of each of your turns sells up to ${r.perLandDollar} widgets per dollar of land price from its shelves, so pricier land sells more. Pricier PP&E sells at a better price, $${r.prices.common.toFixed(2)} to $${r.prices.legendary.toFixed(2)} a widget. Landing on it lets you run a special sale`,
     residential: `pays you passive income at each fiscal year end of ${pct(z.yearly)} of its cost`,
     banking: `each fiscal year earns ${pct(z.interest)} interest on your company's cash plus fees of ${pct(z.yearly)} of its cost`,
@@ -721,8 +722,8 @@ function zoneText(id) {
 function buildingText(pos, tile) {
   const b = tile.building;
   if (tile.zone === 'industrial') {
-    const n = production(pos, b.cost, false);
-    return `Makes ${n.toLocaleString('en-US')} widgets each time its owner passes, ${(n * rules.zones.industrial.landing).toLocaleString('en-US')} on landing.`;
+    const n = production(pos, b.cost);
+    return `Makes up to ${n.toLocaleString('en-US')} widgets a turn, ${(n * rules.zones.industrial.overtime).toLocaleString('en-US')} in an overtime shift when its owner lands here.`;
   }
   if (tile.zone === 'retail') {
     const { units, price } = storeTerms(pos, b);
@@ -761,8 +762,8 @@ function renderHand() {
   const r = me.retail;
   $('widgets').replaceChildren(
     el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
-    el('p', { class: 'small' }, `${me.carried.toLocaleString('en-US')} on your token. ${placesText(me)}`),
-    el('p', { class: 'small' }, 'Your factories make widgets onto your token as it passes (more when you land), and your token drops them at your stores as it passes. Passing a transport tile ships them to your stores on that side of the board, or on any side where you own transport (freight is charged on other players\' lines).'),
+    el('p', { class: 'small' }, placesText(me)),
+    el('p', { class: 'small' }, `At the end of each of your turns your factories make what your stores need to hold ${rules.supply.cover} turns of sales, and your company ships it to them. Stores on the factory's side of the board are reached by truck. Other sides need a transport line on the factory's side: your own is free, someone else's charges $${rules.retail.freight.toFixed(2)} a widget. The island needs an airport of your own.`),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at ${r.minPrice === r.maxPrice ? `$${r.maxPrice.toFixed(2)}` : `$${r.minPrice.toFixed(2)} to $${r.maxPrice.toFixed(2)}`} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL } from '../src/cfo/data.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY } from '../src/cfo/data.js';
 import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
@@ -239,6 +239,8 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
   give(a, 10 * n);
   a.carried = 0;
   give(b, 10 * n);
+  b.carried = 0;
+  Object.assign(g.tiles[posOfSpace(12)], { owner: 1, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 10 * n });
   store(g, 0, 1, 'rare', 1000, 10 * n);
   g.phase = 'act';
   assert.equal(act(g, 0, { a: 'sell', option: 'clearance' }), 'There is no sale to make here.');
@@ -252,7 +254,7 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
   b.sale = { pos };
   const before = a.ledger.cash;
   assert.equal(act(g, 1, { a: 'sell' }), null);
-  assert.equal(b.carried, 9 * n);
+  assert.equal(g.tiles[posOfSpace(12)].stock, 9 * n, 'wholesale from the factory\'s warehouse');
   assert.equal(incomeStatement(b).revenue.revSales, Math.round(n * price));
   assert.equal(a.ledger.cash, before + Math.round(n * price * RETAIL.commission), 'the store owner keeps a commission');
   for (const p of g.players) {
@@ -261,56 +263,66 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
   }
 });
 
-test('factories make widgets as you pass and more as you land; transport ships them to stores', () => {
+test('factories make what the stores need each turn, and logistics ship it to them', () => {
   const g = createGame(['A', 'B'], 3);
   const [a, b] = g.players;
-  const factory = posOfSpace(12);
+  const factory = posOfSpace(12); // top
   const cost = M(100);
   Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost, dep: 0 }, stock: 0 });
-  const pass = Math.round(ZONES.industrial.produce * Math.sqrt(cost * SQUARES[factory].price));
-  assert.equal(production(factory, cost, false), pass, 'the building and the land count equally');
-  assert.equal(production(factory, cost, true), pass * ZONES.industrial.landing);
-  const shop = posOfSpace(30); // bottom side, like the airport at space 34
+  const cap = Math.round(ZONES.industrial.produce * Math.sqrt(cost * SQUARES[factory].price));
+  assert.equal(production(factory, cost), cap, 'the building and the land count equally');
+  const shop = posOfSpace(30); // bottom
   store(g, 0, 30, 'common', 100);
-  const airport = posOfSpace(34);
-  g.tiles[airport].owner = 1;
+  const rail = posOfSpace(5); // top
+  g.tiles[rail].owner = 1;
+  assert.equal(sideOf(rail), sideOf(factory));
 
-  // Walking past the factory makes widgets, paid for from company cash, onto the token.
+  // At the end of the turn the factory runs, paid from company cash, and B's railway on the
+  // factory's side carries the widgets to the bottom store for freight. The store then sells them.
   const cash = a.ledger.cash;
-  Object.assign(g, { turn: 0, phase: 'roll' });
-  a.pos = factory - 1;
-  g.seed = 7;
-  act(g, 0, { a: 'roll' });
-  assert.notEqual(a.pos, factory);
-  assert.equal(a.carried, pass);
-  assert.equal(a.ledger.inventory, pass);
-  assert.equal(a.ledger.cash, cash - pass);
+  const bCash = b.ledger.cash;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  const freight = Math.round(cap * RETAIL.freight);
+  assert.equal(b.ledger.cash, bCash + freight);
+  assert.equal(g.tiles[factory].stock, 0);
+  assert.equal(a.ledger.inventory, 0, 'everything shipped and sold');
+  assert.equal(a.ledger.cash, cash - cap - freight + cap * RETAIL.prices.common);
 
-  // Landing on it makes more.
+  // Production is planned to demand: a store already holding its target gets nothing more made.
+  const target = SQUARES[shop].price * RETAIL.perLandDollar * SUPPLY.cover;
+  give(a, 2 * target);
   a.carried = 0;
-  a.ledger.inventory = 0;
-  a.ledger.cash = cash;
+  g.tiles[shop].stock = 2 * target;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.equal(a.ledger.inventory, g.tiles[shop].stock, 'nothing new was made');
+
+  // With no transport on the factory's side, goods for another side wait in the factory.
+  g.tiles[rail].owner = null;
+  give(a, -g.tiles[shop].stock);
+  a.carried = 0;
+  g.tiles[shop].stock = 0;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.equal(g.tiles[factory].stock, cap);
+  assert.equal(g.tiles[shop].stock, 0);
+
+  // Landing on your own factory runs an overtime shift.
   for (let s = 1; ; s++) {
     Object.assign(g, { turn: 0, phase: 'roll', seed: s });
     a.pos = factory - 7;
-    const before = a.carried;
+    const before = g.tiles[factory].stock;
     act(g, 0, { a: 'roll' });
     if (a.pos === factory) {
-      assert.equal(a.carried - before, pass * ZONES.industrial.landing);
+      assert.equal(g.tiles[factory].stock - before, cap * ZONES.industrial.overtime);
       break;
     }
   }
-  assert.equal(sideOf(airport), 'bottom');
-
-  // Passing B's airport on the bottom side ships them to A's store there, for a freight fee.
-  const load = a.carried;
-  Object.assign(g, { turn: 0, phase: 'roll' });
-  a.pos = airport - 1;
-  const bCash = b.ledger.cash;
-  act(g, 0, { a: 'roll' });
-  assert.equal(a.carried, 0);
-  assert.equal(g.tiles[shop].stock, load);
-  assert.equal(b.ledger.cash, bCash + Math.round(load * RETAIL.freight));
+  for (const p of g.players) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
 });
 
 test('loans add a liability and charge interest at year end', () => {
@@ -630,7 +642,7 @@ test('the portfolio win needs a lap of the island', () => {
   assert.equal(g.winner, 0);
 });
 
-test('shipments reach stores on any side with your own transport, and keep moving while you are away', () => {
+test('your own transport ships to other sides free, even while you are away', () => {
   const g = createGame(['A', 'B'], 10);
   const a = g.players[0];
   const factory = posOfSpace(12); // top
@@ -642,7 +654,7 @@ test('shipments reach stores on any side with your own transport, and keep movin
   store(g, 0, 30, 'common', 100);
   g.tiles[posOfSpace(34)].owner = 0; // A's airport on the bottom side
   g.tiles[posOfSpace(5)].owner = 0; // A's railway on the top side
-  // A is away on the island; at the end of the turn A's lines ship the top factory's stock to the bottom store.
+  // A is away on the island; at the end of the turn A's railway ships the top factory's stock to the bottom store.
   Object.assign(g, { turn: 0, phase: 'act' });
   a.pos = ISLAND_START + 3;
   assert.equal(act(g, 0, { a: 'end' }), null);
@@ -1148,28 +1160,25 @@ test('rezoning costs a fee and the PP&E must be rebuilt', () => {
   assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
 
-test('the island Terminal ships your widgets to your stores across the island', () => {
+test('shipping to the island needs an airport of your own', () => {
   const g = createGame(['A', 'B'], 14, { easyBooks: true });
   const p = g.players[0];
-  const shops = [ISLAND_START + 3, ISLAND_START + 15];
-  for (const pos of shops) Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
-  // Flying in lands you at the Terminal, which ships what you carry.
+  const shop = ISLAND_START + 3;
+  Object.assign(g.tiles[shop], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
+  const factory = posOfSpace(12);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 100, dep: 0 }, stock: 0 });
   give(p, 1000);
+  p.carried = 0;
+  g.tiles[factory].stock = 1000;
+  g.tiles[posOfSpace(5)].owner = 0; // A's railway on the factory's side
   Object.assign(g, { turn: 0, phase: 'act' });
-  const airport = posOfSpace(34);
-  g.tiles[airport].owner = 0;
-  p.pos = airport;
-  assert.equal(act(g, 0, { a: 'fly' }), null);
-  assert.equal(p.pos, ISLAND_START);
-  assert.equal(p.carried, 0);
-  assert.deepEqual(shops.map((s) => g.tiles[s].stock), [500, 500]);
-  // Passing it on a lap does the same.
-  give(p, 600);
-  Object.assign(g, { turn: 0, phase: 'roll' });
-  p.pos = ISLAND_START + 23;
-  act(g, 0, { a: 'roll' });
-  assert.equal(p.carried, 0);
-  assert.equal(shops.reduce((n, s) => n + g.tiles[s].stock, 0), 1600);
+  act(g, 0, { a: 'end' });
+  assert.equal(g.tiles[shop].stock, 0, 'a railway does not reach the island');
+  g.tiles[posOfSpace(34)].owner = 0; // A's airport
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.ok(g.tiles[factory].stock < 1000, 'an airport does');
+  assert.equal(p.ledger.inventory, g.tiles[factory].stock + g.tiles[shop].stock);
 });
 
 test('a game begun with typed statements switches to statements built from entries', () => {
