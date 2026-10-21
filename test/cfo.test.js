@@ -324,6 +324,31 @@ test('loans add a liability and charge interest at year end', () => {
   assert.equal(balanceSheet(p).liabilities.loan, 2000);
   assert.equal(act(g, 0, { a: 'repay', amount: 500 }), null);
   assert.equal(balanceSheet(p).liabilities.loan, 1500);
+  // Repaying everything before the year end still pays interest on the most owed this year.
+  assert.equal(act(g, 0, { a: 'repay', amount: 1500 }), null);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.report.income.expenses.expInterest, 2000 * CONFIG.loanInterest);
+  // With nothing borrowed the next year, there is no interest.
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.report.income.expenses.expInterest, 0);
+});
+
+test('a Shell Company loan is due to an affiliate, outside the Bank limit and its interest', () => {
+  const g = createGame(['A', 'B'], 4, { easyBooks: true });
+  const p = g.players[0];
+  p.hand = ['shell'];
+  g.phase = 'act';
+  assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.equal(balanceSheet(p).liabilities.affiliateLoan, M(1500));
+  assert.equal(balanceSheet(p).liabilities.loan, 0);
+  p.atBank = true;
+  assert.equal(act(g, 0, { a: 'borrow', amount: CONFIG.loanLimit }), null, 'the Bank still lends its full limit');
+  const s = balanceSheet(p);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
 
 test('fraud: more of it means likelier to be caught, and being caught is an immediate loss', () => {

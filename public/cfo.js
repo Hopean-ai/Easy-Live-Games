@@ -477,7 +477,7 @@ function renderTurn() {
         box.append(amountForm(`Hire ${q.name}`, `${q.name} is out. Fund a subsidiary for them to run (at least ${money(cfg.subsidiaryMin)}); you keep ${100 - cfg.managerShares}% of it.`, (amount) => actNow({ a: 'hire', target: j, amount })));
       });
     }
-    if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total at ${Math.round(rules.config.loanInterest * 100)}% a year.`, (amount) => actNow({ a: 'borrow', amount })));
+    if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total. Interest is ${Math.round(rules.config.loanInterest * 100)}% of the most you owe during each fiscal year, charged at its end.`, (amount) => actNow({ a: 'borrow', amount })));
     const loan = me.loan ?? me.balance?.liabilities.loan ?? 0;
     if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
@@ -594,7 +594,7 @@ function renderTile() {
     $('tile-title').textContent = CORNER_NAMES[sq.kind][1];
     box.push(el('p', {}, {
       fye: 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
-      bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year.`,
+      bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year, charged on the most you owe during the year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
       terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year. Like any transport tile, it ships the widgets you carry to your stores across the island. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,

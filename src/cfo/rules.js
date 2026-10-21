@@ -19,6 +19,7 @@ export const ACCOUNTS = {
   investments: 'Investment in subsidiaries',
   goodwill: 'Goodwill',
   loan: 'Bank loan',
+  affiliateLoan: 'Due to affiliate',
   capital: 'Contributed capital',
   retained: 'Retained earnings',
   draws: 'Owner distributions',
@@ -151,6 +152,7 @@ export function post(p, text, lines, { doc = true } = {}) {
   }
   if (Math.abs(sum) > 1e-6) throw new Error(`unbalanced entry: ${text}`);
   for (const [acct, amt] of Object.entries(lines)) p.ledger[acct] = round((p.ledger[acct] ?? 0) + amt);
+  if (lines.loan) p.peakLoan = Math.max(p.peakLoan ?? 0, -p.ledger.loan); // for the year's interest
   const entry = Object.entries(lines).map(([a, v]) => [a, round(v)]).filter(([, v]) => v !== 0);
   p.journal.push({ text, lines: entry });
   if (p.journal.length > JOURNAL_SIZE) p.journal.shift();
@@ -190,7 +192,7 @@ export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
   const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
-  const liabilities = { loan: -l.loan };
+  const liabilities = { loan: -l.loan || 0, affiliateLoan: -l.affiliateLoan || 0 };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
   const totalEquity = sum(Object.values(equity));
@@ -285,7 +287,12 @@ function cleanAction(action) {
 // Applies one player action. Returns null on success or a short error for that player.
 // Games saved before an account existed get it at zero, so their books keep adding up.
 function upgrade(g) {
-  for (const p of g.players) for (const a of Object.keys(ACCOUNTS)) p.ledger[a] ??= 0;
+  for (const p of g.players) {
+    for (const a of Object.keys(ACCOUNTS)) {
+      p.ledger[a] ??= 0;
+      if (p.bookLedger) p.bookLedger[a] ??= 0;
+    }
+  }
   // Games begun with typed statements switch to statements built from entries. Their books so far
   // are the true ledger without the documents not yet filed, closed into retained earnings.
   if (!g.easyBooks && !g.autoStatements) {
@@ -1114,7 +1121,7 @@ function acquireCompany(g, p, q, price) {
   const held = q.shares.holders[me] ?? 0;
   const paid = Math.ceil((price * (total - held)) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
   const lines = {};
-  for (const a of ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'loan']) lines[a] = q.ledger[a];
+  for (const a of ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'loan', 'affiliateLoan']) lines[a] = q.ledger[a];
   lines.cash -= paid;
   const net = Object.values(lines).reduce((a, b) => a + b, 0);
   if (net < 0) lines.goodwill += -net;
@@ -1138,7 +1145,7 @@ function acquireCompany(g, p, q, price) {
     delete c.shares.holders[them];
   }
   discardHand(g, q);
-  Object.assign(q, { out: true, carried: 0, docs: [], fyePending: null, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
+  Object.assign(q, { out: true, carried: 0, docs: [], fyePending: null, peakLoan: 0, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
   log(g, `${p.name} buys ${q.name}'s company for ${money(paid)}. ${q.name} is out of the game.`);
 }
 
@@ -1256,7 +1263,11 @@ function fiscalYearEnd(g, p) {
   }
   if (depreciation) post(p, `Depreciation for the year on ${depreciated} building${depreciated > 1 ? 's' : ''}`, { expDep: depreciation, accDep: -depreciation });
 
-  if (p.ledger.loan < 0) charge(g, p, -p.ledger.loan * CONFIG.loanInterest, 'expInterest', 'Loan interest');
+  // Miles: interest is on the most the company owed the Bank this year, so a loan repaid before
+  // the year end still pays for the time it was out.
+  const owed = Math.max(p.peakLoan ?? 0, -p.ledger.loan);
+  p.peakLoan = -p.ledger.loan;
+  if (owed > 0) charge(g, p, owed * CONFIG.loanInterest, 'expInterest', `Loan interest (${Math.round(CONFIG.loanInterest * 100)}% of the most owed this year, ${money(owed)})`);
   if (p.out) return;
   if (p.outsourced) charge(g, p, CONFIG.bookkeeperFee, 'expOther', 'Bookkeeping fees');
   if (p.out) return;
@@ -1481,7 +1492,7 @@ const PLAYS = {
     return null;
   },
   shell(g, p) {
-    post(p, 'Loan from an affiliate', { cash: M(1500), loan: -M(1500) });
+    post(p, 'Loan from an affiliate', { cash: M(1500), affiliateLoan: -M(1500) });
     return null;
   },
   ponzi(g, p) {
@@ -1623,8 +1634,8 @@ function fraudCheck(g, p, chance, who) {
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
 export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'loan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
-const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'capital', 'retained']);
+export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
 // The statements a player's own recorded entries add up to, for auto statements: their books so
