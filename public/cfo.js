@@ -286,22 +286,23 @@ function render() {
 }
 
 function renderWaiting() {
+  const host = state.host ?? 0; // the first admin to join, else the first player
   $('seat-list').replaceChildren(
     ...state.seats.map((s, i) =>
       el('li', { class: s.connected ? '' : 'away' },
         el('span', { class: 'dot', style: { background: COLORS[i] } }),
-        `${s.name}${s.guest ? ' (guest)' : ''}${i === mySeat ? ' (you)' : ''}${i === 0 ? ' · host' : ''}`)),
+        `${s.name}${s.guest ? ' (guest)' : ''}${i === mySeat ? ' (you)' : ''}${i === host ? ' · host' : ''}`)),
   );
   const n = state.seats.length;
   const max = rules?.config.maxPlayers ?? 6;
   let text;
   if (mySeat === null) text = n >= max ? 'This room is full, so you are watching.' : 'Joining…';
   else if (state.expect) text = `Waiting for ${state.expect - n} more matched player${state.expect - n === 1 ? '' : 's'} to arrive.`;
-  else if (mySeat === 0) text = n < 2 ? 'Share the invite link. You need at least one more player.' : `Start when everyone is here (up to ${max}).`;
+  else if (mySeat === host) text = n < 2 ? 'Share the invite link. You need at least one more player.' : `Start when everyone is here (up to ${max}).`;
   else text = 'Waiting for the host to start.';
   $('wait-text').textContent = text;
   renderWinOptions();
-  $('start').hidden = mySeat !== 0;
+  $('start').hidden = mySeat !== host;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
 }
 
@@ -322,7 +323,7 @@ function renderWinOptions() {
   // Don't overwrite a number the host is in the middle of typing.
   if (document.activeElement !== $('value-target')) $('value-target').value = o.valueTarget ?? rules?.config.valueTarget ?? '';
   if (document.activeElement !== $('max-years')) $('max-years').value = o.maxYears ?? 0;
-  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== 0;
+  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== (state.host ?? 0);
 }
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
