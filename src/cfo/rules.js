@@ -398,7 +398,15 @@ const ACTIONS = {
       zoneId = g.zoningRow.splice(zone, 1)[0];
       refill(g.zoningRow, g.zoningDeck);
     }
-    post(p, `Bought ${sq.name}`, { land: sq.price, cash: -sq.price });
+    if (sq.kind === 'transport') {
+      // The price covers the land and the structures on it, which are PP&E and depreciate.
+      const land = transportLand(p.pos);
+      const ppe = sq.price - land;
+      post(p, `Bought ${sq.name}: ${money(land)} land, ${money(ppe)} PP&E`, { land, ppe, cash: -sq.price });
+      Object.assign(tile, { landBasis: land, building: { rarity: 'transport', cost: ppe, basis: ppe, dep: 0 } });
+    } else {
+      post(p, `Bought ${sq.name}`, { land: sq.price, cash: -sq.price });
+    }
     tile.owner = g.turn;
     tile.zone = zoneId;
     g.phase = 'act';
@@ -864,8 +872,11 @@ export function canBuild(g, pos) {
   return null;
 }
 
+export const transportLand = (pos) => Math.round(SQUARES[pos].price * CONFIG.transportLand);
+
 export function canUpgrade(g, pos) {
   const tile = g.tiles[pos];
+  if (SQUARES[pos]?.kind !== 'land') return 'Only buildings on land can be upgraded.';
   if (!tile || tile.owner !== g.turn) return 'Upgrade PP&E you own.';
   if (!tile.building) return 'There is no PP&E there to upgrade.';
   if (SQUARES[pos].landmark) return 'Landmarks cannot be upgraded.';
@@ -1050,7 +1061,7 @@ function liquidate(g, p, need) {
       log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
     }
   }
-  const buildings = owned.filter(({ t }) => t.building).sort((a, b) => a.t.building.cost - b.t.building.cost);
+  const buildings = owned.filter(({ t, pos }) => t.building && SQUARES[pos].kind === 'land').sort((a, b) => a.t.building.cost - b.t.building.cost);
   for (const { t, pos } of buildings) {
     if (companyCash(p) >= need) return;
     sellBuilding(g, p, t, pos);
@@ -1722,7 +1733,7 @@ function transferProperty(g, pos, seller, buyer, amount) {
   const sold = { cash: amount, land: -landBasis, gain: landBasis + basis - (b?.dep ?? 0) - amount };
   if (b) Object.assign(sold, { ppe: -basis, accDep: b.dep });
   post(seller, `Sold ${sq.name} to ${buyer.name}`, sold);
-  const land = b ? Math.min(amount, sq.price) : amount;
+  const land = b ? Math.min(amount, sq.kind === 'transport' ? transportLand(pos) : sq.price) : amount;
   const bought = { land, cash: -amount };
   if (b && amount > land) bought.ppe = amount - land;
   post(buyer, `Bought ${sq.name} from ${seller.name}`, bought);

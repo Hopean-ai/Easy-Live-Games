@@ -170,7 +170,14 @@ test('buying land takes a zoning card and posts a journal entry', () => {
   assert.equal(g.tiles[p.pos].owner, 0);
   assert.equal(g.tiles[p.pos].zone, sq.kind === 'land' ? zone : null);
   assert.equal(p.ledger.cash, cash - sq.price);
-  assert.equal(p.ledger.land, sq.price); // transport routes are carried with land
+  if (sq.kind === 'transport') {
+    // A transport tile is part land, part PP&E that depreciates.
+    assert.equal(p.ledger.land, Math.round(sq.price * CONFIG.transportLand));
+    assert.equal(p.ledger.ppe, sq.price - p.ledger.land);
+    assert.equal(g.tiles[p.pos].building.basis, p.ledger.ppe);
+  } else {
+    assert.equal(p.ledger.land, sq.price);
+  }
 });
 
 test('a fiscal year end pays your salary, depreciates, taxes and closes the books', () => {
@@ -1148,4 +1155,25 @@ test('a game begun with typed statements switches to statements built from entri
   for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
   assert.equal(act(g, 0, { a: 'statements' }), null);
   assert.equal(p.lastCheck.errors, 0, 'correct entries make correct statements');
+});
+
+test('a transport tile is booked as land and PP&E, and its PP&E depreciates', () => {
+  const g = createGame(['A', 'B'], 15, { easyBooks: true });
+  const p = g.players[0];
+  const airport = posOfSpace(34);
+  const price = SQUARES[airport].price;
+  Object.assign(g, { turn: 0, phase: 'buy' });
+  p.pos = airport;
+  assert.equal(act(g, 0, { a: 'buy' }), null);
+  const land = Math.round(price * CONFIG.transportLand);
+  assert.equal(p.ledger.land, land);
+  assert.equal(p.ledger.ppe, price - land);
+  assert.match(act(g, 0, { a: 'build', pos: airport, card: 0 }), /Only buildings on land/);
+  // A year end depreciates the structures, not the land.
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(-p.ledger.accDep, Math.round((price - land) * CONFIG.depreciation));
+  const s = balanceSheet(p);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
