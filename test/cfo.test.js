@@ -1177,3 +1177,40 @@ test('a transport tile is booked as land and PP&E, and its PP&E depreciates', ()
   const s = balanceSheet(p);
   assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
+
+test('a fiscal year end books one depreciation entry for all buildings', () => {
+  const g = createGame(['A', 'B'], 16);
+  const p = g.players[0];
+  for (const n of [1, 2, 3]) Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 1000, dep: 0 } });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  const deps = p.docs.filter((d) => d.text.startsWith('Depreciation'));
+  assert.equal(deps.length, 1);
+  assert.deepEqual(deps[0].lines.find(([a]) => a === 'expDep'), ['expDep', 300]);
+});
+
+test('over whole games, statements built from correct entries match the true books', () => {
+  for (let seed = 1; seed <= 10; seed++) {
+    const g = createGame(['A', 'B', 'C'], seed, { maxYears: 5 });
+    for (let step = 0; step < 2000 && g.phase !== 'over'; step++) {
+      const i = g.turn;
+      for (const [k, q] of g.players.entries()) {
+        if (q.out) continue;
+        for (const d of q.docs) if (!d.recorded) act(g, k, { a: 'record', doc: d.id, lines: d.lines });
+        if (!q.fyePending) continue;
+        const { preview } = viewFor(g, k).players[k];
+        for (const kind of ['income', 'balance']) {
+          for (const [f, v] of Object.entries(q.fyePending.truth[kind])) assert.ok(Math.abs(preview[kind][f] - v) <= 1, `seed ${seed}: ${f}`);
+        }
+        assert.equal(act(g, k, { a: 'statements' }), null);
+        assert.equal(q.lastCheck.errors, 0);
+      }
+      if (g.phase === 'roll') act(g, i, { a: 'roll' });
+      else if (g.phase === 'buy') act(g, i, { a: g.players[i].ledger.cash > M(2000) ? 'buy' : 'pass', zone: 0 });
+      else {
+        act(g, i, { a: 'build', pos: g.tiles.findIndex((t) => t && t.owner === i && t.zone && !t.building), card: 0 });
+        act(g, i, { a: 'end' });
+      }
+    }
+  }
+});

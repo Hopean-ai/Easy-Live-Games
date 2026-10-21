@@ -1242,14 +1242,17 @@ function fiscalYearEnd(g, p) {
     const earned = Math.round(b.cost * z.yearly);
     if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
   });
-  for (const { t, pos } of mine) {
+  // Miles: one depreciation entry for the year, covering every building.
+  let depreciation = 0;
+  let depreciated = 0;
+  for (const { t } of mine) {
     const basis = t.building.basis ?? t.building.cost;
     const dep = Math.min(Math.round(basis * CONFIG.depreciation), basis - t.building.dep);
-    if (dep) {
-      t.building.dep += dep;
-      post(p, `Depreciation on ${SQUARES[pos].name}`, { expDep: dep, accDep: -dep });
-    }
+    t.building.dep += dep;
+    depreciation += dep;
+    if (dep) depreciated += 1;
   }
+  if (depreciation) post(p, `Depreciation for the year on ${depreciated} building${depreciated > 1 ? 's' : ''}`, { expDep: depreciation, accDep: -depreciation });
 
   if (p.ledger.loan < 0) charge(g, p, -p.ledger.loan * CONFIG.loanInterest, 'expInterest', 'Loan interest');
   if (p.out) return;
