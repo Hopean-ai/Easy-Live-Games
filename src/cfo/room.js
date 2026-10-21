@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, SUPPLY, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE } from './data.js';
 import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS } from './rules.js';
 import { sanitizeName } from '../names.js';
+import { isAdmin, hostSeat } from '../admin.js';
 
 const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is about 600 bytes
 // Miles: no turn time limits. A player can take as long as they like, even with the tab closed.
@@ -61,16 +62,17 @@ export class CfoRoom extends DurableObject {
   claimSeat(token, name, account) {
     const seats = this.room.seats;
     const guest = !account;
+    const admin = isAdmin(this.env, account);
     let mine = seats.findIndex((s) => s.token === token);
     if (mine < 0 && account) mine = seats.findIndex((s) => s.account === account);
     if (mine >= 0) {
       seats[mine].token = token;
       if (account && !seats[mine].account && seats[mine].name.toLowerCase() === account) seats[mine].account = account;
-      Object.assign(seats[mine], this.room.status === 'waiting' ? { name, guest, account } : {});
+      Object.assign(seats[mine], this.room.status === 'waiting' ? { name, guest, account, admin } : {});
       return mine;
     }
     if (this.room.status !== 'waiting' || seats.length >= CONFIG.maxPlayers) return null; // spectate
-    seats.push({ token, name, guest, account });
+    seats.push({ token, name, guest, account, admin });
     return seats.length - 1;
   }
 
@@ -86,8 +88,8 @@ export class CfoRoom extends DurableObject {
     if (seat === null || seat === undefined) return;
 
     if (msg?.t === 'start') {
-      // The first player in a private room decides when to start.
-      if (this.room.status !== 'waiting' || seat !== 0) return;
+      // The host (the first admin to join, else the first player) decides when to start.
+      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats)) return;
       if (this.room.seats.length < CONFIG.minPlayers) return send(ws, { t: 'error', text: `At least ${CONFIG.minPlayers} players are needed.` });
       this.start();
     } else if (msg?.t === 'again') {
@@ -96,7 +98,7 @@ export class CfoRoom extends DurableObject {
       this.reseat();
     } else if (msg?.t === 'option') {
       // The host chooses the room's options before the game starts.
-      if (this.room.status !== 'waiting' || seat !== 0) return;
+      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats)) return;
       const o = { ...this.room.options };
       if ('autoStatements' in msg) o.autoStatements = Boolean(msg.autoStatements);
       for (const k of ['valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
@@ -232,7 +234,7 @@ export class CfoRoom extends DurableObject {
 
   broadcast() {
     const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, connected: this.socketsFor(i).length > 0 }));
-    const base = { t: 'state', status: this.room.status, seats, expect: this.room.expect, options: this.room.options ?? {}, deadline: this.room.deadline ?? null };
+    const base = { t: 'state', status: this.room.status, seats, host: hostSeat(this.room.seats), expect: this.room.expect, options: this.room.options ?? {}, deadline: this.room.deadline ?? null };
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const seat = ws.deserializeAttachment()?.seat ?? null;

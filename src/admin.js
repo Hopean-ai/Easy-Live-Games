@@ -17,3 +17,10 @@ function adminUsers(env) {
       .filter(Boolean),
   );
 }
+
+// Which seat hosts a lobby: the first admin to have joined, otherwise the first player.
+// Seats are in join order and each carries the admin flag its room set from isAdmin.
+export function hostSeat(seats) {
+  const admin = seats.findIndex((s) => s.admin);
+  return admin >= 0 ? admin : 0;
+}
