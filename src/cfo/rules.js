@@ -891,7 +891,7 @@ function scrapBuilding(g, p, t, pos, why) {
   const b = t.building;
   const basis = b.basis ?? b.cost;
   const salvage = salvageValue(b);
-  post(p, `Destroyed PP&E on ${SQUARES[pos].name} for ${why}: ${money(salvage)} salvage`, { cash: salvage, accDep: b.dep, ppe: -basis, gain: basis - b.dep - salvage });
+  post(p, `Destroyed the ${RARITIES[b.rarity].name} PP&E on ${SQUARES[pos].name} for ${why} (cost ${money(basis)}, accumulated depreciation ${money(b.dep)}), salvaged for ${Math.round(CONFIG.salvage * 100)}% of book value`, { cash: salvage, accDep: b.dep, ppe: -basis, gain: basis - b.dep - salvage });
   t.building = null;
   p.carried += t.stock ?? 0;
   t.stock = 0;
@@ -1057,7 +1057,7 @@ function liquidate(g, p, need) {
     const stock = sold - units;
     const proceeds = Math.round(stock * CONFIG.liquidation);
     if (stock > 0) {
-      post(p, 'Sold widgets to the bank', { cash: proceeds, gain: stock - proceeds, inventory: -stock });
+      post(p, `Cash shortfall: the bank bought ${stock.toLocaleString('en-US')} widgets (cost $1 each, ${money(stock)} in all) at $${CONFIG.liquidation.toFixed(2)} each`, { cash: proceeds, gain: stock - proceeds, inventory: -stock });
       log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
     }
   }
@@ -1078,7 +1078,7 @@ function sellBuilding(g, p, t, pos) {
   const proceeds = Math.round(b.cost * CONFIG.liquidation);
   const basis = b.basis ?? b.cost;
   const book = basis - b.dep;
-  post(p, `Sold PP&E on ${SQUARES[pos].name} to the bank`, { cash: proceeds, accDep: b.dep, ppe: -basis, gain: book - proceeds });
+  post(p, `Cash shortfall: the bank bought the ${RARITIES[b.rarity]?.name ?? ''} PP&E on ${SQUARES[pos].name} (cost ${money(basis)}, accumulated depreciation ${money(b.dep)}) for ${Math.round(CONFIG.liquidation * 100)}% of its cost`, { cash: proceeds, accDep: b.dep, ppe: -basis, gain: book - proceeds });
   t.building = null;
   p.carried += t.stock;
   t.stock = 0;
@@ -1090,7 +1090,7 @@ function sellLand(g, p, t, pos) {
   const sq = SQUARES[pos];
   const proceeds = Math.round(sq.price * CONFIG.liquidation);
   const basis = t.landBasis ?? sq.price;
-  post(p, `Sold ${sq.name} to the bank`, { cash: proceeds, land: -basis, gain: basis - proceeds });
+  post(p, `Cash shortfall: the bank bought the land at ${sq.name} (cost ${money(basis)}) for ${Math.round(CONFIG.liquidation * 100)}% of its list price`, { cash: proceeds, land: -basis, gain: basis - proceeds });
   delete t.landBasis;
   returnZoning(g, t);
   t.owner = null;
@@ -1735,7 +1735,7 @@ function transferProperty(g, pos, seller, buyer, amount) {
   const basis = b ? (b.basis ?? b.cost) : 0;
   const sold = { cash: amount, land: -landBasis, gain: landBasis + basis - (b?.dep ?? 0) - amount };
   if (b) Object.assign(sold, { ppe: -basis, accDep: b.dep });
-  post(seller, `Sold ${sq.name} to ${buyer.name}`, sold);
+  post(seller, `Sold ${sq.name} to ${buyer.name} (land cost ${money(landBasis)}${b ? `; PP&E cost ${money(basis)}, accumulated depreciation ${money(b.dep)}` : ''})`, sold);
   const land = b ? Math.min(amount, sq.kind === 'transport' ? transportLand(pos) : sq.price) : amount;
   const bought = { land, cash: -amount };
   if (b && amount > land) bought.ppe = amount - land;
