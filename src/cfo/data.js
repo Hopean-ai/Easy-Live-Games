@@ -198,10 +198,10 @@ function buildSquares() {
 // What a building does depends on the zone of the land under it (Miles: Industrial makes
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
-// - Industrial (Miles): makes widgets whenever its owner passes it, more when they land on it.
-//   A pass makes `produce` x the square root of (PP&E cost x land price) widgets, paid for at $1
-//   each, so the building and the land count equally; landing makes `landing` times that. They
-//   go onto the token.
+// - Industrial: makes widgets at the end of each of its owner's turns, planned to what their stores
+//   need, up to `produce` x the square root of (PP&E cost x land price) a turn, paid for at $1
+//   each, so the building and the land count equally. Landing on it runs an overtime shift of
+//   `overtime` turns' worth. The widgets wait in the factory until the company ships them.
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential (Miles): passive income. Tenants pay `yearly` x cost at each fiscal year end;
 //   visitors pay only the land rent.
@@ -209,7 +209,7 @@ function buildSquares() {
 // One card per lot: the spreadsheet's 47, less 3 Industrial for the lots that became deck squares,
 // plus 16 for the island's lots (2 Industrial, 6 Retail, 2 Banking, 6 Residential).
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 4, landing: 3 },
+  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.32, overtime: 12 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
   residential: { name: 'Residential', count: 13, rent: 0, yearly: 0.5 },
@@ -232,9 +232,21 @@ export const RETAIL = {
     premium: { name: 'Premium launch', volume: 1, price: 1.5 },
   },
   commission: 0.25, // landing on someone else's Retail: sell through their store, they keep this share
-  freight: 0.1, // per widget shipped on someone else's transport tile, paid to its owner
+  freight: 0.2, // per widget shipped from a factory on a side where you own no transport line: paid to a rival's line there, or a hired carrier
 };
 
+
+// The supply chain (see `operate` in rules.js). Each company sets a production level (Miles: a
+// dial). Stores are restocked up to `cover` turns of their sales. Matching demand, factories make
+// only what that needs; at full capacity they run flat out and stores stock deeper, with the rest
+// waiting in the factories; idle, they make nothing. PLACEHOLDERS.
+export const SUPPLY = {
+  levels: {
+    idle: { name: 'Idle', cover: 2, make: false },
+    demand: { name: 'Match demand', cover: 2, make: true },
+    full: { name: 'Full capacity', cover: 4, make: true, flatOut: true },
+  },
+};
 
 // ---- PP&E (60 cards, one per lot; the Assets sheet had 47) ----
 // Each step up costs about 4x the last, so the top cards take saving for (Miles: the right feel).

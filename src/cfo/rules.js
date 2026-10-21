@@ -6,7 +6,7 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL,
+  CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
@@ -88,7 +88,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       name, pos: 0, out: false, skip: false, years: 0,
       ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
       journal: [], report: null,
-      carried: 0, // widgets on the player's token; the rest sit in their factories and stores
+      carried: 0, // widgets with nowhere to sit (a sold building's stock); the rest sit in factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
       // Shares in this player's company: who holds how many. Everyone starts owning all 100 of theirs.
@@ -272,6 +272,7 @@ function cleanAction(action) {
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
   if (typeof action.accept === 'boolean') out.accept = action.accept;
+  if (typeof action.level === 'string' && Object.hasOwn(SUPPLY.levels, action.level)) out.level = action.level;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -319,6 +320,13 @@ export function act(g, who, raw) {
   if (action.a === 'resign') {
     bankrupt(g, p, `${p.name} resigns.`);
     afterAction(g);
+    return null;
+  }
+  // Miles: a production dial, which a company can turn at any time.
+  if (action.a === 'production') {
+    if (!action.level) return 'Pick a production level.';
+    p.production = action.level;
+    log(g, `${p.name} sets production to ${SUPPLY.levels[action.level].name.toLowerCase()}.`);
     return null;
   }
   if (Object.hasOwn(BOOKS, action.a) || Object.hasOwn(DEALS, action.a)) {
@@ -690,8 +698,11 @@ const ACTIONS = {
       if (!tile.stock) return 'This store has no widgets on its shelves.';
       sellWidgets(g, p, tile, units * s.volume, price * s.price, `${s.name} at ${SQUARES[pos].name}`);
     } else {
-      if (!p.carried) return 'You are not carrying any widgets.';
-      const sold = sellWidgets(g, p, p, units, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
+      // Wholesale: the rival's store takes widgets from your factories' warehouses.
+      const stock = g.tiles.filter((t) => isMine(g, t, 'industrial') && t.stock);
+      if (!stock.length) return 'Your factories have no widgets waiting.';
+      let sold = 0;
+      for (const t of stock) sold += sellWidgets(g, p, t, units - sold / price, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
       const cut = Math.round(sold * RETAIL.commission);
       if (cut) {
         post(p, `Commission to ${g.players[owner].name}`, { expOther: cut, cash: -cut });
@@ -706,13 +717,7 @@ const ACTIONS = {
     if (g.phase === 'roll') return 'Roll first.';
     if (g.phase === 'buy') ACTIONS.pass(g, p);
     p.sale = null;
-    // Away on the island, your own transport lines still carry your factories' widgets to your
-    // stores; without them, widgets wait for you to come back.
-    if (onIsland(p.pos)) {
-      g.tiles.forEach((t, pos) => {
-        if (t?.owner === g.turn && SQUARES[pos].kind === 'transport') ship(g, p, pos, false);
-      });
-    }
+    operate(g, p);
     // Every store sells from its own shelves.
     g.tiles.forEach((t, pos) => {
       if (t?.owner === g.turn && t.zone === 'retail' && t.building && t.stock) {
@@ -754,20 +759,10 @@ function buyLandmark(g, p, sq, tile) {
   return null;
 }
 
-// Miles: a factory makes widgets as its owner passes it, more when they land on it, sized by both
-// the building's cost and the land's price so pricier land is better. Each widget costs $1 to
-// make, from company cash; a company short of cash makes what it can afford. They go on the token.
-export function production(pos, cost, landing) {
-  const z = ZONES.industrial;
-  return Math.round(z.produce * Math.sqrt(cost * SQUARES[pos].price)) * (landing ? z.landing : 1);
-}
-
-function produce(g, p, pos, landing) {
-  const n = Math.min(production(pos, g.tiles[pos].building.cost, landing), Math.max(0, Math.floor(companyCash(p))));
-  if (n <= 0) return;
-  post(p, `Widgets made at ${SQUARES[pos].name}`, { inventory: n, cash: -n });
-  p.carried += n;
-  log(g, `${p.name}'s ${SQUARES[pos].name} makes ${n.toLocaleString('en-US')} widgets.`);
+// A factory's capacity for one turn, sized by both the building's cost and the land's price so
+// pricier land is better (Miles). Each widget costs $1 of company cash to make.
+export function production(pos, cost) {
+  return Math.round(ZONES.industrial.produce * Math.sqrt(cost * SQUARES[pos].price));
 }
 
 // Miles: a store's PP&E sets its price per widget, and its land sets how many it sells a turn.
@@ -783,7 +778,7 @@ export function retailTerms(g, idx) {
 }
 
 // Sells up to `units` widgets (each cost $1 to make) from `from` (a store tile's shelves, or the
-// player's own token, both with a count in .stock / .carried) at `price` each; returns the revenue.
+// player's storage, with a count in .stock / .carried) at `price` each; returns the revenue.
 function sellWidgets(g, p, from, units, price, text) {
   const key = from === p ? 'carried' : 'stock';
   const n = Math.min(Math.floor(from[key]), Math.round(units));
@@ -798,8 +793,8 @@ function sellWidgets(g, p, from, units, price, text) {
 }
 
 // ---- Moving widgets ----
-// Miles: players transport widgets as they move; passing a transport tile gets them around that
-// side of the board at once. The board's four sides, by position (corners belong to none).
+// The board's four sides, by position (corners belong to none). Shipping stays on a side by truck
+// and needs a transport line to cross to another.
 export function sideOf(pos) {
   if (pos >= 1 && pos <= 20) return 'top';
   if (pos >= 22 && pos <= 30) return 'right';
@@ -811,57 +806,83 @@ export function sideOf(pos) {
 
 const isMine = (g, t, kind) => t?.owner === g.turn && t.zone === kind && t.building;
 
-// What happens to a player's widgets as their token passes (or lands on) a square.
+// Landing on your own factory runs an overtime shift. Otherwise the token doesn't move goods: the
+// company's logistics do, at the end of each of its turns (see `operate`).
 function visit(g, p, pos, landing) {
   const t = g.tiles[pos];
-  if (isMine(g, t, 'industrial')) {
-    produce(g, p, pos, landing);
-    p.carried += t.stock ?? 0; // widgets left at the factory by older rules
-    t.stock = 0;
-  } else if (isMine(g, t, 'retail') && p.carried) {
-    t.stock += p.carried;
+  if (landing && isMine(g, t, 'industrial')) makeWidgets(g, p, pos, production(pos, t.building.cost) * ZONES.industrial.overtime, 'Overtime shift');
+}
+
+function makeWidgets(g, p, pos, want, why = 'Widgets made') {
+  const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p))));
+  if (n <= 0) return 0;
+  post(p, `${why} at ${SQUARES[pos].name}`, { inventory: n, cash: -n });
+  g.tiles[pos].stock = (g.tiles[pos].stock ?? 0) + n;
+  log(g, `${p.name}'s ${SQUARES[pos].name} makes ${n.toLocaleString('en-US')} widgets.`);
+  return n;
+}
+
+// Who carries goods out of a factory on `side`: your own transport line there carries them free;
+// otherwise you pay freight per widget, to a rival whose line is there or, with none, to a hired
+// carrier (the bank). Goods made on the island move through its Terminal free.
+function carrierOn(g, side) {
+  if (side === 'island') return { free: true };
+  const lines = g.tiles.map((t, i) => ({ t, i })).filter(({ t, i }) => SQUARES[i].kind === 'transport' && sideOf(i) === side && t.owner !== null && !g.players[t.owner].out);
+  const mine = lines.find(({ t }) => t.owner === g.turn);
+  if (mine) return { free: true };
+  return lines[0] ? { owner: g.players[lines[0].t.owner], pos: lines[0].i } : { hired: true };
+}
+
+// The island is reached by air: you need an airport of your own to ship to or from it.
+const ownsAirport = (g) => g.tiles.some((t, i) => t?.owner === g.turn && SQUARES[i].kind === 'transport' && SQUARES[i].mode === 'air');
+
+// The company's supply chain, run at the end of each of its owner's turns, like a real one runs
+// every day without the CEO driving the goods around:
+// 1. Production follows the company's dial (SUPPLY.levels): matching demand, factories make only
+//    what the stores need to hold `cover` turns of sales, up to each factory's capacity for a
+//    turn; at full capacity they make all they can; idle, nothing.
+// 2. Logistics fill each store up to that target from the factories, nearest first. Shipping is
+//    free from a factory on a side where you own a transport line; otherwise it costs freight per
+//    widget (see `carrierOn`). The island and the main board are linked only by your own airport.
+function operate(g, p) {
+  const factories = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'industrial'));
+  const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'retail'));
+  // Widgets anywhere else (from older rules, or a sold building's shelves) go to the first warehouse.
+  const depot = factories[0] ?? stores[0];
+  if (p.carried && depot) {
+    depot.t.stock += p.carried;
     p.carried = 0;
-  } else if (SQUARES[pos].kind === 'transport' || SQUARES[pos].kind === 'terminal') {
-    // Miles: the island's Terminal is its airport, shipping to your stores across the island.
-    ship(g, p, pos);
   }
-}
-
-// Ships everything the player carries, plus their factory stock on this side of the board, to
-// their stores on this side or on any side where they own transport (Miles), split evenly.
-// Someone else's line charges freight. With carry false, only factory stock moves (the player
-// isn't there with their token).
-function ship(g, p, pos, carry = true) {
-  const side = sideOf(pos);
-  const sides = new Set([side, ...g.tiles.map((t, i) => (t?.owner === g.turn && SQUARES[i].kind === 'transport' ? sideOf(i) : null))]);
-  const here = g.tiles.map((t, i) => ({ t, i })).filter(({ i }) => sideOf(i) === side);
-  const stores = g.tiles.filter((t, i) => isMine(g, t, 'retail') && sides.has(sideOf(i)));
-  if (!stores.length) return;
-  const factories = here.filter(({ t }) => isMine(g, t, 'industrial') && t.stock).map(({ t }) => t);
-  const carried = carry ? p.carried : 0;
-  const units = carried + factories.reduce((n, t) => n + t.stock, 0);
-  if (!units) return;
-  const line = g.tiles[pos];
-  const owner = !line || line.owner === null || line.owner === g.turn ? null : g.players[line.owner]; // the Terminal is free
-  if (owner && !owner.out) {
-    const fee = charge(g, p, units * RETAIL.freight, 'expFreight', `Freight on ${owner.name}'s ${SQUARES[pos].name}`);
-    if (fee) post(owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
-    if (p.out) return;
-    // Paying the freight may have meant selling widgets, so ship only what is left.
-    return moveToStores(g, p, pos, stores, Math.min(carried, p.carried), factories.filter((t) => t.stock));
+  const level = SUPPLY.levels[p.production] ?? SUPPLY.levels.demand;
+  const target = ({ t, pos }) => storeTerms(pos, t).units * level.cover;
+  const onHand = p.carried + [...factories, ...stores].reduce((n, { t }) => n + t.stock, 0);
+  let budget = !level.make ? 0 : level.flatOut ? Infinity : Math.max(0, stores.reduce((n, s) => n + target(s), 0) - onHand);
+  for (const { t, pos } of factories) {
+    if (budget <= 0) break;
+    budget -= makeWidgets(g, p, pos, Math.min(budget, production(pos, t.building.cost)));
   }
-  moveToStores(g, p, pos, stores, carried, factories);
-}
-
-function moveToStores(g, p, pos, stores, carried, factories) {
-  const units = carried + factories.reduce((n, t) => n + t.stock, 0);
-  if (!units) return;
-  p.carried -= carried;
-  for (const t of factories) t.stock = 0;
-  stores.forEach((t, i) => {
-    t.stock += Math.floor(units / stores.length) + (i < units % stores.length ? 1 : 0);
-  });
-  log(g, `${p.name} ships ${units.toLocaleString('en-US')} widgets by ${SQUARES[pos].name} to ${stores.length} store${stores.length > 1 ? 's' : ''}.`);
+  const need = new Map(stores.map((s) => [s, Math.max(0, target(s) - s.t.stock)]));
+  const airport = ownsAirport(g);
+  for (const f of factories) {
+    const side = sideOf(f.pos);
+    const carrier = carrierOn(g, side);
+    const reach = stores.filter((s) => (side === 'island') === (sideOf(s.pos) === 'island') || airport)
+      .sort((a, b) => (sideOf(a.pos) === side ? 0 : 1) - (sideOf(b.pos) === side ? 0 : 1));
+    for (const s of reach) {
+      const n = Math.min(f.t.stock, need.get(s));
+      if (n <= 0) continue;
+      if (!carrier.free) {
+        const by = carrier.owner ? `${carrier.owner.name}'s ${SQUARES[carrier.pos].name}` : 'a hired carrier';
+        const fee = charge(g, p, n * RETAIL.freight, 'expFreight', `Freight on ${by} to ${SQUARES[s.pos].name}`);
+        if (fee && carrier.owner) post(carrier.owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
+        if (p.out) return;
+      }
+      const m = Math.min(n, f.t.stock); // paying the freight may have meant selling widgets
+      f.t.stock -= m;
+      s.t.stock += m;
+      need.set(s, need.get(s) - m);
+    }
+  }
 }
 
 // Miles: bank control gives another card option. Each Banking building a company owns lets it
@@ -1052,7 +1073,7 @@ function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
   const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx);
   if (p.ledger.inventory > 0 && companyCash(p) < need) {
-    // Only as many widgets as the shortfall needs, from the token first, then the shelves.
+    // Only as many widgets as the shortfall needs, from storage first, then factories and shelves.
     let units = Math.min(p.ledger.inventory, Math.ceil((need - companyCash(p)) / CONFIG.liquidation));
     const sold = units;
     const take = Math.min(p.carried, units);
@@ -1753,7 +1774,7 @@ function transferProperty(g, pos, seller, buyer, amount) {
   const bought = { land, cash: -amount };
   if (b && amount > land) bought.ppe = amount - land;
   post(buyer, `Bought ${sq.name} from ${seller.name}`, bought);
-  // Widgets waiting there stay the seller's; they go onto the seller's token.
+  // Widgets waiting there stay the seller's; they go to the seller's other warehouses.
   seller.carried += t.stock;
   t.stock = 0;
   t.owner = g.players.indexOf(buyer);
@@ -1908,6 +1929,7 @@ export function viewFor(g, who) {
       sale: p.sale ?? null,
       inventory: open(i) ? p.ledger.inventory : null,
       carried: p.carried,
+      production: p.production ?? 'demand',
       retail: retailTerms(g, i),
       ...(i === who && !g.easyBooks ? {
         docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),
