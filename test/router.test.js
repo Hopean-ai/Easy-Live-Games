@@ -77,11 +77,17 @@ test('login sets an HttpOnly session cookie; a wrong password does not', async (
 test('/api/me reports the signed-in account, logout clears it', async () => {
   const e = env();
   const me = (cookie) => worker.fetch(new Request('http://x/api/me', { headers: { Cookie: cookie } }), e).then((r) => r.json());
-  assert.deepEqual(await me('sid=good'), { name: 'Miles' });
-  assert.deepEqual(await me(''), { name: null });
+  assert.deepEqual(await me('sid=good'), { name: 'Miles', admin: false });
+  assert.deepEqual(await me(''), { name: null, admin: false });
   const out = await worker.fetch(new Request('http://x/api/logout', { method: 'POST', headers: { Cookie: 'sid=good' } }), e);
   assert.match(out.headers.get('Set-Cookie'), /Max-Age=0/);
-  assert.deepEqual(await me('sid=good'), { name: null });
+  assert.deepEqual(await me('sid=good'), { name: null, admin: false });
+});
+
+test('/api/me flags accounts listed in ADMIN_USERS', async () => {
+  const e = { ...env(), ADMIN_USERS: 'someone, miles' };
+  const res = await worker.fetch(new Request('http://x/api/me', { headers: { Cookie: 'sid=good' } }), e);
+  assert.deepEqual(await res.json(), { name: 'Miles', admin: true });
 });
 
 test('requests from another site are refused', async () => {
