@@ -96,13 +96,19 @@ test('players record their own entries and file their own statements', () => {
   const truth = p.fyePending.truth;
   assert.equal(truth.balance.capital, CONFIG.startCompanyCash);
   assert.equal(truth.balance.cash, p.ledger.cash);
-  // File with one wrong line; the miscoded capital entry counts too, as do unrecorded year-end documents.
+  // The statements are built from the player's own entries: they review them and submit.
+  // The miscoded capital entry and any unrecorded year-end documents are the misstatements.
   const unrecorded = p.docs.filter((d) => d.year === 1 && !d.recorded).length;
-  assert.equal(act(g, 0, { a: 'statements', income: truth.income, balance: { ...truth.balance, cash: truth.balance.cash + 50 } }), null);
-  assert.deepEqual(p.lastCheck.wrongFields, ['cash']);
+  const preview = viewFor(g, 0).players[0].preview;
+  assert.equal(preview.income.revOps, undefined);
+  assert.equal(viewFor(g, 1).players[0].preview, undefined, 'others cannot see it');
+  assert.equal(act(g, 0, { a: 'statements' }), null);
+  assert.equal(JSON.stringify(p.filed.balance), JSON.stringify(preview.balance), 'what was previewed is what is filed');
+  assert.ok(p.lastCheck.wrongFields.includes('capital'));
   assert.equal(p.lastCheck.corrections.length, 1 + unrecorded);
-  assert.equal(p.misstatements, 2 + unrecorded);
-  assert.equal(viewFor(g, 1).players[0].filed.balance.cash, truth.balance.cash + 50, 'others see what was filed');
+  assert.equal(p.misstatements, 1 + unrecorded);
+  assert.equal(viewFor(g, 1).players[0].filed.balance.capital, preview.balance.capital, 'others see what was filed');
+  assert.notEqual(preview.balance.capital, truth.balance.capital);
 
   // The Interim Review fines misstatements.
   const cash = p.ledger.cash;
@@ -1129,4 +1135,17 @@ test('the island Terminal ships your widgets to your stores across the island', 
   act(g, 0, { a: 'roll' });
   assert.equal(p.carried, 0);
   assert.equal(shops.reduce((n, s) => n + g.tiles[s].stock, 0), 1600);
+});
+
+test('a game begun with typed statements switches to statements built from entries', () => {
+  const g = createGame(['A', 'B'], 23);
+  g.autoStatements = false; // as saved before the switch
+  const p = g.players[0];
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.equal(g.autoStatements, true);
+  for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
+  assert.equal(act(g, 0, { a: 'statements' }), null);
+  assert.equal(p.lastCheck.errors, 0, 'correct entries make correct statements');
 });
