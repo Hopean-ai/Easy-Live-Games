@@ -199,9 +199,13 @@ function buildSquares() {
 // widgets, Retail sells them, Residential collects rent, Banking earns interest). Every building
 // also charges visitors `rent` x its cost. The rates are PLACEHOLDERS:
 // - Industrial: makes widgets at the end of each of its owner's turns, planned to what their stores
-//   need, up to `produce` x the square root of (PP&E cost x land price) a turn, paid for at $1
-//   each, so the building and the land count equally. Landing on it runs an overtime shift of
-//   `overtime` turns' worth. The widgets wait in the factory until the company ships them.
+//   need, up to `produce` x the square root of (PP&E cost x land price) a turn, so the building and
+//   the land count equally. Landing on it runs an overtime shift of `overtime` turns' worth. The
+//   widgets wait in the factory until the company ships them.
+//   Costs (economies of scale): each widget takes `variableCost` in materials and labour, and each
+//   factory carries `overhead` per widget of capacity every turn. Overhead is absorbed into the
+//   widgets made, so a widget always goes into inventory at variableCost + overhead; the share of
+//   overhead on capacity left idle is expensed that turn. A full factory makes the cheapest widgets.
 // - Retail: sells widgets at the end of every one of the owner's turns (see RETAIL below).
 // - Residential (Miles): passive income. Tenants pay `yearly` x cost at each fiscal year end;
 //   visitors pay only the land rent.
@@ -209,13 +213,13 @@ function buildSquares() {
 // One card per lot: the spreadsheet's 47, less 3 Industrial for the lots that became deck squares,
 // plus 16 for the island's lots (2 Industrial, 6 Retail, 2 Banking, 6 Residential).
 export const ZONES = {
-  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.32, overtime: 12 },
+  industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.32, overtime: 12, variableCost: 0.6, overhead: 0.2 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
   residential: { name: 'Residential', count: 13, rent: 0, yearly: 0.75 },
 };
 
-// Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
+// Widgets are counted in units. The spreadsheet's widget tiers are
 // denominations of that count, like bills: a Platinum widget is 10,000 Common ones.
 export const WIDGET_TIERS = [
   ['Platinum', 10000], ['Gold', 1000], ['Silver', 100], ['Bronze', 10], ['Common', 1],
@@ -224,7 +228,7 @@ export const WIDGET_TIERS = [
 // Miles: widgets sell throughout the rounds, and landing on Retail gives more control that turn.
 // A store's PP&E sets its price per widget and its land sets how many it sells. PLACEHOLDERS.
 export const RETAIL = {
-  perLandDollar: 3, // each store sells up to this x its land price in widgets at the end of each of your turns
+  perLandDollar: 1, // each store sells up to this x its land price in widgets at the end of each of your turns
   prices: { common: 2, uncommon: 2.25, rare: 2.5, landmark: 2.5, epic: 2.75, legendary: 3 }, // per widget, by the store's PP&E
   // Choices when you land on your own Retail square, as multiples of a normal turn's volume and price.
   sales: {
@@ -232,6 +236,15 @@ export const RETAIL = {
     premium: { name: 'Premium launch', volume: 1, price: 1.5 },
   },
   commission: 0.25, // landing on someone else's Retail: sell through their store, they keep this share
+  // Miles: a pricing dial. Each company sets its stores' prices; cheaper sells more widgets a turn.
+  pricing: {
+    low: { name: 'Low prices', price: 0.8, volume: 1.5 },
+    normal: { name: 'Normal prices', price: 1, volume: 1 },
+    premium: { name: 'Premium prices', price: 1.25, volume: 0.6 },
+  },
+  // Stores on the same side of the board compete: each rival store there with lower prices than
+  // yours takes this share of your customers, and each with higher prices sends you as many more.
+  competition: 0.1,
   freight: 0.2, // per widget shipped from a factory on a side where you own no transport line: paid to a rival's line there, or a hired carrier
 };
 
@@ -308,10 +321,10 @@ export const PERSONAL_CARDS = {
   wealthy: { name: 'Wealthy Spouse', count: 2, value: M(1000), spouse: true, text: `Receive ${usd(10)} x 10 for each of these you hold beyond the first, each fiscal year.` },
   intelligent: { name: 'Intelligent Spouse', count: 2, value: M(1000), spouse: true, text: `Deduct ${usd(100)} from your personal taxes each fiscal year.` },
   // Miles: small effects, nothing too disruptive; the Beach House ties to the island. PLACEHOLDER amounts.
-  horses: { name: 'Horses', count: 5, value: M(25), text: `The first time you roll doubles each fiscal year, win ${usd(100)} at the races.` },
-  beach: { name: 'Beach House', count: 5, value: M(250), text: `Rent it to tourists: receive ${usd(100)} each time you complete a lap of the island.` },
-  cabin: { name: 'Mountain Cabin', count: 5, value: M(250), text: 'Study at your cabin: you never sit out a turn at Continuing Professional Education.' },
-  mansion: { name: 'Country Mansion', count: 5, value: M(1500), text: `Host weddings and events: receive ${usd(100)} each fiscal year.` },
+  horses: { name: 'Horses', count: 5, value: M(25), prize: M(250), text: `The first time you roll doubles each fiscal year, each of your horses wins ${usd(250)} at the races.` },
+  beach: { name: 'Beach House', count: 5, value: M(250), lap: M(250), text: `Rent it to tourists: receive ${usd(250)} each time you complete a lap of the island.` },
+  cabin: { name: 'Mountain Cabin', count: 5, value: M(250), yearly: M(100), text: `Study at your cabin: you never sit out a turn at Continuing Professional Education. Rent it out for ${usd(100)} each fiscal year.` },
+  mansion: { name: 'Country Mansion', count: 5, value: M(1500), yearly: M(250), text: `Host weddings and events: receive ${usd(250)} each fiscal year.` },
 };
 
 export function deckOf(cards) {
