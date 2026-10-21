@@ -532,6 +532,21 @@ function placesText(me) {
   return places.join(', ');
 }
 
+// Miles: a production dial. The company can turn it at any time; it applies at the end of each turn.
+function productionDial(me) {
+  const levels = rules.supply.levels;
+  const hint = {
+    idle: 'make nothing and save cash; stores keep selling what they have',
+    demand: `make only what your stores need to hold ${levels.demand.cover} turns of sales`,
+    full: `run flat out; stores hold ${levels.full.cover} turns of sales and the rest waits in your factories`,
+  };
+  const current = me.production ?? 'demand';
+  return el('div', {},
+    el('p', { class: 'small' }, `Production: ${levels[current].name}. Factories ${hint[current]}.`),
+    el('div', { class: 'row' }, Object.entries(levels).map(([id, l]) =>
+      el('button', { class: 'secondary', disabled: id === current, onclick: () => actNow({ a: 'production', level: id }) }, l.name))));
+}
+
 function widgetText(n) {
   n = Math.floor(n);
   if (!n) return 'No widgets.';
@@ -763,7 +778,8 @@ function renderHand() {
   $('widgets').replaceChildren(
     el('p', {}, `${Math.floor(me.inventory).toLocaleString('en-US')} widgets${me.inventory >= 1 ? `: ${widgetText(me.inventory)}` : ''}.`),
     el('p', { class: 'small' }, placesText(me)),
-    el('p', { class: 'small' }, `At the end of each of your turns your factories make what your stores need to hold ${rules.supply.cover} turns of sales, and your company ships it to them. Stores on the factory's side of the board are reached by truck. Other sides need a transport line on the factory's side: your own is free, someone else's charges $${rules.retail.freight.toFixed(2)} a widget. The island needs an airport of your own.`),
+    productionDial(me),
+    el('p', { class: 'small' }, `At the end of each of your turns your factories make widgets at the production level you set, and your company ships them to your stores. Stores on the factory's side of the board are reached by truck. Other sides need a transport line on the factory's side: your own is free, someone else's charges $${rules.retail.freight.toFixed(2)} a widget. The island needs an airport of your own.`),
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at ${r.minPrice === r.maxPrice ? `$${r.maxPrice.toFixed(2)}` : `$${r.minPrice.toFixed(2)} to $${r.maxPrice.toFixed(2)}`} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),

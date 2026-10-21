@@ -290,13 +290,32 @@ test('factories make what the stores need each turn, and logistics ship it to th
   assert.equal(a.ledger.cash, cash - cap - freight + cap * RETAIL.prices.common);
 
   // Production is planned to demand: a store already holding its target gets nothing more made.
-  const target = SQUARES[shop].price * RETAIL.perLandDollar * SUPPLY.cover;
+  const target = SQUARES[shop].price * RETAIL.perLandDollar * SUPPLY.levels.demand.cover;
   give(a, 2 * target);
   a.carried = 0;
   g.tiles[shop].stock = 2 * target;
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
   assert.equal(a.ledger.inventory, g.tiles[shop].stock, 'nothing new was made');
+
+  // The dial: idle makes nothing; full capacity makes all it can, even with stores stocked.
+  assert.equal(act(g, 1, { a: 'production', level: 'idle' }), null, 'any company can turn its own dial, on any turn');
+  assert.equal(act(g, 0, { a: 'production', level: 'loud' }), 'Pick a production level.');
+  act(g, 0, { a: 'production', level: 'full' });
+  const held = a.ledger.inventory;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  const turnSales = SQUARES[shop].price * RETAIL.perLandDollar;
+  assert.equal(a.ledger.inventory, held + cap - turnSales, 'a full shift is made though the store was stocked');
+  act(g, 0, { a: 'production', level: 'idle' });
+  const stocked = a.ledger.inventory;
+  g.tiles[shop].stock -= 1; // room on the shelves
+  give(a, -1);
+  a.carried = 0;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  act(g, 0, { a: 'end' });
+  assert.ok(a.ledger.inventory < stocked, 'idle makes nothing');
+  act(g, 0, { a: 'production', level: 'demand' });
 
   // With no transport on the factory's side, goods for another side wait in the factory.
   g.tiles[rail].owner = null;

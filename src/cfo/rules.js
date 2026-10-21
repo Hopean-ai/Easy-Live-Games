@@ -272,6 +272,7 @@ function cleanAction(action) {
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
   if (typeof action.accept === 'boolean') out.accept = action.accept;
+  if (typeof action.level === 'string' && Object.hasOwn(SUPPLY.levels, action.level)) out.level = action.level;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -319,6 +320,13 @@ export function act(g, who, raw) {
   if (action.a === 'resign') {
     bankrupt(g, p, `${p.name} resigns.`);
     afterAction(g);
+    return null;
+  }
+  // Miles: a production dial, which a company can turn at any time.
+  if (action.a === 'production') {
+    if (!action.level) return 'Pick a production level.';
+    p.production = action.level;
+    log(g, `${p.name} sets production to ${SUPPLY.levels[action.level].name.toLowerCase()}.`);
     return null;
   }
   if (Object.hasOwn(BOOKS, action.a) || Object.hasOwn(DEALS, action.a)) {
@@ -829,8 +837,9 @@ const ownsAirport = (g) => g.tiles.some((t, i) => t?.owner === g.turn && SQUARES
 
 // The company's supply chain, run at the end of each of its owner's turns, like a real one runs
 // every day without the CEO driving the goods around:
-// 1. Production is planned to demand: factories make only what the stores need to hold
-//    `SUPPLY.cover` turns of sales, up to each factory's capacity for a turn.
+// 1. Production follows the company's dial (SUPPLY.levels): matching demand, factories make only
+//    what the stores need to hold `cover` turns of sales, up to each factory's capacity for a
+//    turn; at full capacity they make all they can; idle, nothing.
 // 2. Logistics fill each store up to that target from the factories, nearest first. The same side
 //    of the board goes by local truck; another side needs a transport line on the factory's side
 //    (your own is free, a rival's charges freight per widget); the island needs your own airport.
@@ -843,9 +852,10 @@ function operate(g, p) {
     depot.t.stock += p.carried;
     p.carried = 0;
   }
-  const target = ({ t, pos }) => storeTerms(pos, t).units * SUPPLY.cover;
+  const level = SUPPLY.levels[p.production] ?? SUPPLY.levels.demand;
+  const target = ({ t, pos }) => storeTerms(pos, t).units * level.cover;
   const onHand = p.carried + [...factories, ...stores].reduce((n, { t }) => n + t.stock, 0);
-  let budget = Math.max(0, stores.reduce((n, s) => n + target(s), 0) - onHand);
+  let budget = !level.make ? 0 : level.flatOut ? Infinity : Math.max(0, stores.reduce((n, s) => n + target(s), 0) - onHand);
   for (const { t, pos } of factories) {
     if (budget <= 0) break;
     budget -= makeWidgets(g, p, pos, Math.min(budget, production(pos, t.building.cost)));
@@ -1917,6 +1927,7 @@ export function viewFor(g, who) {
       sale: p.sale ?? null,
       inventory: open(i) ? p.ledger.inventory : null,
       carried: p.carried,
+      production: p.production ?? 'demand',
       retail: retailTerms(g, i),
       ...(i === who && !g.easyBooks ? {
         docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),

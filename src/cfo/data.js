@@ -236,9 +236,17 @@ export const RETAIL = {
 };
 
 
-// The supply chain (see `operate` in rules.js): each store is restocked up to `cover` turns of its
-// sales, and factories make only what that needs. PLACEHOLDER.
-export const SUPPLY = { cover: 2 };
+// The supply chain (see `operate` in rules.js). Each company sets a production level (Miles: a
+// dial). Stores are restocked up to `cover` turns of their sales. Matching demand, factories make
+// only what that needs; at full capacity they run flat out and stores stock deeper, with the rest
+// waiting in the factories; idle, they make nothing. PLACEHOLDERS.
+export const SUPPLY = {
+  levels: {
+    idle: { name: 'Idle', cover: 2, make: false },
+    demand: { name: 'Match demand', cover: 2, make: true },
+    full: { name: 'Full capacity', cover: 4, make: true, flatOut: true },
+  },
+};
 
 // ---- PP&E (60 cards, one per lot; the Assets sheet had 47) ----
 // Each step up costs about 4x the last, so the top cards take saving for (Miles: the right feel).
