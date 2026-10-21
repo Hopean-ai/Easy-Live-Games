@@ -1106,11 +1106,14 @@ test('rezoning costs a fee and the PP&E must be rebuilt', () => {
   const salvage = salvageValue(g.tiles[pos].building);
   const cash = p.ledger.cash;
   const deck = g.zoningDeck.length;
+  const land = p.ledger.land;
   assert.equal(act(g, 0, { a: 'rezone', pos, zone: card }), null);
   assert.equal(g.tiles[pos].zone, to);
   assert.equal(g.tiles[pos].building, null, 'the PP&E is gone and must be rebuilt');
   assert.equal(p.ledger.cash, cash + salvage - rezoneFee(pos));
   assert.equal(rezoneFee(pos), Math.round(SQUARES[pos].price * CONFIG.rezoneFee));
+  assert.equal(p.ledger.land - land, rezoneFee(pos), 'the fee is added to the land\'s cost');
+  assert.equal(g.tiles[pos].landBasis, SQUARES[pos].price + rezoneFee(pos));
   assert.equal(g.zoningRow.length, CONFIG.rowSize);
   assert.equal(g.zoningDeck.length, deck, 'the old zoning goes back as the new card comes off');
   assert.equal(act(g, 1, { a: 'rezone', pos, zone: 0 }), 'It is not your turn.');

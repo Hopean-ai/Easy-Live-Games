@@ -493,7 +493,9 @@ const ACTIONS = {
     const fee = rezoneFee(pos);
     if (companyCash(p) + (t.building ? salvageValue(t.building) : 0) < fee) return 'Your company cannot afford the fee.';
     if (t.building) scrapBuilding(g, p, t, pos, 'rezoning');
-    post(p, `Rezoning fee for ${SQUARES[pos].name}`, { expOther: fee, cash: -fee });
+    // Miles: the fee makes the land more useful, so it's capitalized into the land's cost.
+    post(p, `Rezoning fee for ${SQUARES[pos].name}`, { land: fee, cash: -fee });
+    t.landBasis = (t.landBasis ?? SQUARES[pos].price) + fee;
     const was = t.zone;
     returnZoning(g, t);
     t.zone = g.zoningRow.splice(zone, 1)[0];
