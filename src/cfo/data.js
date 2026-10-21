@@ -212,7 +212,7 @@ export const ZONES = {
   industrial: { name: 'Industrial', count: 25, rent: 0.1, produce: 0.32, overtime: 12 },
   retail: { name: 'Retail', count: 16, rent: 0.2 },
   banking: { name: 'Banking', count: 6, rent: 0.1, yearly: 0.25, interest: 0.05 },
-  residential: { name: 'Residential', count: 13, rent: 0, yearly: 0.5 },
+  residential: { name: 'Residential', count: 13, rent: 0, yearly: 0.75 },
 };
 
 // Widgets are counted in units that cost $1 each to make. The spreadsheet's widget tiers are
