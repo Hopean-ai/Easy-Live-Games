@@ -253,6 +253,20 @@ export const RETAIL = {
 // dial). Stores are restocked up to `cover` turns of their sales. Matching demand, factories make
 // only what that needs; at full capacity they run flat out and stores stock deeper, with the rest
 // waiting in the factories; idle, they make nothing. PLACEHOLDERS.
+// Miles: trade credit. Part of each store's sales is on credit (Accounts receivable), collected a
+// few of the owner's turns later; widget materials are bought on credit (Accounts payable) and paid
+// a few turns later. Cards change those periods. PLACEHOLDER numbers.
+export const CREDIT = {
+  salesShare: 0.5, // share of normal store sales made on credit
+  collectTurns: 2, // customers pay this many of your turns after the sale
+  payTurns: 2, // suppliers are paid this many of your turns after the purchase
+  factoringFee: 0.03, // a factor buys receivables now for this much less
+  fastCollect: 1, // Credit Department: customers pay in this many turns
+  slowPay: 4, // Supplier Negotiation: suppliers are paid in this many turns
+  disputeDelay: 4, // Bogus Quality Dispute: every bill owed moves back this many turns
+  badDebt: 0.1, // Customer Default: share of receivables written off
+};
+
 export const SUPPLY = {
   levels: {
     idle: { name: 'Idle', cover: 2, make: false },
@@ -287,6 +301,8 @@ export const FRAUD_CARDS = {
   ponzi: { name: 'Ponzi Scheme', count: 2, keep: true, placeholder: true, text: `Every other player pays you ${usd(100)} of personal cash.` },
   shred: { name: 'Shred the Evidence', count: 2, keep: true, placeholder: true, text: 'Clear two frauds from your record. Shredding is itself a fraud, so it counts as one.' },
   backdate: { name: 'Backdated Invoice', count: 3, keep: true, placeholder: true, text: 'Build one of the available PP&E cards for half its price.' },
+  dispute: { name: 'Bogus Quality Dispute', count: 2, keep: true, placeholder: true, text: `Claim your suppliers' goods were faulty: every bill you owe them is paid 4 turns later than due.` },
+  fictitious: { name: 'Fictitious Receivables', count: 2, keep: true, placeholder: true, text: `Book up to ${usd(1500)} of sales on credit to customers who don't exist. Profit and company value rise until the fiscal year end, when the bills are written off as bad debts.` },
 };
 
 export const MARKET_CARDS = {
@@ -306,6 +322,11 @@ export const MARKET_CARDS = {
   rezoning: { name: 'Zoning Reform', count: 2, placeholder: true, text: 'The available zoning cards are replaced for free.' },
   holiday: { name: 'Tax Holiday', count: 2, placeholder: true, text: 'No company pays corporate tax at its next fiscal year end.' },
   spoilage: { name: 'Supply Chain Disruption', count: 2, placeholder: true, text: 'Every company writes off 10% of its widgets.' },
+  factoring: { name: 'Invoice Factoring', count: 3, keep: true, placeholder: true, text: 'Sell everything your customers owe you to a factor: collect it all now, less a 3% fee.' },
+  creditDept: { name: 'Credit Department', count: 2, keep: true, placeholder: true, text: 'Chase customers harder: for the rest of this fiscal year, they pay 1 turn after a sale instead of 2.' },
+  supplierTerms: { name: 'Supplier Negotiation', count: 2, keep: true, placeholder: true, text: 'Win longer terms: for the rest of this fiscal year, you pay suppliers 4 turns after a purchase instead of 2.' },
+  default: { name: 'Customer Default', count: 2, placeholder: true, text: 'A big customer goes under: every company writes off 10% of what its customers owe it.' },
+  crunch: { name: 'Credit Crunch', count: 2, placeholder: true, text: 'Suppliers demand cash: every company pays everything it owes them now.' },
   whistle: { name: 'Whistleblower', count: 2, keep: true, placeholder: true, text: `Tip off the regulators about a rival: they face a fraud check at Interim Review odds. If they're convicted, you collect a ${usd(1000)} reward.` },
 };
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS } from '../src/cfo/data.js';
-import { createGame, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
+import { createGame, creditTerms, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -56,6 +56,9 @@ function playOut(seed, players = 4, options = {}) {
       assert.equal(b.assets.cash, q.ledger.cash);
       const held = q.carried + g.tiles.reduce((n, t) => n + (t && t.owner === g.players.indexOf(q) ? t.stock : 0), 0);
       if (!q.out) assert.ok(Math.abs(held * g.widgetCost - q.ledger.inventory) < 0.01, 'every widget is somewhere');
+      const bills = (list) => Math.round((list ?? []).reduce((n, x) => n + x.amount, 0) * 100) / 100;
+      if (!q.out) assert.equal(b.assets.receivable, bills(q.receivables), 'every receivable is a bill');
+      if (!q.out) assert.equal(b.liabilities.payable, bills(q.payables), 'every payable is a bill');
     }
   }
   return g;
@@ -267,6 +270,7 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
 
 test('factories make what the stores need each turn, and logistics ship it to them', () => {
   const g = createGame(['A', 'B'], 3);
+  g.credit = false; // all in cash here; trade credit has its own tests
   const [a, b] = g.players;
   const factory = posOfSpace(12); // top
   const cost = M(100);
@@ -564,6 +568,10 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     b.assets.push('wealthy');
     a.frauds = 2; // so the cards that clear frauds have something to clear
     post(a, 'Legal fees', { expOther: M(500), cash: -M(500) }); // something for Cook the Books to move
+    post(a, 'Supplies on credit', { expOther: M(10), payable: -M(10) }); // a bill to dispute
+    a.payables.push({ amount: M(10), due: 5 });
+    post(a, 'Sales on credit', { receivable: M(20), revSales: -M(20) }); // a bill to collect
+    a.receivables.push({ amount: M(20), due: 5 });
     a.personalCash = M(2000);
     a.atBank = true;
     act(g, 0, { a: 'borrow', amount: M(500) });
@@ -587,6 +595,9 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     for (const p of g.players) {
       const s = balanceSheet(p);
       assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01, id);
+      const bills = (list) => Math.round((list ?? []).reduce((n, x) => n + x.amount, 0) * 100) / 100;
+      assert.equal(s.assets.receivable, bills(p.receivables), `${id}: receivables match the bills`);
+      assert.equal(s.liabilities.payable, bills(p.payables), `${id}: payables match the bills`);
     }
   }
 });
@@ -1319,6 +1330,7 @@ test('the pricing dial trades price for volume, and rival stores on a side compe
 test('games begun before factory overhead keep $1 widgets', () => {
   const g = createGame(['A', 'B'], 33);
   delete g.widgetCost;
+  delete g.credit;
   const p = g.players[0];
   const factory = posOfSpace(12);
   Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
@@ -1367,4 +1379,77 @@ test('company cash earns bank interest once, however many banks; each bank adds 
   assert.equal(fees.length, 2);
   for (const e of fees) assert.equal(cash(e), M(1000) * ZONES.banking.yearly);
   assert.equal(p.report.income.revenue.revInterest, cash(interest[0]) + 2 * M(1000) * ZONES.banking.yearly);
+});
+
+test('trade credit: half of store sales are collected later, materials are paid later', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const a = g.players[0];
+  store(g, 0, 30, 'common', 100);
+  const factory = posOfSpace(31);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  const end = () => { Object.assign(g, { turn: 0, phase: 'act' }); act(g, 0, { a: 'end' }); };
+  end();
+  const sales = -a.ledger.revSales;
+  assert.ok(sales > 0);
+  assert.equal(a.ledger.receivable, Math.round(sales * CREDIT.salesShare), 'half the sales are on credit');
+  const owed = -a.ledger.payable;
+  assert.ok(owed > 0, 'materials are bought on credit');
+  assert.equal(a.receivables[0].due, 1 + CREDIT.collectTurns);
+  // Nothing falls due next turn; the turn after, customers pay and suppliers are paid.
+  const firstSale = a.receivables[0].amount;
+  end();
+  assert.ok(a.receivables.some((b) => b.amount === firstSale));
+  const cash = a.ledger.cash;
+  end();
+  assert.ok(!a.receivables.some((b) => b.due <= a.clock));
+  assert.ok(!a.payables.some((b) => b.due <= a.clock));
+  assert.ok(a.journal.some((e) => e.text === 'Customers pay their bills'));
+  assert.ok(a.journal.some((e) => e.text === 'Suppliers paid'));
+  assert.notEqual(a.ledger.cash, cash);
+
+  // Credit Department and Supplier Negotiation change the periods until the year end.
+  a.hand = ['creditDept', 'supplierTerms'];
+  Object.assign(g, { turn: 0, phase: 'act' });
+  assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.equal(act(g, 0, { a: 'play', card: 0 }), null);
+  assert.deepEqual(creditTerms(a), { collect: CREDIT.fastCollect, pay: CREDIT.slowPay });
+  assert.ok(a.receivables.every((b) => b.due <= a.clock + CREDIT.fastCollect));
+  a.pos = BOARD_SIZE - 2;
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  act(g, 0, { a: 'roll' });
+  assert.deepEqual(creditTerms(a), { collect: CREDIT.collectTurns, pay: CREDIT.payTurns }, 'back to normal after the year end');
+});
+
+test('Fictitious Receivables inflate one year, then are written off; a cash shortfall sells real ones to a factor', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const a = g.players[0];
+  a.hand = ['fictitious'];
+  g.phase = 'act';
+  assert.equal(act(g, 0, { a: 'play', card: 0, amount: M(1000) }), null);
+  assert.equal(a.frauds, 1);
+  assert.equal(a.ledger.receivable, M(1000));
+  for (let k = 0; k < 4; k++) { Object.assign(g, { turn: 0, phase: 'act' }); act(g, 0, { a: 'end' }); }
+  assert.equal(a.ledger.receivable, M(1000), 'nobody ever pays a fictitious bill');
+  // The first year end books the sales into that year; the next one writes them off.
+  const fye = () => { a.pos = BOARD_SIZE - 2; Object.assign(g, { turn: 0, phase: 'roll' }); act(g, 0, { a: 'roll' }); };
+  fye();
+  assert.equal(a.ledger.receivable, M(1000));
+  fye();
+  assert.equal(a.ledger.receivable, 0);
+  assert.ok(a.journal.some((e) => e.text === 'Bad debts written off'));
+
+  // Short of cash, genuine bills are factored before anything is sold.
+  const b = g.players[1];
+  post(b, 'Sales on credit', { receivable: M(1000), revSales: -M(1000) });
+  b.receivables.push({ amount: M(1000), due: 99 });
+  post(b, 'Spend down', { expOther: b.ledger.cash, cash: -b.ledger.cash });
+  Object.assign(g, { turn: 1, phase: 'act' });
+  b.hand = [];
+  g.marketDeck = ['lawsuit'];
+  b.pos = posOfSpace(8) - 2;
+  Object.assign(g, { turn: 1, phase: 'roll' });
+  while (b.pos !== posOfSpace(8)) { b.pos = posOfSpace(8) - 2; g.marketDeck = ['lawsuit']; Object.assign(g, { turn: 1, phase: 'roll' }); act(g, 1, { a: 'roll' }); }
+  assert.ok(!b.out);
+  assert.equal(b.ledger.receivable, 0);
+  assert.ok(b.journal.some((e) => /factor/.test(e.text)));
 });

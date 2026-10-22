@@ -563,6 +563,15 @@ function pricingDial(me) {
       el('button', { class: 'secondary', disabled: id === current, onclick: () => actNow({ a: 'pricing', level: id }) }, l.name))));
 }
 
+// Trade credit: what customers owe the company and what it owes suppliers, and when they pay.
+function creditText(me) {
+  const c = me.credit;
+  if (!c) return null;
+  const turns = (n) => `${n} turn${n === 1 ? '' : 's'}`;
+  return el('p', { class: 'small' },
+    `Credit: customers owe you ${money(c.receivable)} and you owe suppliers ${money(c.payable)}. ${Math.round(rules.credit.salesShare * 100)}% of your stores' sales are on credit, collected ${turns(c.collect)} later; widget materials are bought on credit and paid ${turns(c.pay)} later. Bills are settled at the end of your turn, and if cash runs short, what customers owe is sold to a factor for ${Math.round(rules.credit.factoringFee * 100)}% less.`);
+}
+
 function widgetText(n) {
   n = Math.floor(n);
   if (!n) return 'No widgets.';
@@ -814,6 +823,7 @@ function renderHand() {
     el('p', { class: 'small' }, r.stores
       ? `Your ${r.stores} store${r.stores > 1 ? 's' : ''} sell up to ${r.units.toLocaleString('en-US')} a turn at ${r.minPrice === r.maxPrice ? `$${r.maxPrice.toFixed(2)}` : `$${r.minPrice.toFixed(2)} to $${r.maxPrice.toFixed(2)}`} each.`
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
+    creditText(me),
   );
   // Everyone's personal assets are public, like a Monopoly player's deeds.
   const others = g.players.map((p, i) => ({ p, i })).filter(({ p, i }) => i !== mySeat && !p.out);
@@ -850,6 +860,7 @@ function playControls(id, i) {
       el('button', { class: 'secondary', disabled: g.players[mySeat].cash < rules.rarities[r].price * 0.9, onclick: () => play({ pos: selected, rarity: r }) },
         `${rules.rarities[r].name} ×${counts[r]} (${money(rules.rarities[r].price * 0.9)})`)));
   }
+  if (id === 'fictitious') return amountForm('Book fictitious sales', `Up to ${money(1500 * rules.moneyScale)}.`, (amount) => play({ amount }));
   if (id === 'embezzle') return amountForm('Embezzle', `Up to ${money(2000 * rules.moneyScale)}.`, (amount) => play({ amount }));
   if (id === 'insider') {
     const targets = g.players.map((p, j) => ({ p, j })).filter(({ p }) => p.isPublic && !p.out);
