@@ -1330,3 +1330,24 @@ test('games begun before factory overhead keep $1 widgets', () => {
   assert.equal(p.ledger.inventory, made);
   assert.equal(p.ledger.cash, cash - made, 'no idle overhead either');
 });
+
+test('the end-of-game recap: a point per fiscal year end, shown only once the game is over', () => {
+  const g = createGame(['A', 'B', 'C'], 41);
+  assert.equal(viewFor(g, 0).players[0].history, null, 'kept back during play');
+  const g2 = playOut(41, 3);
+  const v = viewFor(g2, 0);
+  for (const [i, p] of g2.players.entries()) {
+    const h = v.players[i].history;
+    assert.deepEqual(h, p.history);
+    assert.equal(h[0].year, 0);
+    assert.equal(h[0].netIncome, null);
+    const closes = h.filter((x) => Number.isInteger(x.year) && x.year > 0);
+    assert.equal(closes.length, p.years, 'one point per fiscal year closed');
+    for (const x of h) for (const k of ['value', 'cash', 'netWorth']) assert.ok(Number.isFinite(x[k]));
+    if (!p.out) {
+      const end = h.at(-1);
+      assert.equal(end.year, p.years + 0.5);
+      assert.equal(end.netWorth, netWorth(g2, p), 'the last point is the final standing');
+    }
+  }
+});
