@@ -10,8 +10,9 @@ const ROUTINE_BETA = 'experimental-cc-routine-2026-04-01';
 
 // The router has already checked the caller is an admin and the room code is well formed.
 export async function callClaudePlayers(env, { origin, code, count }) {
-  if (!env.CLAUDE_ROUTINE_URL || !env.CLAUDE_ROUTINE_TOKEN) {
-    return { status: 503, error: 'Claude players are not set up yet: the routine URL and token secrets are missing.' };
+  const missing = ['CLAUDE_ROUTINE_URL', 'CLAUDE_ROUTINE_TOKEN'].filter((k) => !env[k]);
+  if (missing.length) {
+    return { status: 503, error: `Claude players are not set up yet: this Worker has no ${missing.join(' or ')} secret.` };
   }
   const n = Number(count);
   if (!Number.isInteger(n) || n < 1 || n > MAX_CLAUDE_PLAYERS) return { status: 400, error: `Ask for 1 to ${MAX_CLAUDE_PLAYERS} players.` };
