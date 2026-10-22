@@ -24,7 +24,7 @@ export const ACCOUNTS = {
   affiliateLoan: 'Due to affiliate',
   capital: 'Contributed capital',
   retained: 'Retained earnings',
-  draws: 'Owner distributions',
+  draws: 'Distributions to shareholders',
   revSales: 'Widget sales',
   cogs: 'Cost of widgets sold',
   revRent: 'Rent revenue',
@@ -98,14 +98,15 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       carried: 0, // widgets with nowhere to sit (a sold building's stock); the rest sit in factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
-      // Shares in this player's company: who holds how many. Everyone starts owning all 100 of theirs.
-      shares: { holders: { [g.players.length]: 100 }, public: 0 }, isPublic: false, parent: null,
+      // Shares in the company this player is CFO of: who holds how many. Miles: the CFO starts with
+      // a stake (CONFIG.cfoShares of 100) and the founders, who aren't players, hold the rest.
+      shares: { holders: { [g.players.length]: CONFIG.cfoShares }, founders: 100 - CONFIG.cfoShares, public: 0 }, isPublic: false, parent: null,
       manual: !g.easyBooks, docs: [], docSeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
     // Later seats can start with a little more, to offset going first.
     const capital = CONFIG.startCompanyCash + (g.players.length - 1) * CONFIG.seatBonus;
-    post(p, 'Owner invests starting capital', { cash: capital, capital: -capital });
+    post(p, 'Founders invest starting capital', { cash: capital, capital: -capital });
   }
   for (const p of g.players) snapshot(g, p, 0);
   log(g, `${g.players[0].name} goes first.`);
@@ -221,12 +222,21 @@ export function portfolio(p) {
 // above its books), but brings tighter fraud scrutiny. Subsidiaries are part-owned by a parent.
 
 export function totalShares(p) {
-  return Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + p.shares.public;
+  return Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + (p.shares.founders ?? 0) + p.shares.public;
 }
 
 // What the market pays for the whole company.
 export function companyValue(p) {
   return Math.max(0, balanceSheet(p).totalEquity) * (p.isPublic ? CONFIG.publicPremium : 1);
+}
+
+// New shares are issued at the market price, never below CONFIG.minIssuePrice.
+export function issuePrice(p) {
+  return Math.max(CONFIG.minIssuePrice, Math.ceil(sharePrice(p)));
+}
+
+function issueShares(p, who, n) {
+  p.shares.holders[who] = (p.shares.holders[who] ?? 0) + n;
 }
 
 export function sharePrice(p) {
@@ -338,15 +348,20 @@ export function act(g, who, raw) {
     log(g, `${p.name} sets ${RETAIL.pricing[action.level].name.toLowerCase()} at their stores.`);
     return null;
   }
-  // The owner puts personal cash into the company as more capital, at any time.
+  // The CFO buys new shares in the company with personal cash, at any time, at the market price.
   if (action.a === 'invest') {
     const amount = Math.floor(Number(action.amount) * 100) / 100;
     if (!(amount > 0)) return 'Enter an amount.';
     if (p.parent !== null) return 'Your company is a subsidiary; its parent company funds it.';
     if (amount > p.personalCash) return 'You do not have that much personal cash.';
-    p.personalCash = round(p.personalCash - amount);
-    post(p, 'Owner invests more capital', { cash: amount, capital: -amount });
-    log(g, `${p.name} invests ${money(amount)} of their own money in their company.`);
+    const price = issuePrice(p);
+    const n = Math.floor(amount / price);
+    if (!n) return `New shares cost ${money(price)} each.`;
+    const paid = round(n * price);
+    p.personalCash = round(p.personalCash - paid);
+    issueShares(p, g.players.indexOf(p), n);
+    post(p, `${n} new shares bought by the CFO`, { cash: paid, capital: -paid });
+    log(g, `${p.name} buys ${n} new shares in their company for ${money(paid)}.`);
     afterAction(g);
     return null;
   }
@@ -547,15 +562,27 @@ const ACTIONS = {
     return null;
   },
 
-  // Pay yourself: company cash becomes personal cash, less personal tax.
+  // Pay yourself a bonus: company cash becomes personal cash, less personal tax. Miles: you are the
+  // CFO, not the owner, so it is pay (an expense), not a distribution to shareholders.
   pay(g, p, { amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
     amount = Math.floor(Number(amount));
     if (!(amount > 0)) return 'Enter an amount.';
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
-    post(p, 'Owner distribution', { draws: amount, cash: -amount });
-    // Every shareholder gets their share of a distribution. A parent company's share goes to its
-    // books as dividend income; people's shares are taxed; the public's share leaves the game.
+    post(p, 'Bonus paid to you', { expSalary: amount, cash: -amount });
+    const tax = personalIncome(p, amount);
+    log(g, `${p.name} is paid a ${money(amount)} bonus (${money(tax)} personal tax).`);
+    return null;
+  },
+
+  // Pay a dividend: every shareholder gets their share. A parent company's share goes to its books
+  // as dividend income; people's shares are taxed; the founders' and the public's leave the game.
+  dividend(g, p, { amount } = {}) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    amount = Math.floor(Number(amount));
+    if (!(amount > 0)) return 'Enter an amount.';
+    if (amount > companyCash(p)) return 'Your company does not have that much cash.';
+    post(p, 'Dividend paid to shareholders', { draws: amount, cash: -amount });
     const total = totalShares(p);
     for (const [h, n] of Object.entries(p.shares.holders)) {
       const q = g.players[h];
@@ -566,7 +593,7 @@ const ACTIONS = {
         log(g, `${q.name}'s company receives a ${money(part)} dividend from ${p.name}.`);
       } else {
         const tax = personalIncome(q, part);
-        log(g, `${q.name} receives ${money(part)} from ${p.name}'s company (${money(tax)} personal tax).`);
+        log(g, `${q.name} receives a ${money(part)} dividend from ${p.name}'s company (${money(tax)} personal tax).`);
       }
     }
     return null;
@@ -998,7 +1025,7 @@ function carrierOn(g, side) {
 const ownsAirport = (g) => g.tiles.some((t, i) => t?.owner === g.turn && SQUARES[i].kind === 'transport' && SQUARES[i].mode === 'air');
 
 // The company's supply chain, run at the end of each of its owner's turns, like a real one runs
-// every day without the CEO driving the goods around:
+// every day without the CFO driving the goods around:
 // 1. Production follows the company's dial (SUPPLY.levels): matching demand, factories make only
 //    what the stores need to hold `cover` turns of sales, up to each factory's capacity for a
 //    turn; at full capacity they make all they can; idle, nothing.
@@ -1327,7 +1354,7 @@ function acquireCompany(g, p, q, price) {
   const held = q.shares.holders[me] ?? 0;
   const paid = Math.ceil((price * (total - held)) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
   const lines = {};
-  for (const a of ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'loan', 'affiliateLoan']) lines[a] = q.ledger[a];
+  for (const a of ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'payable', 'loan', 'affiliateLoan']) lines[a] = q.ledger[a] ?? 0;
   lines.cash -= paid;
   const net = Object.values(lines).reduce((a, b) => a + b, 0);
   if (net < 0) lines.goodwill += -net;
@@ -1343,6 +1370,12 @@ function acquireCompany(g, p, q, price) {
   });
   g.offers = (g.offers ?? []).filter((o) => o.from !== them && o.to !== them);
   p.carried += q.carried;
+  // Its customers' and suppliers' bills come too, falling due on the buyer's clock.
+  const shift = (b) => ({ ...b, due: b.due === null ? null : b.due - (q.clock ?? 0) + (p.clock ?? 0) });
+  p.receivables = [...(p.receivables ?? []), ...(q.receivables ?? []).map(shift)];
+  p.payables = [...(p.payables ?? []), ...(q.payables ?? []).map(shift)];
+  q.receivables = [];
+  q.payables = [];
   // The target's own subsidiaries now belong to the buyer.
   for (const c of g.players) {
     if (c.parent !== them) continue;
@@ -1425,7 +1458,7 @@ function restart(g, q, parent, capital) {
     receivables: [], payables: [], terms: null,
     docs: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
-    shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, public: 0 },
+    shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, founders: 0, public: 0 },
     isPublic: false, parent,
   });
   post(q, `Capital from ${host.name}`, { cash: capital, capital: -capital });
@@ -1486,7 +1519,17 @@ function fiscalYearEnd(g, p) {
   // Miles: the year end is payday. The company pays you automatically: a base salary plus a bonus
   // on the year's profit before your pay, as much as its cash allows. It is a company expense,
   // and personal income taxed like any other.
-  const due = CONFIG.salary + Math.max(0, incomeStatement(p).preTax) * CONFIG.salaryBonus;
+  const bonus = Math.max(0, incomeStatement(p).preTax) * CONFIG.salaryBonus;
+  // Miles: once the company is public, the profit share of the CFO's pay comes as new shares at
+  // the market price (a stock award), which isn't cash so isn't taxed until the shares are sold.
+  const award = p.isPublic && p.parent === null ? Math.floor(bonus / issuePrice(p)) : 0;
+  if (award) {
+    const value = round(award * issuePrice(p));
+    issueShares(p, g.players.indexOf(p), award);
+    post(p, `Stock award: ${award} new shares paid to you`, { expSalary: value, capital: -value });
+    log(g, `${p.name} is awarded ${award} new shares (${money(value)}).`);
+  }
+  const due = CONFIG.salary + (award ? 0 : bonus);
   const salary = Math.round(Math.min(due, Math.max(0, companyCash(p))));
   if (salary) {
     post(p, 'Salary paid to you', { expSalary: salary, cash: -salary });

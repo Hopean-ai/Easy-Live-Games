@@ -48,6 +48,11 @@ export const CONFIG = {
   acquireMin: M(10000), // ...and never less than this, so an early or nearly broke company isn't a cheap kill
   subsidiaryMin: M(1000), // PLACEHOLDER: least a parent must put into a new subsidiary
   managerShares: 25, // PLACEHOLDER: share of a subsidiary its hired manager owns
+  // Miles: you are the company's CFO, not its owner. You start holding this many of its 100 shares;
+  // the founders hold the rest. Investing buys new shares; once the company is public, the profit
+  // share of your salary is paid in new shares at the market price (a stock award).
+  cfoShares: 20, // PLACEHOLDER
+  minIssuePrice: M(1), // PLACEHOLDER: new shares are never issued below this, even when equity is gone
   bookkeeperFee: M(100), // PLACEHOLDER: yearly fee for a bookkeeper who records entries and files statements (no clean-books bonus)
   seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
   personalUnit: 1, // Miles: personal cash is as granular as company cash (one cent); this used to be $10,000
