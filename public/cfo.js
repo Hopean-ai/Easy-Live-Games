@@ -815,7 +815,7 @@ function renderHand() {
   const assets = me.assets.map((id) => el('span', { class: 'chip', title: rules.personal[id].text ?? '' }, `${rules.personal[id].name} ${money(rules.personal[id].value)}`));
   const r = me.retail;
   $('widgets').replaceChildren(
-    el('p', {}, `${me.widgets.toLocaleString('en-US')} widgets${me.widgets >= 1 ? `: ${widgetText(me.widgets)}` : ''}, carried at ${money(me.inventory)}.`),
+    el('p', {}, `${me.widgets.toLocaleString('en-US')} widgets${me.widgets >= 1 ? `: ${widgetText(me.widgets)}` : ''}, carried at ${money(me.inventory)}${me.widgets >= 1 && me.averageCost ? `, an average of $${me.averageCost.toFixed(2)} each (making them plus freight to your stores)` : ''}.`),
     el('p', { class: 'small' }, placesText(me)),
     productionDial(me),
     pricingDial(me),
