@@ -177,6 +177,25 @@ $('copy').addEventListener('click', async () => {
 $('start').addEventListener('click', () => send({ t: 'start' }));
 $('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
 $('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
+// Admins can ask Claude to send players into the room; the Worker calls the Claude routine.
+async function callClaude(count) {
+  $('claude-text').textContent = 'Calling Claude…';
+  let res;
+  try {
+    res = await (await fetch(`/api/rooms/cfo/${room}/claude`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count }) })).json();
+  } catch {
+    res = { error: 'Could not reach the server.' };
+  }
+  const text = res.error ?? `Claude is on the way: ${res.players.join(', ')} should join in a minute or two.`;
+  $('claude-text').textContent = text;
+  if (!$('play').hidden) $('status').textContent = text;
+}
+$('claude-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  callClaude(Number($('claude-count').value));
+});
+$('claude-back').addEventListener('click', () => callClaude(1));
+
 $('resign').addEventListener('click', () => {
   if (confirm('Resign? Your company will be wound up and you will be out of the game.')) actNow({ a: 'resign' });
 });
@@ -304,6 +323,7 @@ function renderWaiting() {
   $('wait-text').textContent = text;
   renderWinOptions();
   $('start').hidden = mySeat !== host;
+  $('claude-form').hidden = !state.seats[mySeat]?.admin || n >= max;
   $('start').disabled = n < (rules?.config.minPlayers ?? 2);
 }
 
@@ -422,6 +442,9 @@ function renderTurn() {
   }
   const self = g.players[mySeat];
   $('my-cash').textContent = self && !self.out && g.phase !== 'over' ? `Company cash ${money(self.cash)} · personal ${money(self.personalCash)}` : '';
+  // Claude players whose run ended mid-game can be called back into their seats by an admin.
+  $('claude-back').hidden = !state.seats[mySeat]?.admin || g.phase === 'over'
+    || !state.seats.some((s, i) => s.guest && /^Claude \d+$/.test(s.name) && !s.connected && !g.players[i]?.out);
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
   if (g.win) {
     $('goal').textContent = `Win: last standing, company worth ${money(g.win.valueTarget)}, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;

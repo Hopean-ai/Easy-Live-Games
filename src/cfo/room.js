@@ -5,6 +5,8 @@ import { sanitizeName } from '../names.js';
 import { isAdmin, hostSeat } from '../admin.js';
 
 const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is about 600 bytes
+const CLAUDE_NAME = /^Claude \d+$/; // the names Claude players join under
+const CLAUDE_COOLDOWN_MS = 60_000; // one call for Claude players a minute, so a double tap starts one run
 // Miles: no turn time limits. A player can take as long as they like, even with the tab closed.
 // An optional turn timer (CONFIG.turnSeconds) can be switched back on; it is off.
 
@@ -55,6 +57,34 @@ export class CfoRoom extends DurableObject {
     if (seat !== null && account) this.refreshList = true; // keeps the game fresh in their list
     await this.changed();
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // Called by the router when an admin asks for Claude players (see src/claude.js). In a lobby it
+  // names new players for the free seats; mid-game it names the Claude players already seated, so
+  // a new run can reconnect them. Returns the names, or an error to show the admin.
+  async claudePlayers(count) {
+    const r = this.room;
+    const now = Date.now();
+    if (now - (r.claudeAt ?? 0) < CLAUDE_COOLDOWN_MS) return { error: 'Claude players were just called. Give them a minute to arrive.' };
+    const isClaude = (s) => s.guest && CLAUDE_NAME.test(s.name);
+    let names;
+    if (r.status === 'waiting') {
+      const free = CONFIG.maxPlayers - r.seats.length;
+      if (free <= 0) return { error: 'The room is full.' };
+      const taken = new Set(r.seats.map((s) => s.name.toLowerCase()));
+      names = [];
+      for (let i = 1; names.length < Math.min(count, free) && i <= CONFIG.maxPlayers * 2; i++) {
+        if (!taken.has(`claude ${i}`)) names.push(`Claude ${i}`);
+      }
+    } else if (r.status === 'playing') {
+      names = r.seats.filter((s, i) => isClaude(s) && !r.game?.players[i]?.out && !this.socketsFor(i).length).map((s) => s.name);
+      if (!names.length) return { error: 'No Claude players are waiting to reconnect.' };
+    } else {
+      return { error: 'This game is over.' };
+    }
+    r.claudeAt = now;
+    await this.ctx.storage.put('room', r);
+    return { names, status: r.status };
   }
 
   // A player gets their seat back by the same tab's token or, when signed in, by their account,

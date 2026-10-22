@@ -46,6 +46,18 @@
         <input id="max-years" type="number" min="0" max="50">
       </label>
       <button id="start" hidden>Start the game</button>
+      <!-- Admins only: the server checks too. Asks Claude to send players into this room. -->
+      <form id="claude-form" class="inline" hidden>
+        <select id="claude-count" aria-label="How many Claude players">
+          <option value="1">1 Claude player</option>
+          <option value="2">2 Claude players</option>
+          <option value="3">3 Claude players</option>
+          <option value="4">4 Claude players</option>
+          <option value="5">5 Claude players</option>
+        </select>
+        <button type="submit" class="secondary">Add Claude players</button>
+      </form>
+      <p id="claude-text" class="small" role="status"></p>
     </section>
 
     <section id="play" hidden>
@@ -116,6 +128,7 @@
         <span>Room <strong id="room-code-2"></strong></span>
         <span id="goal"></span>
         <span id="status"></span>
+        <button id="claude-back" class="link" hidden>Reconnect Claude players</button>
         <button id="resign" class="link">Resign</button>
       </footer>
     </section>
