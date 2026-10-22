@@ -758,7 +758,7 @@ function zoneText(id) {
     industrial: `makes widgets at the end of each of your turns, only as many as your stores need, up to ${z.produce} × √(PP&E cost × land price) a turn, so both the PP&E's price and the land's price count. Each widget takes $${z.variableCost.toFixed(2)} of materials and labour, and the factory carries $${z.overhead.toFixed(2)} of overhead per widget of capacity every turn: a full factory makes widgets for $${(z.variableCost + z.overhead).toFixed(2)}, and overhead on capacity left idle is still paid. Landing on it runs an overtime shift of ${z.overtime} turns' worth`,
     retail: `at the end of each of your turns sells up to ${r.perLandDollar} widgets per dollar of land price from its shelves, so pricier land sells more. Pricier PP&E sells at a better price, $${r.prices.common.toFixed(2)} to $${r.prices.legendary.toFixed(2)} a widget at normal prices. Your pricing dial and rival stores on the same side change both. Landing on it lets you run a special sale`,
     residential: `pays you passive income at each fiscal year end of ${pct(z.yearly)} of its cost`,
-    banking: `each fiscal year earns ${pct(z.interest)} interest on your company's cash plus fees of ${pct(z.yearly)} of its cost`,
+    banking: `earns fees of ${pct(z.yearly)} of its cost at each fiscal year end. Owning any bank also earns ${pct(z.interest)} interest on your company's cash, once, however many banks you own`,
   }[id];
   return z.rent ? `${z.name} PP&E charges visitors ${pct(z.rent)} of its cost, and ${yearly}.` : `${z.name} PP&E charges visitors only the land rent, and ${yearly}.`;
 }

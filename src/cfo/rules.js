@@ -1329,10 +1329,13 @@ function fiscalYearEnd(g, p) {
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
   const each = (zone, fn) => mine.filter(({ t }) => t.zone === zone).forEach(({ t, pos }) => fn(t.building, SQUARES[pos].name, ZONES[zone]));
 
-  // Banking first, on the cash the company held through the year.
+  // Banking first. The company's cash sits in its own bank and earns interest once, however many
+  // banks it owns; each bank adds fees from its outside customers, in line with its size.
+  const interest = mine.some(({ t }) => t.zone === 'banking') ? Math.max(0, Math.round(companyCash(p) * ZONES.banking.interest)) : 0;
+  if (interest) post(p, 'Interest on company cash held at its own bank', { cash: interest, revInterest: -interest });
   each('banking', (b, name, z) => {
-    const earned = Math.max(0, Math.round(companyCash(p) * z.interest + b.cost * z.yearly));
-    if (earned) post(p, `Interest and fees at ${name}`, { cash: earned, revInterest: -earned });
+    const earned = Math.round(b.cost * z.yearly);
+    if (earned) post(p, `Banking fees at ${name}`, { cash: earned, revInterest: -earned });
   });
   each('residential', (b, name, z) => {
     const earned = Math.round(b.cost * z.yearly);
