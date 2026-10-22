@@ -102,6 +102,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     const capital = CONFIG.startCompanyCash + (g.players.length - 1) * CONFIG.seatBonus;
     post(p, 'Owner invests starting capital', { cash: capital, capital: -capital });
   }
+  for (const p of g.players) snapshot(g, p, 0);
   log(g, `${g.players[0].name} goes first.`);
   return g;
 }
@@ -1032,8 +1033,15 @@ function afterAction(g) {
   if (current(g).out) nextTurn(g);
 }
 
+// One point on the end-of-game recap charts: where a company and its owner stood.
+function snapshot(g, p, year, netIncome = null) {
+  (p.history ??= []).push({ year, value: companyValue(p), cash: companyCash(p), netWorth: netWorth(g, p), netIncome });
+}
+
 function finish(g, p, reason) {
   g.phase = 'over';
+  // The final point: where everyone still playing stood when the game ended, partway into a year.
+  for (const q of g.players) if (!q.out) snapshot(g, q, q.years + 0.5);
   g.winner = g.players.indexOf(p);
   g.endReason = reason;
   log(g, `${p.name} wins with ${reason}.`);
@@ -1388,6 +1396,7 @@ function fiscalYearEnd(g, p) {
   p.years += 1;
   const statement = incomeStatement(p);
   p.report = { year: p.years, income: statement, balance: balanceSheet(p) };
+  snapshot(g, p, p.years, statement.netIncome);
   const truth = { income: incomeFields(p) };
   // Close the year: revenues, expenses and distributions roll into retained earnings.
   const closing = {};
@@ -1992,6 +2001,8 @@ export function viewFor(g, who) {
       pricing: p.pricing ?? 'normal',
       widgets: open(i) ? widgetsHeld(g, p) : null,
       retail: retailTerms(g, i),
+      // The recap charts; kept back until the game ends, since manual books hide a rival's true figures.
+      history: g.phase === 'over' ? p.history ?? [] : null,
       ...(i === who && !g.easyBooks ? {
         docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),
         lastCheck: p.lastCheck,

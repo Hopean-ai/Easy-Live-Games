@@ -281,6 +281,7 @@ function render() {
   renderStatements();
   renderBooks();
   renderFye();
+  renderRecap();
   renderMarket();
   $('log').replaceChildren(...[...state.game.log].reverse().map((line) => el('li', {}, line))); // newest first
 }
@@ -432,6 +433,7 @@ function renderTurn() {
     const order = g.players.map((p, i) => ({ p, i })).sort((a, b) => (a.i === g.winner ? -1 : b.i === g.winner ? 1 : b.p.netWorth - a.p.netWorth));
     box.append(el('h2', {}, 'Final standings'), el('ol', { class: 'standings' }, order.map(({ p, i }) =>
       el('li', {}, `${p.name}${i === g.winner ? ' (winner)' : ''}${p.out ? ', out' : ''}: net worth ${money(p.netWorth)}, portfolio ${money(p.portfolio)}, ${p.years} fiscal year${p.years === 1 ? '' : 's'}`))));
+    box.append(el('button', { class: 'secondary', onclick: () => $('recap').scrollIntoView({ behavior: 'smooth' }) }, 'See the game recap'));
     if (mySeat !== null) box.append(el('button', { onclick: () => send({ t: 'again' }) }, 'Play again with this table'));
     return;
   }
@@ -1099,6 +1101,86 @@ function renderCheck(me) {
   $('check').replaceChildren(el('details', { class: 'check' }, el('summary', {}, head),
     lines.length ? el('table', { class: 'fs' }, el('thead', {}, el('tr', {}, el('th', {}, 'Line'), el('th', {}, 'You filed'), el('th', {}, 'Correct'))), el('tbody', {}, lines)) : null,
     fixes.length ? el('ul', { class: 'small' }, fixes) : null));
+}
+
+// ---- End-of-game recap ----
+
+const SVG = 'http://www.w3.org/2000/svg';
+
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children.flat()) if (c) node.append(c);
+  return node;
+}
+
+// Axis labels: $1.2M, $350k, $900.
+function shortMoney(n) {
+  const a = Math.abs(n);
+  const s = a >= 1e6 ? `${+(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${+(a / 1e3).toFixed(0)}k` : `${Math.round(a)}`;
+  return `${n < 0 ? '−' : ''}$${s}`;
+}
+
+// A round step that gives about four gridlines between lo and hi.
+function niceStep(span) {
+  const raw = span / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw || 1));
+  return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+}
+
+// One line per player across their fiscal years; the last point is where the game ended.
+function recapChart(title, key, players) {
+  const W = 360, H = 200, L = 52, R = 10, T = 10, B = 26;
+  const series = players.map((p, i) => ({ i, name: p.name, pts: (p.history ?? []).map((h) => [h.year, h[key]]) })).filter((s) => s.pts.length);
+  const xs = series.flatMap((s) => s.pts.map(([x]) => x));
+  const ys = series.flatMap((s) => s.pts.map(([, y]) => y));
+  const maxX = Math.max(1, ...xs);
+  const step = niceStep(Math.max(1, Math.max(0, ...ys) - Math.min(0, ...ys)));
+  const lo = Math.floor(Math.min(0, ...ys) / step) * step;
+  const hi = Math.max(lo + step, Math.ceil(Math.max(0, ...ys) / step) * step);
+  const px = (x) => L + (x / maxX) * (W - L - R);
+  const py = (y) => T + (1 - (y - lo) / (hi - lo)) * (H - T - B);
+  const grid = [];
+  for (let y = lo; y <= hi + step / 2; y += step) {
+    grid.push(svg('line', { x1: L, x2: W - R, y1: py(y), y2: py(y), class: y === 0 ? 'axis' : 'grid' }));
+    grid.push(svg('text', { x: L - 6, y: py(y) + 4, 'text-anchor': 'end' }, shortMoney(y)));
+  }
+  const ticks = [];
+  const every = Math.max(1, Math.ceil(Math.floor(maxX) / 8));
+  for (let x = 0; x <= maxX; x += every) ticks.push(svg('text', { x: px(x), y: H - 8, 'text-anchor': 'middle' }, x === 0 ? 'Start' : `Y${x}`));
+  const lines = series.map((s) => svg('g', { style: `color:${COLORS[s.i]}` },
+    svg('polyline', { points: s.pts.map(([x, y]) => `${px(x)},${py(y)}`).join(' '), class: 'line' }),
+    s.pts.map(([x, y]) => svg('circle', { cx: px(x), cy: py(y), r: 3 },
+      svg('title', {}, `${s.name}, ${Number.isInteger(x) ? (x ? `year ${x}` : 'start') : 'game end'}: ${money(y)}`)))));
+  return el('figure', { class: 'chart' },
+    el('figcaption', {}, title),
+    svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': title }, grid, ticks, lines));
+}
+
+function bestWorst(p) {
+  const years = (p.history ?? []).filter((h) => h.netIncome !== null && h.netIncome !== undefined);
+  if (!years.length) return 'closed no fiscal years';
+  const best = years.reduce((a, b) => (b.netIncome > a.netIncome ? b : a));
+  const worst = years.reduce((a, b) => (b.netIncome < a.netIncome ? b : a));
+  const line = (h) => `year ${h.year} (${money(h.netIncome)} net income)`;
+  return years.length === 1 ? `one fiscal year: ${line(best)}` : `best ${line(best)}, worst ${line(worst)}`;
+}
+
+function renderRecap() {
+  const g = state.game;
+  const show = g.phase === 'over' && g.players.some((p) => p.history?.length);
+  $('recap').hidden = !show;
+  if (!show) return;
+  $('recap').replaceChildren(
+    el('h2', {}, 'Game recap'),
+    el('p', { class: 'small' }, 'Each point is a fiscal year end; the last is where things stood when the game ended. Hover a point for its figure.'),
+    el('div', { class: 'legend' }, g.players.map((p, i) => el('span', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === g.winner ? ' (winner)' : ''}${p.out ? ' (out)' : ''}`))),
+    el('div', { class: 'charts' },
+      recapChart('Company value', 'value', g.players),
+      recapChart('Company cash', 'cash', g.players),
+      recapChart('Net worth', 'netWorth', g.players)),
+    el('h3', {}, 'Best and worst years'),
+    el('ul', { class: 'recap-years' }, g.players.map((p, i) => el('li', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}: ${bestWorst(p)}`))));
 }
 
 function renderFye() {
