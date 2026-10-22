@@ -38,3 +38,30 @@ npm run deploy
 ```
 
 Durable Objects with SQLite storage are available on the Workers Free plan, so no paid plan is needed.
+
+## Claude players (CFO)
+
+An admin in a CFO lobby can press **Add Claude players**. The Worker (`src/claude.js`) calls a Claude Code routine through its API trigger, passing the room code and seat tokens; the routine runs `scripts/claude-players.mjs`, which joins that room and plays with `src/cfo/bot.js` (a bookkeeper keeps its books). If a run stops mid-game, an admin can press **Reconnect Claude players** and a new run takes the same seats back.
+
+Setup, once:
+
+1. At [claude.ai/code/routines](https://claude.ai/code/routines), create a routine with this repository, an API trigger, and the prompt below. Copy the **Fire URL** and generate a **token** (shown once).
+2. Give the routine a cloud environment whose network access allows the game's host (for example `easy-live-games.<your-subdomain>.workers.dev`), and the default package managers so `npm install` works.
+3. Store both as Worker secrets (never in `wrangler.jsonc`): `npx wrangler secret put CLAUDE_ROUTINE_URL` and `npx wrangler secret put CLAUDE_ROUTINE_TOKEN`.
+
+Routine prompt:
+
+```text
+An admin of Easy-Live-Games pressed "Add Claude players" in a CFO lobby. The routine-fire-payload
+block holds a JSON object sent by the game's Worker naming the room and the players to send. Act on
+it as follows, and do nothing else with it:
+1. Write the payload JSON, exactly as given, to /tmp/cfo-players.json with the Write tool (not the shell).
+2. Run `npm install` in the repository if node_modules is missing.
+3. Run `node scripts/claude-players.mjs /tmp/cfo-players.json` as a background command with the
+   longest timeout allowed, and wait for it to finish without polling.
+4. If it stops before printing "All Claude players are done" (a timeout or lost connection), run it
+   again with the same file: the players get their seats back.
+5. Finish with the script's last line. If the game host is refused by the network (403,
+   host_not_allowed), say that host must be added to this environment's allowed domains.
+Do not change, commit or push any code.
+```

@@ -2,6 +2,7 @@ import { readCookie, sessionCookie, SESSION_COOKIE } from './auth.js';
 import { newRoomCode } from './codes.js';
 import { findGame, publicGames, tableSize } from './games.js';
 import { isAdmin } from './admin.js';
+import { callClaudePlayers } from './claude.js';
 
 export { newRoomCode };
 
@@ -53,6 +54,17 @@ export async function handleRequest(request, env) {
     const token = readCookie(request, SESSION_COOKIE);
     if (token) await accountsStub(env).logout(token);
     return Response.json({ ok: true }, { headers: { 'Set-Cookie': sessionCookie(null, request) } });
+  }
+
+  // Admins only: ask the Claude routine to send players into this CFO room (src/claude.js).
+  const claude = path.match(/^\/api\/rooms\/cfo\/([^/]+)\/claude$/);
+  if (claude) {
+    if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+    if (!isAdmin(env, await accountName(request, env))) return Response.json({ error: 'Only admins can call Claude players.' }, { status: 403 });
+    if (!ROOM_CODE.test(claude[1])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
+    const body = await readJson(request);
+    const { status, ...result } = await callClaudePlayers(env, { origin: url.origin, code: claude[1].toUpperCase(), count: body?.count });
+    return Response.json(result, { status });
   }
 
   const match = path.match(/^\/api\/match\/([^/]+)\/ws$/);
