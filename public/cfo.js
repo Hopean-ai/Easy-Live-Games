@@ -467,12 +467,16 @@ function renderTurn() {
       box.append(el('button', { class: 'secondary', disabled: me.cash < rules.config.settlement, onclick: () => actNow({ a: 'settle' }) },
         `Settle one fraud quietly (${money(rules.config.settlement)} in legal fees)`));
     }
-    if (me.parent === null) box.append(amountForm('Invest in your company', 'Put your own personal cash into your company as more capital, at any time. It is not taxed and cannot be taken back out except as pay.', (amount) => actNow({ a: 'invest', amount })));
-    box.append(amountForm('Pay yourself extra', `Your salary is paid automatically at each fiscal year end. This pays you more now from company cash, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    if (me.parent === null) {
+      const price = Math.max(rules.config.minIssuePrice, Math.ceil(me.sharePrice ?? 0));
+      box.append(amountForm('Buy new shares in your company', `You're the CFO, holding ${me.shares.holders[mySeat] ?? 0} of ${totalShares(me)} shares. Put personal cash into the company, at any time, for new shares at ${money(price)} each. It is not taxed, and you get it back only by selling shares once the company is public, as dividends, or in a buyout.`, (amount) => actNow({ a: 'invest', amount })));
+    }
+    box.append(amountForm('Pay yourself a bonus', `Your salary is paid automatically at each fiscal year end${me.isPublic ? ', with its profit share as new shares (a stock award)' : ''}. A bonus pays you more now from company cash, booked as pay, less ${Math.round(rules.config.personalTax * 100)}% personal tax.`, (amount) => actNow({ a: 'pay', amount })));
+    box.append(amountForm('Pay a dividend', `Company cash shared among all shareholders by their shares: the founders, the public, any parent company, and you (${money(1000 * rules.moneyScale * (me.shares.holders[mySeat] ?? 0) / totalShares(me))} of every ${money(1000 * rules.moneyScale)}, less personal tax).`, (amount) => actNow({ a: 'dividend', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : g.tiles.some((t) => t?.owner === mySeat && t.zone === 'industrial' && t.stock > 0))) box.append(saleControls(me));
     const cfg = rules.config;
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
-      box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? You will own less of your company, and auditors will look twice as hard.`) && actNow({ a: 'ipo' }) },
+      box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? Your stake will be a smaller share of a bigger company, auditors will look twice as hard, and from then on the profit share of your salary is paid in new shares.`) && actNow({ a: 'ipo' }) },
         `Go public: sell ${cfg.ipoShares} new shares at about ${money(me.sharePrice * cfg.publicPremium)} each`));
     }
     if (g.players.length >= 3) {
@@ -1227,17 +1231,19 @@ function renderFye() {
 
 // ---- Shares ----
 
+const totalShares = (c) => Object.values(c.shares.holders).reduce((a, b) => a + b, 0) + (c.shares.founders ?? 0) + c.shares.public;
+
 function renderMarket() {
   const g = state.game;
   const canTrade = myTurn() && g.phase === 'act';
   const rows = g.players.map((c, i) => {
     if (c.out) return null;
-    const total = Object.values(c.shares.holders).reduce((a, b) => a + b, 0) + c.shares.public;
+    const total = totalShares(c);
     const mine = c.shares.holders[mySeat] ?? 0;
     const status = c.isPublic ? `Public, ${c.shares.public} of ${total} shares on the market` : c.parent !== null ? `Subsidiary of ${g.players[c.parent].name}` : 'Private';
     const row = el('div', { class: 'stock' },
       el('strong', {}, `${c.name}'s company`),
-      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}.`} You hold ${mine}.`));
+      el('span', { class: 'small' }, `${status}.${c.sharePrice === null ? '' : ` Share price ${money(c.sharePrice)}.`} You hold ${mine} of ${total}${c.shares.founders ? `; the founders hold ${c.shares.founders}` : ''}.`));
     if (canTrade && c.isPublic) {
       const input = el('input', { type: 'number', min: 1, step: 1, placeholder: 'Shares', inputMode: 'numeric' });
       row.append(el('div', { class: 'inline3' }, input,
@@ -1252,7 +1258,7 @@ function renderMarket() {
     }
     return row;
   }).filter(Boolean);
-  rows.push(el('p', { class: 'small' }, `You can buy a rival independent company outright for ${Math.round((rules.config.acquirePremium - 1) * 100)}% over its market value, taking its owner out of the game. Public companies are valued higher, so they cost more.`));
-  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but auditors look ${rules.config.publicScrutiny}× as hard: frauds are likelier to be caught and misstatements are fined more. Distributions are shared among all shareholders.`));
+  rows.push(el('p', { class: 'small' }, `You can buy a rival independent company outright for ${Math.round((rules.config.acquirePremium - 1) * 100)}% over its market value, taking its CFO out of the game. Every shareholder, founders included, is paid for their shares. Public companies are valued higher, so they cost more.`));
+  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but auditors look ${rules.config.publicScrutiny}× as hard: frauds are likelier to be caught and misstatements are fined more. Dividends are shared among all shareholders.`));
   $('market').replaceChildren(...rows);
 }
