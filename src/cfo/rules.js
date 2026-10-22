@@ -6,18 +6,20 @@
 // and the income statement and balance sheet are read off the ledger. Personal cash and personal
 // assets sit outside the company, as they would for a real owner.
 import {
-  CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY,
+  CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
   FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
 } from './data.js';
 
 export const ACCOUNTS = {
   cash: 'Cash',
+  receivable: 'Accounts receivable',
   inventory: 'Inventory (widgets)',
   land: 'Land',
   ppe: 'PP&E',
   accDep: 'Accumulated depreciation',
   investments: 'Investment in subsidiaries',
   goodwill: 'Goodwill',
+  payable: 'Accounts payable',
   loan: 'Bank loan',
   affiliateLoan: 'Due to affiliate',
   capital: 'Contributed capital',
@@ -58,6 +60,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     seed: seed >>> 0,
     // What a widget goes into inventory at. Games begun before factory overhead keep $1 widgets.
     widgetCost: ZONES.industrial.variableCost + ZONES.industrial.overhead,
+    credit: true, // sales and supplier credit (games begun before it settle everything in cash)
     turn: 0,
     phase: 'roll', // roll | buy | act | over
     dice: null,
@@ -90,6 +93,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       name, pos: 0, out: false, skip: false, years: 0,
       ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
       journal: [], report: null,
+      receivables: [], payables: [], clock: 0, terms: null, // trade credit: bills and the turns they fall due
       carried: 0, // widgets with nowhere to sit (a sold building's stock); the rest sit in factories and stores
       personalCash: CONFIG.startPersonalCash, assets: [], hand: [],
       frauds: 0, taxWaived: false, deduction: 0,
@@ -194,8 +198,8 @@ export function incomeStatement(p) {
 export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
-  const assets = { cash: l.cash, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
-  const liabilities = { loan: -l.loan || 0, affiliateLoan: -l.affiliateLoan || 0 };
+  const assets = { cash: l.cash, receivable: l.receivable ?? 0, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
+  const liabilities = { payable: -l.payable || 0, loan: -l.loan || 0, affiliateLoan: -l.affiliateLoan || 0 };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
   const totalEquity = sum(Object.values(equity));
@@ -745,7 +749,7 @@ const ACTIONS = {
     g.tiles.forEach((t, pos) => {
       if (t?.owner === g.turn && t.zone === 'retail' && t.building && t.stock) {
         const { units, price } = storeSales(g, pos, t);
-        sellWidgets(g, p, t, units, price, `Widget sales at ${SQUARES[pos].name}`);
+        sellWidgets(g, p, t, units, price, `Widget sales at ${SQUARES[pos].name}`, Boolean(g.credit));
       }
     });
     nextTurn(g);
@@ -818,18 +822,86 @@ export function retailTerms(g, idx) {
 
 // Sells up to `units` widgets (at the game's widget cost) from `from` (a store tile's shelves, or the
 // player's storage, with a count in .stock / .carried) at `price` each; returns the revenue.
-function sellWidgets(g, p, from, units, price, text) {
+function sellWidgets(g, p, from, units, price, text, credit = false) {
   const key = from === p ? 'carried' : 'stock';
   const n = Math.min(Math.floor(from[key]), Math.round(units));
   if (n <= 0) return 0;
   from[key] -= n;
   if (n <= 0) return 0;
   const revenue = Math.round(n * price);
-  post(p, text, { cash: revenue, revSales: -revenue });
+  const onCredit = credit ? Math.round(revenue * CREDIT.salesShare) : 0;
+  if (revenue > onCredit) post(p, onCredit ? `${text}, paid in cash` : text, { cash: revenue - onCredit, revSales: onCredit - revenue });
+  if (onCredit) sellOnCredit(p, `${text}, on credit`, onCredit);
   const cost = widgetValue(g, n);
   post(p, `Cost of widgets sold (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`, { cogs: cost, inventory: -cost });
   log(g, `${p.name} sells ${n.toLocaleString('en-US')} widgets for ${money(revenue)}.`);
   return revenue;
+}
+
+// ---- Trade credit ----
+// Miles: some sales are collected later (Accounts receivable) and materials are paid later
+// (Accounts payable). Bills fall due a number of the company's own turns later; `p.clock` counts
+// those turns, and cards change the periods for the rest of a fiscal year (`p.terms`).
+
+export function creditTerms(p) {
+  return { collect: p.terms?.collect ?? CREDIT.collectTurns, pay: p.terms?.pay ?? CREDIT.payTurns };
+}
+
+const billTotal = (bills) => round(bills.reduce((n, b) => n + b.amount, 0));
+
+function sellOnCredit(p, text, amount) {
+  post(p, text, { receivable: amount, revSales: -amount });
+  (p.receivables ??= []).push({ amount, due: (p.clock ?? 0) + creditTerms(p).collect });
+}
+
+function buyOnCredit(p, text, amount) {
+  post(p, text, { inventory: amount, payable: -amount });
+  (p.payables ??= []).push({ amount, due: (p.clock ?? 0) + creditTerms(p).pay });
+}
+
+// At the end of each of the company's turns: customers whose bills are due pay, then the company
+// pays the suppliers it owes. Fictitious bills (a fraud) never fall due.
+function settleCredit(g, p) {
+  p.clock = (p.clock ?? 0) + 1;
+  const due = (b) => b.due !== null && b.due <= p.clock;
+  const collected = billTotal((p.receivables ?? []).filter(due));
+  if (collected) post(p, 'Customers pay their bills', { cash: collected, receivable: -collected });
+  p.receivables = (p.receivables ?? []).filter((b) => !due(b));
+  const owed = billTotal((p.payables ?? []).filter(due));
+  p.payables = (p.payables ?? []).filter((b) => !due(b));
+  if (owed) payBills(g, p, owed, 'Suppliers paid');
+}
+
+// Pays suppliers `amount` (already taken off the bills list), selling assets if need be.
+function payBills(g, p, amount, text) {
+  charge(g, p, amount, 'payable', text);
+}
+
+// A factor buys every genuine bill customers owe, paying now less its fee.
+function factor(p, text = 'Receivables sold to a factor') {
+  const real = (p.receivables ?? []).filter((b) => !b.fake);
+  const amount = billTotal(real);
+  if (!amount) return 0;
+  const fee = round(amount * CREDIT.factoringFee);
+  post(p, text, { cash: round(amount - fee), expOther: fee, receivable: -amount });
+  p.receivables = p.receivables.filter((b) => b.fake);
+  return amount;
+}
+
+// Writes off `share` of every bill customers owe as a bad debt; with `fakeOnly`, just the
+// fictitious ones booked before this fiscal year.
+function writeOff(p, share, text, fakeOnly = false) {
+  let total = 0;
+  for (const b of p.receivables ?? []) {
+    if (fakeOnly && !(b.fake && b.year < p.years)) continue;
+    const cut = round(b.amount * share);
+    b.amount = round(b.amount - cut);
+    total += cut;
+  }
+  p.receivables = (p.receivables ?? []).filter((b) => b.amount > 0);
+  total = round(total);
+  if (total) post(p, text, { expOther: total, receivable: -total });
+  return total;
 }
 
 // ---- Moving widgets ----
@@ -865,7 +937,11 @@ function makeWidgets(g, p, pos, want, why = 'Widgets made') {
   const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p) / widgetCost(g))));
   if (n <= 0) return 0;
   const cost = widgetValue(g, n);
-  post(p, `${why} at ${SQUARES[pos].name} (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`, { inventory: cost, cash: -cost });
+  const label = `${why} at ${SQUARES[pos].name} (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`;
+  // With trade credit the materials are bought on account; the factory's own overhead is paid now.
+  const materials = g.credit ? Math.min(Math.floor(cost), Math.round(n * ZONES.industrial.variableCost)) : 0; // whole dollars, as bills are paid
+  if (materials) buyOnCredit(p, `${label}: materials on credit`, materials);
+  if (cost > materials) post(p, materials ? `${label}: factory overhead` : label, { inventory: round(cost - materials), cash: -round(cost - materials) });
   g.tiles[pos].stock = (g.tiles[pos].stock ?? 0) + n;
   log(g, `${p.name}'s ${SQUARES[pos].name} makes ${n.toLocaleString('en-US')} widgets.`);
   return n;
@@ -894,6 +970,8 @@ const ownsAirport = (g) => g.tiles.some((t, i) => t?.owner === g.turn && SQUARES
 //    free from a factory on a side where you own a transport line; otherwise it costs freight per
 //    widget (see `carrierOn`). The island and the main board are linked only by your own airport.
 function operate(g, p) {
+  settleCredit(g, p);
+  if (p.out) return;
   const factories = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'industrial'));
   const stores = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => isMine(g, t, 'retail'));
   // Widgets anywhere else (from older rules, or a sold building's shelves) go to the first warehouse.
@@ -1136,6 +1214,8 @@ function charge(g, p, amount, account, text) {
 // Sells buildings (cheapest first), then land, back to the bank until cash covers `need`.
 function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
+  // Short of cash, a company sells what customers owe it before anything else.
+  if (companyCash(p) < need) factor(p, 'Cash shortfall: receivables sold to a factor');
   const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx);
   if (widgetsHeld(g, p) > 0 && companyCash(p) < need) {
     // Only as many widgets as the shortfall needs, from storage first, then factories and shelves.
@@ -1254,6 +1334,8 @@ function bankrupt(g, p, text) {
   });
   g.offers = (g.offers ?? []).filter((o) => o.from !== idx && o.to !== idx);
   discardHand(g, p);
+  p.receivables = [];
+  p.payables = [];
   p.out = true;
   log(g, text);
   // A parent's investment in a failed subsidiary is lost.
@@ -1301,6 +1383,7 @@ function restart(g, q, parent, capital) {
     out: false, skip: false, pos: host.pos, years: host.years, atBank: false, sale: null,
     ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     journal: [], report: null, hand: [], frauds: 0, taxWaived: false, carried: 0,
+    receivables: [], payables: [], terms: null,
     docs: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, public: 0 },
@@ -1395,6 +1478,9 @@ function fiscalYearEnd(g, p) {
   }
 
   personalYearEnd(g, p);
+  // Fictitious receivables from an earlier year can't be collected, so the year end writes them off.
+  writeOff(p, 1, 'Bad debts written off', true);
+  p.terms = null; // card terms last for the rest of the fiscal year
 
   p.years += 1;
   const statement = incomeStatement(p);
@@ -1521,6 +1607,16 @@ const MARKET_NOW = {
   holiday(g) {
     for (const q of alive(g)) q.taxWaived = true;
   },
+  default(g) {
+    for (const q of alive(g)) writeOff(q, CREDIT.badDebt, 'Bad debts: a customer goes under');
+  },
+  crunch(g) {
+    for (const q of alive(g)) {
+      const owed = billTotal(q.payables ?? []);
+      q.payables = [];
+      if (owed) payBills(g, q, owed, 'Suppliers paid early (credit crunch)');
+    }
+  },
   spoilage(g) {
     g.players.forEach((q, i) => {
       if (q.out || widgetsHeld(g, q) < 1) return;
@@ -1541,6 +1637,34 @@ const MARKET_NOW = {
 };
 
 const PLAYS = {
+  factoring(g, p) {
+    if (!factor(p)) return 'No customers owe you anything.';
+    return null;
+  },
+  creditDept(g, p) {
+    p.terms = { ...creditTerms(p), collect: CREDIT.fastCollect };
+    for (const b of p.receivables ?? []) if (b.due !== null) b.due = Math.min(b.due, p.clock + CREDIT.fastCollect);
+    log(g, `${p.name}'s customers now pay ${CREDIT.fastCollect} turn after a sale.`);
+    return null;
+  },
+  supplierTerms(g, p) {
+    p.terms = { ...creditTerms(p), pay: CREDIT.slowPay };
+    for (const b of p.payables ?? []) b.due = Math.max(b.due, p.clock + CREDIT.slowPay);
+    log(g, `${p.name} now pays suppliers ${CREDIT.slowPay} turns after a purchase.`);
+    return null;
+  },
+  dispute(g, p) {
+    if (!p.payables?.length) return 'You owe your suppliers nothing.';
+    for (const b of p.payables) b.due += CREDIT.disputeDelay;
+    return null;
+  },
+  fictitious(g, p, { amount }) {
+    amount = Math.min(M(1500), Math.floor(Number(amount) || M(1500)));
+    if (!(amount > 0)) return 'Enter an amount.';
+    post(p, 'Widget sales on credit', { receivable: amount, revSales: -amount });
+    (p.receivables ??= []).push({ amount, due: null, fake: true, year: p.years });
+    return null;
+  },
   stuffing(g, p) {
     const { maxPrice: price, stores } = retailTerms(g, g.turn);
     if (!stores) return 'You need a store to book sales through.';
@@ -1725,8 +1849,8 @@ function fraudCheck(g, p, chance, who) {
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
 export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
-const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'loan', 'affiliateLoan', 'capital', 'retained']);
+export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
 // The statements a player's own recorded entries add up to, for auto statements: their books so
@@ -2004,6 +2128,7 @@ export function viewFor(g, who) {
       pricing: p.pricing ?? 'normal',
       widgets: open(i) ? widgetsHeld(g, p) : null,
       retail: retailTerms(g, i),
+      credit: g.credit && open(i) ? { receivable: p.ledger.receivable ?? 0, payable: -(p.ledger.payable ?? 0), ...creditTerms(p) } : null,
       // The recap charts; kept back until the game ends, since manual books hide a rival's true figures.
       history: g.phase === 'over' ? p.history ?? [] : null,
       ...(i === who && !g.easyBooks ? {
