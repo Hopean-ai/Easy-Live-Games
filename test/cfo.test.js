@@ -1351,3 +1351,20 @@ test('the end-of-game recap: a point per fiscal year end, shown only once the ga
     }
   }
 });
+
+test('company cash earns bank interest once, however many banks; each bank adds its own fees', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const p = g.players[0];
+  for (const n of [1, 3]) Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'banking', building: { rarity: 'rare', cost: M(1000), dep: 0 } });
+  p.pos = BOARD_SIZE - 2; // any roll passes FYE
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.years, 1);
+  const cash = (e) => Object.fromEntries(e.lines).cash;
+  const lines = p.journal.filter((e) => /bank/i.test(e.text));
+  const interest = lines.filter((e) => e.text.startsWith('Interest on company cash'));
+  const fees = lines.filter((e) => e.text.startsWith('Banking fees'));
+  assert.equal(interest.length, 1, 'one interest entry, not one per bank');
+  assert.equal(fees.length, 2);
+  for (const e of fees) assert.equal(cash(e), M(1000) * ZONES.banking.yearly);
+  assert.equal(p.report.income.revenue.revInterest, cash(interest[0]) + 2 * M(1000) * ZONES.banking.yearly);
+});
