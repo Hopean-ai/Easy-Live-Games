@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, creditTerms, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, creditTerms, averageCost, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -55,7 +55,7 @@ function playOut(seed, players = 4, options = {}) {
       assert.ok(Math.abs(b.totalAssets - b.totalLiabilitiesAndEquity) < 0.01, 'assets = liabilities + equity');
       assert.equal(b.assets.cash, q.ledger.cash);
       const held = q.carried + g.tiles.reduce((n, t) => n + (t && t.owner === g.players.indexOf(q) ? t.stock : 0), 0);
-      if (!q.out) assert.ok(Math.abs(held * g.widgetCost - q.ledger.inventory) < 0.01, 'every widget is somewhere');
+      if (!q.out) assert.ok(q.ledger.inventory > -0.01 && (held > 0 || Math.abs(q.ledger.inventory) < 0.01), 'inventory has a cost only while widgets are held');
       const bills = (list) => Math.round((list ?? []).reduce((n, x) => n + x.amount, 0) * 100) / 100;
       if (!q.out) assert.equal(b.assets.receivable, bills(q.receivables), 'every receivable is a bill');
       if (!q.out) assert.equal(b.liabilities.payable, bills(q.payables), 'every payable is a bill');
@@ -271,6 +271,7 @@ test('landing on a store: your own runs a special sale, someone else\'s sells th
 test('factories make what the stores need each turn, and logistics ship it to them', () => {
   const g = createGame(['A', 'B'], 3);
   g.credit = false; // all in cash here; trade credit has its own tests
+  g.costing = false; // a fixed cost per widget here; average costing has its own tests
   const [a, b] = g.players;
   const factory = posOfSpace(12); // top
   const cost = M(100);
@@ -1331,6 +1332,7 @@ test('games begun before factory overhead keep $1 widgets', () => {
   const g = createGame(['A', 'B'], 33);
   delete g.widgetCost;
   delete g.credit;
+  delete g.costing;
   const p = g.players[0];
   const factory = posOfSpace(12);
   Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
@@ -1452,4 +1454,44 @@ test('Fictitious Receivables inflate one year, then are written off; a cash shor
   assert.ok(!b.out);
   assert.equal(b.ledger.receivable, 0);
   assert.ok(b.journal.some((e) => /factor/.test(e.text)));
+});
+
+test('inventory at average cost: freight to your stores is part of it, and widgets sold take the average', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  g.credit = false;
+  const a = g.players[0];
+  const factory = posOfSpace(12); // top
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  store(g, 0, 30, 'common', 100); // bottom
+  g.tiles[posOfSpace(5)].owner = 1; // B's railway on the factory's side carries for freight
+  const made = production(factory, M(100));
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.production = 'full';
+  act(g, 0, { a: 'end' });
+  assert.equal(a.ledger.expFreight, 0, 'freight is not expensed');
+  const fee = -g.players[1].ledger.revFreight;
+  assert.ok(fee > 0, 'freight was paid');
+  // Everything made and shipped went into inventory; what was sold took its share out as cost.
+  assert.ok(Math.abs(a.ledger.inventory + a.ledger.cogs - (made * COST + fee)) < 0.02, 'cost of making and shipping = inventory + cost of sales');
+  assert.ok(a.ledger.cogs > 0);
+  // Sold out, so the freight went to cost of sales with the widgets. With some left, they carry the average.
+  assert.equal(widgetsHeld(g, a), 0);
+  assert.equal(a.ledger.inventory, 0);
+  give(a, 100);
+  post(a, 'Freight in', { inventory: 20, cash: -20 });
+  assert.equal(averageCost(g, a), (100 * COST + 20) / 100);
+});
+
+test('lower of cost or market: widgets that cost more than they sell for are written down at the year end', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const a = g.players[0];
+  store(g, 0, 30, 'common', 100, 1000);
+  post(a, 'Pricey widgets', { inventory: M(30), cash: -M(30) }); // 1,000 widgets at $3
+  a.pos = BOARD_SIZE - 2;
+  a.production = 'idle';
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  act(g, 0, { a: 'roll' });
+  const held = g.tiles[posOfSpace(30)].stock;
+  assert.ok(a.journal.some((e) => e.text.startsWith('Inventory written down to market')));
+  assert.ok(Math.abs(a.ledger.inventory - held * RETAIL.prices.common) < 0.02);
 });

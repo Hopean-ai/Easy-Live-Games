@@ -60,6 +60,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     seed: seed >>> 0,
     // What a widget goes into inventory at. Games begun before factory overhead keep $1 widgets.
     widgetCost: ZONES.industrial.variableCost + ZONES.industrial.overhead,
+    costing: true, // inventory at average cost, with freight in it (older games keep a fixed cost per widget)
     credit: true, // sales and supplier credit (games begun before it settle everything in cash)
     turn: 0,
     phase: 'roll', // roll | buy | act | over
@@ -820,20 +821,20 @@ export function retailTerms(g, idx) {
   return { units: stores.reduce((n, s) => n + s.units, 0), minPrice: Math.min(...prices, Infinity), maxPrice: Math.max(...prices, 0), stores: stores.length };
 }
 
-// Sells up to `units` widgets (at the game's widget cost) from `from` (a store tile's shelves, or the
+// Sells up to `units` widgets (at the company's average cost) from `from` (a store tile's shelves, or the
 // player's storage, with a count in .stock / .carried) at `price` each; returns the revenue.
 function sellWidgets(g, p, from, units, price, text, credit = false) {
   const key = from === p ? 'carried' : 'stock';
   const n = Math.min(Math.floor(from[key]), Math.round(units));
   if (n <= 0) return 0;
+  const cost = costOf(g, p, n);
+  const each = averageCost(g, p);
   from[key] -= n;
-  if (n <= 0) return 0;
   const revenue = Math.round(n * price);
   const onCredit = credit ? Math.round(revenue * CREDIT.salesShare) : 0;
   if (revenue > onCredit) post(p, onCredit ? `${text}, paid in cash` : text, { cash: revenue - onCredit, revSales: onCredit - revenue });
   if (onCredit) sellOnCredit(p, `${text}, on credit`, onCredit);
-  const cost = widgetValue(g, n);
-  post(p, `Cost of widgets sold (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`, { cogs: cost, inventory: -cost });
+  post(p, `Cost of widgets sold (${n.toLocaleString('en-US')} at $${each.toFixed(2)})`, { cogs: cost, inventory: -cost });
   log(g, `${p.name} sells ${n.toLocaleString('en-US')} widgets for ${money(revenue)}.`);
   return revenue;
 }
@@ -928,6 +929,41 @@ function visit(g, p, pos, landing) {
 // What widgets cost: `widgetCost` a unit (ZONES.industrial), or $1 in games begun before overhead.
 export const widgetCost = (g) => g.widgetCost ?? 1;
 const widgetValue = (g, n) => round(n * widgetCost(g));
+
+// Miles: inventory at average cost. What it cost to make widgets and get them to the shelves
+// (materials, absorbed overhead, freight) sits in Inventory until they're sold; each widget
+// sold or lost takes the average cost with it. Older games keep a fixed cost per widget.
+export function averageCost(g, p) {
+  const units = widgetsHeld(g, p);
+  return g.costing && units > 0 ? p.ledger.inventory / units : widgetCost(g);
+}
+
+// The cost of `n` of a company's widgets; the last of them take whatever is left.
+function costOf(g, p, n) {
+  if (!g.costing) return widgetValue(g, n);
+  return n >= widgetsHeld(g, p) ? p.ledger.inventory : round(n * averageCost(g, p));
+}
+
+// Inventory left with no widgets (cents of rounding, or freight paid as the last ones were sold off)
+// is a cost of the goods already gone.
+function tidyInventory(g, p) {
+  if (g.costing && widgetsHeld(g, p) < 1e-9 && p.ledger.inventory && !p.out) {
+    post(p, 'Inventory cost left after the last widgets went', { cogs: p.ledger.inventory, inventory: -p.ledger.inventory });
+  }
+}
+
+// Lower of cost or market: at the year end, widgets that cost more than the company can sell them
+// for are written down to that price: its own stores' lowest price, or a rival store's wholesale
+// price after commission when it has none.
+function writeDownInventory(g, p) {
+  if (!g.costing) return;
+  const units = widgetsHeld(g, p);
+  if (units < 1) return;
+  const r = retailTerms(g, g.players.indexOf(p));
+  const market = r.stores ? r.minPrice : RETAIL.prices.common * (1 - RETAIL.commission);
+  const loss = round(p.ledger.inventory - units * market);
+  if (loss > 0) post(p, `Inventory written down to market ($${market.toFixed(2)} a widget)`, { cogs: loss, inventory: -loss });
+}
 export function widgetsHeld(g, p) {
   const idx = g.players.indexOf(p);
   return p.carried + g.tiles.reduce((n, t) => n + (t?.owner === idx ? t.stock : 0), 0);
@@ -1009,7 +1045,8 @@ function operate(g, p) {
       if (n <= 0) continue;
       if (!carrier.free) {
         const by = carrier.owner ? `${carrier.owner.name}'s ${SQUARES[carrier.pos].name}` : 'a hired carrier';
-        const fee = charge(g, p, n * RETAIL.freight, 'expFreight', `Freight on ${by} to ${SQUARES[s.pos].name}`);
+        // With inventory costing, freight to your own stores is part of what the widgets cost.
+        const fee = charge(g, p, n * RETAIL.freight, g.costing ? 'inventory' : 'expFreight', `Freight on ${by} to ${SQUARES[s.pos].name}`);
         if (fee && carrier.owner) post(carrier.owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
         if (p.out) return;
       }
@@ -1019,6 +1056,7 @@ function operate(g, p) {
       need.set(s, need.get(s) - m);
     }
   }
+  tidyInventory(g, p);
 }
 
 // Miles: bank control gives another card option. Each Banking building a company owns lets it
@@ -1221,6 +1259,8 @@ function liquidate(g, p, need) {
     // Only as many widgets as the shortfall needs, from storage first, then factories and shelves.
     let units = Math.min(widgetsHeld(g, p), Math.ceil((need - companyCash(p)) / CONFIG.liquidation));
     const sold = units;
+    const cost = costOf(g, p, units);
+    const each = averageCost(g, p);
     const take = Math.min(p.carried, units);
     p.carried -= take;
     units -= take;
@@ -1232,8 +1272,7 @@ function liquidate(g, p, need) {
     const stock = sold - units;
     const proceeds = Math.round(stock * CONFIG.liquidation);
     if (stock > 0) {
-      const cost = widgetValue(g, stock);
-      post(p, `Cash shortfall: the bank bought ${stock.toLocaleString('en-US')} widgets (cost ${money(widgetCost(g))} each, ${money(cost)} in all) at $${CONFIG.liquidation.toFixed(2)} each`, { cash: proceeds, gain: round(cost - proceeds), inventory: -cost });
+      post(p, `Cash shortfall: the bank bought ${stock.toLocaleString('en-US')} widgets (cost $${each.toFixed(2)} each, ${money(cost)} in all) at $${CONFIG.liquidation.toFixed(2)} each`, { cash: proceeds, gain: round(cost - proceeds), inventory: -cost });
       log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
     }
   }
@@ -1478,6 +1517,7 @@ function fiscalYearEnd(g, p) {
   }
 
   personalYearEnd(g, p);
+  writeDownInventory(g, p);
   // Fictitious receivables from an earlier year can't be collected, so the year end writes them off.
   writeOff(p, 1, 'Bad debts written off', true);
   p.terms = null; // card terms last for the rest of the fiscal year
@@ -1621,6 +1661,7 @@ const MARKET_NOW = {
     g.players.forEach((q, i) => {
       if (q.out || widgetsHeld(g, q) < 1) return;
       // Take 10% from each place the widgets sit, then book the loss.
+      const each = averageCost(g, q);
       let lost = 0;
       const cut = (n) => Math.floor(n / 10);
       lost += cut(q.carried);
@@ -1631,7 +1672,7 @@ const MARKET_NOW = {
           t.stock -= cut(t.stock);
         }
       }
-      if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expOther: widgetValue(g, lost), inventory: -widgetValue(g, lost) });
+      if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expOther: round(lost * each), inventory: -round(lost * each) });
     });
   },
 };
@@ -2127,6 +2168,7 @@ export function viewFor(g, who) {
       production: p.production ?? 'demand',
       pricing: p.pricing ?? 'normal',
       widgets: open(i) ? widgetsHeld(g, p) : null,
+      averageCost: open(i) ? round(averageCost(g, p)) : null,
       retail: retailTerms(g, i),
       credit: g.credit && open(i) ? { receivable: p.ledger.receivable ?? 0, payable: -(p.ledger.payable ?? 0), ...creditTerms(p) } : null,
       // The recap charts; kept back until the game ends, since manual books hide a rival's true figures.
