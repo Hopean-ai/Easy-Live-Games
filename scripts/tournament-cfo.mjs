@@ -12,6 +12,7 @@ import { SQUARES, RARITIES, CONFIG, M } from '../src/cfo/data.js';
 const NORMAL = {
   reserve: M(500), payAbove: M(20000), payHow: 'dividend', ipo: true,
   zones: ['retail', 'industrial', 'banking', 'residential'],
+  board: [], // board decisions to try each turn, in order, while keeping the buffer
 };
 
 export const STRATEGIES = {
@@ -21,6 +22,9 @@ export const STRATEGIES = {
   generous: { payAbove: M(5000) },
   residential: { zones: ['residential', 'retail', 'industrial', 'banking'] },
   noIpo: { ipo: false },
+  marketer: { board: ['marketing'] },
+  researcher: { board: ['research'] },
+  boardroom: { board: ['research', 'marketing'] },
 };
 
 function zoneCount(g, seat, zone) {
@@ -48,6 +52,7 @@ function turn(g, seat, s) {
     for (const [price, card] of order) if (companyCash(p) - price >= s.reserve && !act(g, seat, { a: 'build', pos, card })) break;
   }
   if (p.sale) act(g, seat, { a: 'sell', option: 'premium' });
+  for (const option of s.board) if (companyCash(p) > M(3000) && !act(g, seat, { a: 'board', option })) break;
   if (s.ipo && !p.isPublic) act(g, seat, { a: 'ipo' });
   const extra = companyCash(p) - s.payAbove;
   if (extra > 0) act(g, seat, { a: s.payHow, amount: Math.floor(extra) });
