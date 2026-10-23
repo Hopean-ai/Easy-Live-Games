@@ -347,6 +347,18 @@ export const ERAS = [
 ];
 // Change 4b: the economic outlook shows the next events that will hit every company, one firing at
 // each shared year end, so players can prepare.
+// Design change 9: hedging and insurance. A company buys cover against one Market Forces event
+// until its fiscal year end, paying the premium up front (a prepaid expense, used up at the year
+// end). The cover pays out the event's loss up to what was insured: the loss the event would cause
+// at the time of buying. Insurers read the outlook too, so cover against the event forecast for
+// this year end costs more. PLACEHOLDER rates.
+export const HEDGES = {
+  recession: { name: 'Business interruption insurance', exposure: 'cash', text: 'Covers what a Recession takes from company cash.' },
+  rates: { name: 'Interest rate cap', exposure: 'loan', text: 'Covers the extra interest an Interest Rate Hike charges on your Bank loan.' },
+  spoilage: { name: 'Supply chain insurance', exposure: 'inventory', text: 'Covers the widgets a Supply Chain Disruption destroys.' },
+};
+export const HEDGE_RATES = { base: 0.25, forecast: 0.5, minimum: M(10) };
+
 export const OUTLOOK = { size: 2, events: ['recession', 'boom', 'rates', 'housing', 'shortage', 'rezoning', 'holiday', 'spoilage', 'default', 'crunch', 'shipping', 'activist'] };
 
 export const SUPPLY = {

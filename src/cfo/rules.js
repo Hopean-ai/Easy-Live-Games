@@ -7,12 +7,13 @@
 // assets sit outside the company, as they would for a real owner.
 import {
   CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
-  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK,
+  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, HEDGES, HEDGE_RATES,
 } from './data.js';
 
 export const ACCOUNTS = {
   cash: 'Cash',
   receivable: 'Accounts receivable',
+  prepaid: 'Prepaid insurance',
   inventory: 'Inventory (widgets)',
   land: 'Land',
   ppe: 'PP&E',
@@ -49,12 +50,13 @@ export const ACCOUNTS = {
   expLegal: 'Legal costs and fines',
   expMarketing: 'Advertising and marketing',
   expResearch: 'Research and development',
+  expInsurance: 'Insurance',
   expOther: 'Other expenses',
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
 // Miles: expenses split by what they are for, as a real income statement shows them.
-const EXPENSE_DETAIL = ['expIdle', 'expInvLoss', 'expTravel', 'expCommission', 'expPropTax', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch'];
+const EXPENSE_DETAIL = ['expIdle', 'expInvLoss', 'expTravel', 'expCommission', 'expPropTax', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch', 'expInsurance'];
 const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws',
   ...EXPENSE_DETAIL];
 const LOG_SIZE = 40;
@@ -221,7 +223,7 @@ export function incomeStatement(p) {
   const expenses = {
     cogs: l.cogs, expIdle: l.expIdle ?? 0, expInvLoss: l.expInvLoss ?? 0, expFreight: l.expFreight, expRent: l.expRent, expSalary: l.expSalary ?? 0, expDep: l.expDep,
     expPropTax: l.expPropTax ?? 0, expTravel: l.expTravel ?? 0, expCommission: l.expCommission ?? 0, expProfessional: l.expProfessional ?? 0,
-    expBadDebt: l.expBadDebt ?? 0, expLegal: l.expLegal ?? 0, expMarketing: l.expMarketing ?? 0, expResearch: l.expResearch ?? 0, expInterest: l.expInterest, expOther: l.expOther,
+    expBadDebt: l.expBadDebt ?? 0, expLegal: l.expLegal ?? 0, expMarketing: l.expMarketing ?? 0, expResearch: l.expResearch ?? 0, expInsurance: l.expInsurance ?? 0, expInterest: l.expInterest, expOther: l.expOther,
   };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
@@ -232,7 +234,7 @@ export function incomeStatement(p) {
 export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
-  const assets = { cash: l.cash, receivable: l.receivable ?? 0, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
+  const assets = { cash: l.cash, receivable: l.receivable ?? 0, prepaid: l.prepaid ?? 0, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
   const liabilities = { payable: -l.payable || 0, loan: -l.loan || 0, lease: -l.lease || 0, affiliateLoan: -l.affiliateLoan || 0 };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
@@ -411,7 +413,7 @@ export function consolidated(g, p) {
   }
   const income = incomeStatement({ ledger });
   const parentIncome = round(income.netIncome - nciIncome);
-  const assets = { cash: ledger.cash, receivable: ledger.receivable, inventory: ledger.inventory, land: ledger.land, ppe: ledger.ppe, accDep: ledger.accDep, investments: ledger.investments, goodwill: ledger.goodwill };
+  const assets = { cash: ledger.cash, receivable: ledger.receivable, prepaid: ledger.prepaid ?? 0, inventory: ledger.inventory, land: ledger.land, ppe: ledger.ppe, accDep: ledger.accDep, investments: ledger.investments, goodwill: ledger.goodwill };
   const liabilities = { payable: -ledger.payable || 0, loan: -ledger.loan || 0, lease: -ledger.lease || 0, affiliateLoan: -ledger.affiliateLoan || 0 };
   const equity = { capital: -ledger.capital, retained: round(-ledger.retained + retainedAdj), netIncome: parentIncome, draws: -ledger.draws, nci: round(nci) };
   const totalLiabilities = sum(Object.values(liabilities));
@@ -443,7 +445,7 @@ function cleanAction(action) {
   const out = { a: action.a };
   for (const f of INT_FIELDS) if (Number.isInteger(action[f]) && Math.abs(action[f]) <= MAX_AMOUNT) out[f] = action[f];
   if (Number.isFinite(action.amount) && Math.abs(action.amount) <= MAX_AMOUNT) out.amount = action.amount;
-  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option) || ['straight', 'accelerated'].includes(action.option))) out.option = action.option;
+  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option) || Object.hasOwn(HEDGES, action.option) || ['straight', 'accelerated'].includes(action.option))) out.option = action.option;
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
@@ -551,6 +553,16 @@ export function act(g, who, raw) {
     p.depMethod = action.option;
     p.policySet = true;
     log(g, `${p.name}'s company adopts ${action.option === 'accelerated' ? 'accelerated' : 'straight-line'} depreciation.`);
+    return null;
+  }
+  // Change 9: buy cover against one Market Forces event until the fiscal year end.
+  if (action.a === 'hedge') {
+    const quote = hedgeQuote(g, p, action.option);
+    if (typeof quote === 'string') return quote;
+    if (companyCash(p) < quote.premium) return `The premium is ${money(quote.premium)}.`;
+    charge(g, p, quote.premium, 'prepaid', `${HEDGES[action.option].name} premium, covering up to ${money(quote.limit)}`);
+    p.cover = { ...p.cover, [action.option]: quote.limit };
+    log(g, `${p.name} buys ${HEDGES[action.option].name.toLowerCase()}: ${money(quote.limit)} of cover for ${money(quote.premium)}.`);
     return null;
   }
   // Change 8: a sealed plan for the new year, made any time and revealed at the shared year end.
@@ -1718,6 +1730,32 @@ function charge(g, p, amount, account, text) {
   return paid;
 }
 
+// Change 9: what cover against an event would insure now, and what it costs.
+function exposure(g, p, id) {
+  const of = HEDGES[id].exposure;
+  if (of === 'cash') return companyCash(p) * 0.1;
+  if (of === 'loan') return Math.max(0, -p.ledger.loan) * 0.1;
+  return Math.max(0, p.ledger.inventory) * 0.1;
+}
+
+export function hedgeQuote(g, p, id) {
+  if (!Object.hasOwn(HEDGES, id)) return 'Pick something to insure against.';
+  if (p.cover?.[id] !== undefined) return 'You already have that cover this fiscal year.';
+  const limit = Math.round(exposure(g, p, id));
+  if (limit < HEDGE_RATES.minimum) return 'There is too little at risk to insure.';
+  const rate = g.outlook?.[0] === id ? HEDGE_RATES.forecast : HEDGE_RATES.base;
+  return { limit, rate, premium: Math.round(limit * rate) };
+}
+
+// After an event's loss is booked, the insurer pays it back up to the cover bought.
+function claim(g, p, id, loss) {
+  const paid = Math.round(Math.min(loss, p.cover?.[id] ?? 0));
+  if (p.out || paid <= 0) return;
+  p.cover[id] = round(p.cover[id] - paid);
+  post(p, `Insurance claim: ${HEDGES[id].name.toLowerCase()}`, { cash: paid, revOther: -paid });
+  log(g, `${p.name}'s ${HEDGES[id].name.toLowerCase()} pays out ${money(paid)}.`);
+}
+
 // Sells buildings (cheapest first), then land, back to the bank until cash covers `need`.
 function liquidate(g, p, need) {
   const idx = g.players.indexOf(p);
@@ -1799,7 +1837,7 @@ function acquireCompany(g, p, q, price) {
   const held = q.shares.holders[me] ?? 0;
   const paid = Math.ceil((price * (total - held)) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
   const lines = {};
-  for (const a of ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'payable', 'loan', 'lease', 'affiliateLoan']) lines[a] = q.ledger[a] ?? 0;
+  for (const a of ['cash', 'receivable', 'prepaid', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'payable', 'loan', 'lease', 'affiliateLoan']) lines[a] = q.ledger[a] ?? 0;
   lines.cash -= paid;
   const net = Object.values(lines).reduce((a, b) => a + b, 0);
   if (net < 0) lines.goodwill += -net;
@@ -1968,6 +2006,7 @@ function sharedYearEnd(g) {
     afterAction(g);
     if (g.phase === 'over') return;
   }
+  for (const q of g.players) q.cover = {};
   const next = eraOf(g);
   if (next !== era) log(g, `The ${next.name} begins. ${next.text}`);
   for (const q of g.players) if (q.out && q.rejoin) newJob(g, q);
@@ -2039,6 +2078,10 @@ function fiscalYearEnd(g, p) {
     g.ppeDeck.unshift(...g.ppeRow.splice(i, 1));
     refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
   }
+  // Change 9: the year's insurance premiums are used up. Without a shared calendar the cover ends
+  // here too; with one, it lasts through the year-end event.
+  if (p.ledger.prepaid > 0) post(p, 'Insurance premiums used up', { expInsurance: p.ledger.prepaid, prepaid: -p.ledger.prepaid });
+  if (!g.calendar) p.cover = {};
   const idx = g.players.indexOf(p);
   const mine = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t }) => t?.owner === idx && t.building);
   const each = (zone, fn) => mine.filter(({ t }) => t.zone === zone).forEach(({ t, pos }) => fn(t.building, SQUARES[pos].name, ZONES[zone]));
@@ -2259,7 +2302,7 @@ const alive = (g) => g.players.filter((q) => !q.out);
 
 const MARKET_NOW = {
   recession(g) {
-    for (const q of alive(g)) charge(g, q, companyCash(q) * 0.1, 'expOther', 'Recession losses');
+    for (const q of alive(g)) claim(g, q, 'recession', charge(g, q, companyCash(q) * 0.1, 'expOther', 'Recession losses'));
   },
   boom(g) {
     for (const q of alive(g)) post(q, 'Economic boom', { cash: M(500), revOther: -M(500) });
@@ -2274,7 +2317,7 @@ const MARKET_NOW = {
     });
   },
   rates(g) {
-    for (const q of alive(g)) if (q.ledger.loan < 0) charge(g, q, -q.ledger.loan * 0.1, 'expInterest', 'Interest rate hike');
+    for (const q of alive(g)) if (q.ledger.loan < 0) claim(g, q, 'rates', charge(g, q, -q.ledger.loan * 0.1, 'expInterest', 'Interest rate hike'));
   },
   housing(g) {
     g.tiles.forEach((t, pos) => {
@@ -2335,6 +2378,7 @@ const MARKET_NOW = {
         }
       }
       if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expInvLoss: round(lost * each), inventory: -round(lost * each) });
+      if (lost) claim(g, q, 'spoilage', round(lost * each));
     });
   },
 };
@@ -2556,8 +2600,8 @@ function fraudCheck(g, p, chance, who) {
 // ---- Players' own books ----
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
-export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'lease', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch', 'expInsurance', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const BALANCE_FIELDS = ['cash', 'receivable', 'prepaid', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'lease', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'lease', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
@@ -2938,6 +2982,7 @@ export function viewFor(g, who) {
       depMethod: p.depMethod ?? 'straight',
       creditLimit: creditLimit(p, g),
       policySet: Boolean(p.policySet),
+      cover: p.cover ?? {},
       issuedYear: p.issuedYear ?? null,
       rejoin: Boolean(p.out && p.rejoin),
       marketing: Boolean(p.marketing),
@@ -2979,7 +3024,7 @@ export function viewFor(g, who) {
         lastCheck: p.lastCheck,
         misstatements: p.misstatements,
       } : {}),
-      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction, outsourced: Boolean(p.outsourced) } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction, outsourced: Boolean(p.outsourced), hedgeQuotes: Object.fromEntries(Object.keys(HEDGES).map((id) => [id, hedgeQuote(g, p, id)])) } : {}),
     })),
   };
 }
