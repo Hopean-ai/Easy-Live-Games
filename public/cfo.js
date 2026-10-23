@@ -516,6 +516,14 @@ function renderTurn() {
     box.append(amountForm('Pay a dividend', `Company cash shared among all shareholders by their shares: the founders, the public, any parent company, and you (${money(1000 * rules.moneyScale * (me.shares.holders[mySeat] ?? 0) / totalShares(me))} of every ${money(1000 * rules.moneyScale)}, less personal tax).`, (amount) => actNow({ a: 'dividend', amount })));
     if (me.sale && (g.tiles[me.sale.pos].owner === mySeat ? g.tiles[me.sale.pos].stock > 0 : g.tiles.some((t) => t?.owner === mySeat && t.zone === 'industrial' && t.stock > 0))) box.append(saleControls(me));
     const cfg = rules.config;
+    if (me.isPublic && me.issuedYear !== me.years) {
+      box.append(amountForm('Sell new shares', `Raise equity: sell up to ${cfg.secondaryShares} new shares to the market at about ${money(me.sharePrice)} each, once a fiscal year. No interest to pay, but every shareholder's stake, yours included, gets smaller.`, (count) => actNow({ a: 'issue', count: Math.floor(count) })));
+    }
+    if (!me.policySet) {
+      box.append(el('div', { class: 'row' }, [el('span', { class: 'small' }, 'Depreciation policy (choose once): straight-line spreads a building\'s cost evenly; accelerated writes off more early, lowering profit and tax now and raising them later.'),
+        el('button', { class: 'secondary', onclick: () => actNow({ a: 'policy', option: 'straight' }) }, 'Straight-line'),
+        el('button', { class: 'secondary', onclick: () => confirm('Adopt accelerated depreciation for good?') && actNow({ a: 'policy', option: 'accelerated' }) }, 'Accelerated')]));
+    }
     if (!me.isPublic && me.parent === null && me.years >= cfg.ipoYears) {
       box.append(el('button', { class: 'secondary', onclick: () => confirm(`Sell ${cfg.ipoShares} new shares to the public? Your stake will be a smaller share of a bigger company, auditors will look twice as hard, and from then on the profit share of your salary is paid in new shares.`) && actNow({ a: 'ipo' }) },
         `Go public: sell ${cfg.ipoShares} new shares at about ${money(me.sharePrice * cfg.publicPremium)} each`));
@@ -526,7 +534,12 @@ function renderTurn() {
         box.append(amountForm(`Hire ${q.name}`, `${q.name} is out. Fund a subsidiary for them to run (at least ${money(cfg.subsidiaryMin)}); you keep ${100 - cfg.managerShares}% of it.`, (amount) => actNow({ a: 'hire', target: j, amount })));
       });
     }
-    if (me.atBank) box.append(amountForm('Borrow', `The Bank lends up to ${money(rules.config.loanLimit)} in total. Interest is ${Math.round(rules.config.loanInterest * 100)}% of the most you owe during each fiscal year, charged at its end.`, (amount) => actNow({ a: 'borrow', amount })));
+    if (me.atBank) {
+      const rate = g.era ? g.era.loanInterest : rules.config.loanInterest;
+      box.append(amountForm('Borrow', g.calendar
+        ? `The Bank lends against your profit: loans and leases together up to ${money(me.creditLimit)} now (${rules.config.debtToEarnings}x your average yearly profit, between ${money(rules.config.startupCredit)} and ${money(rules.config.loanLimit)}). Interest is ${Math.round(rate * 100)}% in the ${g.era?.name ?? 'current era'}, plus ${Math.round(rules.config.creditSpread * 100)}% for each unit of debt per unit of equity, on the most you owe during the year.`
+        : `The Bank lends up to ${money(rules.config.loanLimit)} in total. Interest is ${Math.round(rules.config.loanInterest * 100)}% of the most you owe during each fiscal year, charged at its end.`, (amount) => actNow({ a: 'borrow', amount })));
+    }
     const loan = me.loan ?? me.balance?.liabilities.loan ?? 0;
     if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
@@ -536,7 +549,7 @@ function renderTurn() {
 // The CFO scorecard that decides a game at its year limit: points per measure, best first.
 function scorecardTable(g) {
   const measures = rules.scorecard.filter((m) => g.scorecard.some((r) => m.id in r.scores));
-  const show = (m, v) => (m.id === 'roe' ? `${(v * 100).toFixed(1)}%` : m.id === 'clean' ? String(v) : money(v));
+  const show = (m, v) => (m.id === 'roic' ? `${(v * 100).toFixed(1)}%` : m.id === 'clean' ? String(v) : money(v));
   return el('table', { class: 'scorecard' }, [
     el('tr', {}, [el('th', {}, 'CFO scorecard'), ...measures.map((m) => el('th', {}, `${m.name} (x${m.weight})`)), el('th', {}, 'Points')]),
     ...g.scorecard.map((r) => el('tr', {}, [el('td', {}, g.players[r.seat].name), ...measures.map((m) => el('td', {}, show(m, r.scores[m.id]))), el('td', {}, String(r.points))])),
@@ -774,6 +787,10 @@ function renderTile() {
         row.append(el('button', { class: `build${i >= g.ppeRow.length ? ' secondary' : ''}`, disabled: cash < net, onclick: () => actNow({ a: 'build', pos: selected, card: i }) },
           el('span', {}, old ? `Upgrade to ${rules.rarities[r].name} ${money(net)}` : `Build ${rules.rarities[r].name} ${money(price)}`),
           el('span', { class: 'build-after' }, `${after}${i >= g.ppeRow.length ? ' · bank option' : ''}`)));
+        // Change 7: lease it instead: nothing down, a lease liability paid off each year end.
+        const lease = Math.round(price * rules.config.leaseRate);
+        if (!old) row.append(el('button', { class: 'build secondary', onclick: () => actNow({ a: 'build', pos: selected, card: i, lease: true }) },
+          el('span', {}, `Lease ${rules.rarities[r].name}`), el('span', { class: 'build-after' }, `nothing down, ${money(lease)} a year at ${Math.round(rules.config.leaseInterest * 100)}%`)));
       });
       if (!row.children.length) row.append(el('span', { class: 'small' }, old ? 'No pricier PP&E is face up to upgrade to.' : 'The PP&E deck is empty.'));
       box.push(row);

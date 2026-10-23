@@ -22,6 +22,7 @@ export const ACCOUNTS = {
   payable: 'Accounts payable',
   loan: 'Bank loan',
   affiliateLoan: 'Due to affiliate',
+  lease: 'Lease liability',
   capital: 'Contributed capital',
   retained: 'Retained earnings',
   draws: 'Distributions to shareholders',
@@ -232,7 +233,7 @@ export function balanceSheet(p) {
   const l = p.ledger;
   const net = incomeStatement(p).netIncome;
   const assets = { cash: l.cash, receivable: l.receivable ?? 0, inventory: l.inventory, land: l.land, ppe: l.ppe, accDep: l.accDep, investments: l.investments, goodwill: l.goodwill };
-  const liabilities = { payable: -l.payable || 0, loan: -l.loan || 0, affiliateLoan: -l.affiliateLoan || 0 };
+  const liabilities = { payable: -l.payable || 0, loan: -l.loan || 0, lease: -l.lease || 0, affiliateLoan: -l.affiliateLoan || 0 };
   const equity = { capital: -l.capital, retained: -l.retained, netIncome: net, draws: -l.draws };
   const totalLiabilities = sum(Object.values(liabilities));
   const totalEquity = sum(Object.values(equity));
@@ -283,7 +284,16 @@ export function priceToBook(p, g = null) {
   if (!years.length || business <= 0) return 1;
   const earnings = years.reduce((a, b) => a + b, 0) / years.length;
   const [lo, hi] = CONFIG.priceToBook;
-  return Math.min(p.stigma > 0 ? 1 : hi, Math.max(lo, earnings / (business * CONFIG.requiredReturn)));
+  const required = CONFIG.requiredReturn * (1 + leverage(p, equity));
+  return Math.min(p.stigma > 0 ? 1 : hi, Math.max(lo, earnings / (business * required)));
+}
+
+// Debt (Bank loans, leases, money due to affiliates) over equity. A company with no equity left
+// counts as very highly geared.
+export function leverage(p, equity = balanceSheet(p).totalEquity) {
+  const debt = -(p.ledger.loan ?? 0) - (p.ledger.lease ?? 0) - (p.ledger.affiliateLoan ?? 0);
+  if (debt <= 0) return 0;
+  return equity > 0 ? Math.min(10, debt / equity) : 10;
 }
 
 // Miles (change 1): total shareholder return, for the company's original 100 shares: the share
@@ -402,7 +412,7 @@ export function consolidated(g, p) {
   const income = incomeStatement({ ledger });
   const parentIncome = round(income.netIncome - nciIncome);
   const assets = { cash: ledger.cash, receivable: ledger.receivable, inventory: ledger.inventory, land: ledger.land, ppe: ledger.ppe, accDep: ledger.accDep, investments: ledger.investments, goodwill: ledger.goodwill };
-  const liabilities = { payable: -ledger.payable || 0, loan: -ledger.loan || 0, affiliateLoan: -ledger.affiliateLoan || 0 };
+  const liabilities = { payable: -ledger.payable || 0, loan: -ledger.loan || 0, lease: -ledger.lease || 0, affiliateLoan: -ledger.affiliateLoan || 0 };
   const equity = { capital: -ledger.capital, retained: round(-ledger.retained + retainedAdj), netIncome: parentIncome, draws: -ledger.draws, nci: round(nci) };
   const totalLiabilities = sum(Object.values(liabilities));
   const totalEquity = sum(Object.values(equity));
@@ -433,13 +443,14 @@ function cleanAction(action) {
   const out = { a: action.a };
   for (const f of INT_FIELDS) if (Number.isInteger(action[f]) && Math.abs(action[f]) <= MAX_AMOUNT) out[f] = action[f];
   if (Number.isFinite(action.amount) && Math.abs(action.amount) <= MAX_AMOUNT) out.amount = action.amount;
-  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option))) out.option = action.option;
+  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option) || ['straight', 'accelerated'].includes(action.option))) out.option = action.option;
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
   if (typeof action.memo === 'string') out.memo = action.memo.slice(0, MEMO_SIZE);
   if (typeof action.accept === 'boolean') out.accept = action.accept;
   if (typeof action.sell === 'boolean') out.sell = action.sell;
+  if (typeof action.lease === 'boolean') out.lease = action.lease;
   if (typeof action.level === 'string' && (Object.hasOwn(SUPPLY.levels, action.level) || Object.hasOwn(RETAIL.pricing, action.level))) out.level = action.level;
   if (typeof action.pricing === 'string' && Object.hasOwn(RETAIL.pricing, action.pricing)) out.pricing = action.pricing;
   if (typeof action.production === 'string' && Object.hasOwn(SUPPLY.levels, action.production)) out.production = action.production;
@@ -530,6 +541,16 @@ export function act(g, who, raw) {
     post(p, `${n} new shares bought by the CFO`, { cash: paid, capital: -paid });
     log(g, `${p.name} buys ${n} new shares in their company for ${money(paid)}.`);
     afterAction(g);
+    return null;
+  }
+  // Change 7: the depreciation method, straight-line or accelerated. Chosen once; it applies from
+  // the next year end.
+  if (action.a === 'policy') {
+    if (!['straight', 'accelerated'].includes(action.option)) return 'Pick straight-line or accelerated.';
+    if (p.policySet) return 'Your depreciation policy is already set.';
+    p.depMethod = action.option;
+    p.policySet = true;
+    log(g, `${p.name}'s company adopts ${action.option === 'accelerated' ? 'accelerated' : 'straight-line'} depreciation.`);
     return null;
   }
   // Change 8: a sealed plan for the new year, made any time and revealed at the shared year end.
@@ -698,7 +719,7 @@ const ACTIONS = {
 
   // Builds on empty zoned land, or upgrades PP&E already there (Miles): the old building is
   // destroyed for its salvage value, which goes toward the new one.
-  build(g, p, { pos, card } = {}) {
+  build(g, p, { pos, card, lease } = {}) {
     if (g.phase !== 'act') return 'Roll first.';
     const upgrade = Boolean(g.tiles[pos]?.building);
     const err = upgrade ? canUpgrade(g, pos) : canBuild(g, pos);
@@ -713,7 +734,9 @@ const ACTIONS = {
     const price = RARITIES[rarity].price;
     const old = g.tiles[pos].building;
     if (upgrade && price <= old.cost) return `An upgrade must cost more than the ${money(old.cost)} PP&E there now.`;
-    if (companyCash(p) + (upgrade ? salvageValue(old) : 0) < price) return 'Your company cannot afford it.';
+    if (!lease && companyCash(p) + (upgrade ? salvageValue(old) : 0) < price) return 'Your company cannot afford it.';
+    if (lease && upgrade) return 'Lease on empty land; to upgrade, buy the new building.';
+    if (lease && debtRoom(p, g) < price) return `Lenders count leases as debt: you can take on ${money(Math.max(0, debtRoom(p, g)))} more of loans and leases.`;
     if (upgrade) scrapBuilding(g, p, g.tiles[pos], pos, 'upgrade');
     if (fromRow) {
       g.ppeRow.splice(card, 1);
@@ -721,7 +744,23 @@ const ACTIONS = {
     } else {
       g.ppeDeck.splice(g.ppeDeck.length - 1 - (card - g.ppeRow.length), 1);
     }
-    putBuilding(g, p, pos, rarity, price);
+    if (lease) leaseBuilding(g, p, pos, rarity);
+    else putBuilding(g, p, pos, rarity, price);
+    return null;
+  },
+
+  // Change 7: a public company sells new shares to the market, once a fiscal year.
+  issue(g, p, { count } = {}) {
+    if (g.phase === 'buy') return 'Buy or pass first.';
+    if (!p.isPublic) return 'Only a public company can sell shares to the market.';
+    if (p.issuedYear === p.years) return 'You have already sold shares this fiscal year.';
+    if (!(count >= 1 && count <= CONFIG.secondaryShares)) return `Sell 1 to ${CONFIG.secondaryShares} new shares.`;
+    const price = issuePrice(p, g);
+    const raised = round(price * count);
+    p.shares.public += count;
+    p.issuedYear = p.years;
+    post(p, `${count} new shares sold to the market`, { cash: raised, capital: -raised });
+    log(g, `${p.name}'s company sells ${count} new shares at ${money(price)} for ${money(raised)}.`);
     return null;
   },
 
@@ -896,9 +935,9 @@ const ACTIONS = {
   borrow(g, p, { amount } = {}) {
     if (g.phase !== 'act' || !p.atBank) return 'You can only borrow at the Bank, or after calling it.';
     amount = Math.floor(Number(amount));
-    const room = CONFIG.loanLimit + p.ledger.loan; // loan is a credit balance
+    const room = debtRoom(p, g);
     if (!(amount > 0)) return 'Enter an amount.';
-    if (amount > room) return `The Bank will lend at most ${money(room)} more.`;
+    if (amount > room) return `The Bank will lend at most ${money(Math.max(0, room))} more${g.calendar ? ` (loans and leases are capped at ${CONFIG.debtToEarnings}x your average profit, between ${money(CONFIG.startupCredit)} and ${money(CONFIG.loanLimit)})` : ''}.`;
     post(p, 'Bank loan', { cash: amount, loan: -amount });
     log(g, `${p.name} borrows ${money(amount)} from the Bank.`);
     return null;
@@ -1455,6 +1494,32 @@ function scrapBuilding(g, p, t, pos, why) {
   p.carried += t.stock ?? 0;
   t.stock = 0;
   log(g, `${p.name} destroys the ${RARITIES[b.rarity].name} PP&E on ${SQUARES[pos].name} for ${why}, salvaging ${money(salvage)}.`);
+  endLease(g, p, b, SQUARES[pos].name);
+}
+
+// How much more a company may owe the Bank and lessors together (liabilities are credit balances).
+export function creditLimit(p, g = null) {
+  if (g && !g.calendar) return CONFIG.loanLimit; // games begun before keep the flat limit
+  const years = p.earnings ?? [];
+  const earnings = years.length ? years.reduce((a, b) => a + b, 0) / years.length : 0;
+  return Math.round(Math.min(CONFIG.loanLimit, Math.max(CONFIG.startupCredit, earnings * CONFIG.debtToEarnings)));
+}
+const debtRoom = (p, g) => creditLimit(p, g) + p.ledger.loan + (p.ledger.lease ?? 0);
+
+// Change 7: a leased building, nothing down: a right-of-use asset and a lease liability, paid off
+// at each year end (see CONFIG.leaseRate).
+function leaseBuilding(g, p, pos, rarity) {
+  const price = RARITIES[rarity].price;
+  post(p, `Leased ${RARITIES[rarity].name} PP&E on ${SQUARES[pos].name}: right-of-use asset and lease liability`, { ppe: price, lease: -price });
+  g.tiles[pos].building = { rarity, cost: price, basis: price, dep: 0, owed: price };
+  log(g, `${p.name} leases ${RARITIES[rarity].name} PP&E on ${SQUARES[pos].name}, paying ${money(Math.round(price * CONFIG.leaseRate))} a year.`);
+}
+
+// A leased building that leaves the company (sold, scrapped or traded) has its lease paid off.
+function endLease(g, p, b, name) {
+  const owed = b.owed ?? 0;
+  b.owed = 0;
+  if (owed > 0) charge(g, p, owed, 'lease', `Lease on ${name} paid off`);
 }
 
 function putBuilding(g, p, pos, rarity, price) {
@@ -1522,14 +1587,18 @@ function afterAction(g) {
 export const SCORECARD = [
   { id: 'tsr', name: 'Shareholder value', weight: 2, of: (g, p) => shareholderValue(p, g) },
   { id: 'worth', name: 'Personal net worth', weight: 2, of: (g, p) => netWorth(g, p) },
-  { id: 'roe', name: 'Return on equity', weight: 1, of: (g, p) => returnOnEquity(p) },
+  // Return on invested capital rather than on equity, so it can't be raised just by borrowing.
+  { id: 'roic', name: 'Return on invested capital', weight: 1, of: (g, p) => returnOnCapital(p) },
   { id: 'clean', name: 'Clean filings', weight: 1, of: (g, p) => p.cleanYears ?? 0, manual: true },
 ];
 
-export function returnOnEquity(p) {
+// Profit before interest (after tax) over the equity and debt that fund the business, across
+// every fiscal year closed.
+export function returnOnCapital(p) {
   const years = p.roeYears ?? [];
-  const equity = years.reduce((a, y) => a + Math.max(0, y.equity), 0);
-  return equity > 0 ? round(years.reduce((a, y) => a + y.income, 0) / equity) : 0;
+  const capital = years.reduce((a, y) => a + Math.max(0, y.equity + (y.debt ?? 0)), 0);
+  const income = years.reduce((a, y) => a + y.income + (y.interest ?? 0) * (1 - CONFIG.corporateTax), 0);
+  return capital > 0 ? round((income / capital) * 10000) / 10000 : 0;
 }
 
 export function scorecard(g) {
@@ -1676,18 +1745,19 @@ function liquidate(g, p, need) {
   if (companyCash(p) < need && g.rescue && !p.reorganized && owned.length) return reorganize(g, p, need);
   const buildings = owned.filter(({ t, pos }) => t.building && SQUARES[pos].kind === 'land').sort((a, b) => a.t.building.cost - b.t.building.cost);
   for (const { t, pos } of buildings) {
-    if (companyCash(p) >= need) return;
-    sellBuilding(g, p, t, pos);
+    if (companyCash(p) >= need || p.out) return;
+    if (t.building && t.owner === idx) sellBuilding(g, p, t, pos); // paying off a lease may have sold it already
   }
   const lands = owned.sort((a, b) => SQUARES[a.pos].price - SQUARES[b.pos].price);
   for (const { t, pos } of lands) {
-    if (companyCash(p) >= need) return;
-    sellLand(g, p, t, pos);
+    if (companyCash(p) >= need || p.out) return;
+    if (t.owner === idx) sellLand(g, p, t, pos);
   }
 }
 
 function sellBuilding(g, p, t, pos, why = 'Cash shortfall') {
   const b = t.building;
+
   const proceeds = Math.round(b.cost * CONFIG.liquidation);
   const basis = b.basis ?? b.cost;
   const book = basis - b.dep;
@@ -1696,6 +1766,7 @@ function sellBuilding(g, p, t, pos, why = 'Cash shortfall') {
   p.carried += t.stock;
   t.stock = 0;
   log(g, `${p.name} sells the building on ${SQUARES[pos].name} for ${money(proceeds)}.`);
+  endLease(g, p, b, SQUARES[pos].name);
 }
 
 function sellLand(g, p, t, pos, why = 'Cash shortfall') {
@@ -1725,7 +1796,7 @@ function acquireCompany(g, p, q, price) {
   const held = q.shares.holders[me] ?? 0;
   const paid = Math.ceil((price * (total - held)) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
   const lines = {};
-  for (const a of ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'payable', 'loan', 'affiliateLoan']) lines[a] = q.ledger[a] ?? 0;
+  for (const a of ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'payable', 'loan', 'lease', 'affiliateLoan']) lines[a] = q.ledger[a] ?? 0;
   lines.cash -= paid;
   const net = Object.values(lines).reduce((a, b) => a + b, 0);
   if (net < 0) lines.goodwill += -net;
@@ -1983,12 +2054,29 @@ function fiscalYearEnd(g, p) {
   let depreciated = 0;
   for (const { t } of mine) {
     const basis = t.building.basis ?? t.building.cost;
-    const dep = Math.min(Math.round(basis * CONFIG.depreciation), basis - t.building.dep);
+    // Change 7: accelerated depreciation takes twice the straight-line rate of what's left.
+    const rate = p.depMethod === 'accelerated' ? Math.round((basis - t.building.dep) * CONFIG.depreciation * 2) : Math.round(basis * CONFIG.depreciation);
+    const dep = Math.min(rate, basis - t.building.dep);
     t.building.dep += dep;
     depreciation += dep;
     if (dep) depreciated += 1;
   }
-  if (depreciation) post(p, `Depreciation for the year on ${depreciated} building${depreciated > 1 ? 's' : ''}`, { expDep: depreciation, accDep: -depreciation });
+  if (depreciation) post(p, `${p.depMethod === 'accelerated' ? 'Accelerated depreciation' : 'Depreciation'} for the year on ${depreciated} building${depreciated > 1 ? 's' : ''}`, { expDep: depreciation, accDep: -depreciation });
+  // Change 7: lease payments, interest first, then the liability.
+  for (const { t, pos } of mine) {
+    const b = t.building;
+    if (!(b?.owed > 0) || t.owner !== g.players.indexOf(p)) continue; // an earlier payment may have sold it
+    const interest = Math.round(b.owed * CONFIG.leaseInterest);
+    const principal = Math.min(b.owed, Math.round(b.cost * CONFIG.leaseRate) - interest);
+    charge(g, p, interest, 'expInterest', `Lease interest on ${SQUARES[pos].name}`);
+    if (p.out) return;
+    if (principal > 0) {
+      const paid = charge(g, p, principal, 'lease', `Lease payment on ${SQUARES[pos].name}`);
+      b.owed = round(b.owed - paid);
+      if (p.out) return;
+      if (b.owed <= 0) log(g, `${p.name} has paid off the lease on ${SQUARES[pos].name} and owns it outright.`);
+    }
+  }
 
   // Miles: a property tax. The town assesses every lot and transport tile the company owns at its
   // list price, plus what its building cost, and bills a share of that each fiscal year end.
@@ -2006,7 +2094,7 @@ function fiscalYearEnd(g, p) {
   // the year end still pays for the time it was out.
   const owed = Math.max(p.peakLoan ?? 0, -p.ledger.loan);
   p.peakLoan = -p.ledger.loan;
-  const rate = eraOf(g).loanInterest;
+  const rate = Math.round((eraOf(g).loanInterest + (g.calendar ? CONFIG.creditSpread * Math.min(2, leverage(p)) : 0)) * 1000) / 1000;
   if (owed > 0) charge(g, p, owed * rate, 'expInterest', `Loan interest (${Math.round(rate * 100)}% of the most owed this year, ${money(owed)})`);
   if (p.out) return;
   // Miles: a bookkeeper is paid by the document, for every one it posts at this year end.
@@ -2072,7 +2160,8 @@ function fiscalYearEnd(g, p) {
   const group = consolidated(g, p);
   (p.earnings ??= []).push(group ? group.income.parentIncome : statement.netIncome);
   if (p.earnings.length > CONFIG.earningsYears) p.earnings.shift();
-  (p.roeYears ??= []).push({ income: statement.netIncome, equity: balanceSheet(p).totalEquity });
+  const sheet = balanceSheet(p);
+  (p.roeYears ??= []).push({ income: statement.netIncome, equity: sheet.totalEquity, debt: sheet.liabilities.loan + sheet.liabilities.lease + sheet.liabilities.affiliateLoan, interest: statement.expenses.expInterest });
   snapshot(g, p, p.years, statement.netIncome);
   const truth = { income: incomeFields(p) };
   // Close the year: revenues, expenses and distributions roll into retained earnings.
@@ -2453,8 +2542,8 @@ function fraudCheck(g, p, chance, who) {
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
 export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch', 'expInterest', 'expOther', 'expTax', 'netIncome'];
-export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
-const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained']);
+export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'lease', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
+const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'lease', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
 // Miles: documents and the journal are kept apart. Documents pile up for the player to archive
@@ -2663,6 +2752,7 @@ function transferProperty(g, pos, seller, buyer, amount) {
   t.stock = 0;
   t.owner = g.players.indexOf(buyer);
   t.landBasis = land;
+  if (b) endLease(g, seller, b, sq.name); // the seller pays off any lease
   if (b) Object.assign(b, { basis: amount - land, dep: 0 });
   // An offer on this property from before the sale no longer applies.
   g.offers = (g.offers ?? []).filter((o) => o.pos !== pos);
@@ -2830,6 +2920,10 @@ export function viewFor(g, who) {
       dividendsPerShare: p.dividendsPerShare ?? 0,
       boardAction: p.boardAction ?? null,
       reorganized: Boolean(p.reorganized),
+      depMethod: p.depMethod ?? 'straight',
+      creditLimit: creditLimit(p, g),
+      policySet: Boolean(p.policySet),
+      issuedYear: p.issuedYear ?? null,
       rejoin: Boolean(p.out && p.rejoin),
       marketing: Boolean(p.marketing),
       research: p.research ?? 0,

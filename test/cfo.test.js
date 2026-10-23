@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -418,7 +418,8 @@ test('a Shell Company loan is due to an affiliate, outside the Bank limit and it
   assert.equal(balanceSheet(p).liabilities.affiliateLoan, M(1500));
   assert.equal(balanceSheet(p).liabilities.loan, 0);
   p.atBank = true;
-  assert.equal(act(g, 0, { a: 'borrow', amount: CONFIG.loanLimit }), null, 'the Bank still lends its full limit');
+  assert.equal(act(g, 0, { a: 'borrow', amount: creditLimit(p, g) }), null, 'the Bank still lends its full limit');
+  assert.equal(creditLimit(p, g), CONFIG.startupCredit, 'a company with no profit yet gets startup credit');
   const s = balanceSheet(p);
   assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
 });
@@ -1599,12 +1600,12 @@ test('at the year limit, the CFO scorecard picks the winner', () => {
   const g = createGame(['A', 'B', 'C'], 72, { easyBooks: true, valueTarget: M(1e6), maxYears: 1 });
   const [a, b] = g.players;
   a.personalCash = M(100000);
-  b.roeYears = [{ income: M(100), equity: M(1000) }];
+  b.roeYears = [{ income: M(100), equity: M(500), debt: M(500), interest: 0 }];
   const card = scorecard(g);
   assert.ok(card.every((r) => !('clean' in r.scores)), 'clean filings count only with real books');
   const top = card.find((r) => r.seat === 0);
   assert.equal(top.scores.worth, netWorth(g, a));
-  assert.equal(card.find((r) => r.seat === 1).scores.roe, 0.1);
+  assert.equal(card.find((r) => r.seat === 1).scores.roic, 0.1, 'profit over equity and debt');
   for (const p of g.players) p.years = 1;
   g.phase = 'act';
   act(g, 0, { a: 'end' });
@@ -1991,4 +1992,59 @@ test('supply contracts deliver widgets each turn at the agreed price, with penal
   assert.equal(act(g, 1, { a: 'breach', offer: g.contracts[0].id }), null);
   assert.equal(g.contracts.length, 0);
   assert.equal(b.ledger.expLegal, fee);
+});
+
+test('accounting choices: accelerated depreciation, leasing a building, and selling new shares', () => {
+  const g = createGame(['A', 'B'], 83, { easyBooks: true, valueTarget: M(1e6), calendar: false });
+  const [a, b] = g.players;
+  const one = posOfSpace(1);
+  const two = posOfSpace(3);
+  for (const [pos, seat] of [[one, 0], [two, 1]]) {
+    Object.assign(g.tiles[pos], { owner: seat, zone: 'residential', building: { rarity: 'rare', cost: M(1500), basis: M(1500), dep: 0 }, stock: 0 });
+    post(g.players[seat], 'Building', { ppe: M(1500), cash: -M(1500) });
+  }
+  assert.equal(act(g, 0, { a: 'policy', option: 'accelerated' }), null);
+  assert.match(act(g, 0, { a: 'policy', option: 'straight' }), /already set/);
+  for (const p of g.players) p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  act(g, 0, { a: 'end' });
+  act(g, 1, { a: 'roll' });
+  act(g, 1, { a: 'end' });
+  assert.equal(a.ledger.expDep, 0, 'closed into retained earnings');
+  assert.equal(g.tiles[one].building.dep, M(1500) * CONFIG.depreciation * 2, 'twice the straight-line charge in year one');
+  assert.equal(g.tiles[two].building.dep, M(1500) * CONFIG.depreciation);
+  // A lease: no cash down; a right-of-use asset and a lease liability on the balance sheet.
+  const lot = posOfSpace(6);
+  Object.assign(g.tiles[lot], { owner: 1, zone: 'retail', building: null, stock: 0 });
+  post(b, 'Lot', { land: SQUARES[lot].price, cash: -SQUARES[lot].price });
+  Object.assign(g, { turn: 1, phase: 'act' });
+  g.ppeRow[0] = 'common';
+  const cash = companyCash(b);
+  const ppe = b.ledger.ppe;
+  const price = RARITIES.common.price;
+  assert.equal(act(g, 1, { a: 'build', pos: lot, card: 0, lease: true }), null);
+  assert.equal(companyCash(b), cash);
+  assert.equal(b.ledger.ppe, ppe + price);
+  assert.equal(balanceSheet(b).liabilities.lease, price);
+  b.pos = BOARD_SIZE - 2;
+  Object.assign(g, { phase: 'roll' });
+  act(g, 1, { a: 'roll' });
+  // Each year end pays interest first, then the liability.
+  const interest = Math.round(price * CONFIG.leaseInterest);
+  assert.equal(g.tiles[lot].building.owed, price - (Math.round(price * CONFIG.leaseRate) - interest));
+  assert.equal(balanceSheet(b).liabilities.lease, g.tiles[lot].building.owed);
+  assert.ok(b.journal.some((e) => /Lease interest/.test(e.text)));
+  assert.match(act(g, 1, { a: 'build', pos: posOfSpace(2), card: 0, lease: true }), /./);
+  // Selling new shares, once a year, only when public.
+  Object.assign(g, { turn: 0, phase: 'act' });
+  assert.match(act(g, 0, { a: 'issue', count: 5 }), /public/);
+  a.isPublic = true;
+  const shares = a.shares.public;
+  assert.equal(act(g, 0, { a: 'issue', count: 5 }), null);
+  assert.equal(a.shares.public, shares + 5);
+  assert.match(act(g, 0, { a: 'issue', count: 5 }), /already/);
+  for (const p of g.players) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
 });

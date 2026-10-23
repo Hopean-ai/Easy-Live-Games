@@ -50,7 +50,16 @@ export const CONFIG = {
   // of the equity (the business) at its return over the return investors require (the textbook
   // justified price-to-book), so idle cash adds no more than itself and cash put to work at a good
   // return adds more. Earnings are averaged over recent years.
-  requiredReturn: 0.1, // PLACEHOLDER
+  requiredReturn: 0.1, // PLACEHOLDER: for a company with no debt
+  // Leverage is riskier for shareholders and lenders alike: investors require this return times
+  // (1 + debt / equity) (as in Modigliani-Miller), and lenders charge the era's rate plus this
+  // much per unit of debt / equity. Without it, borrowing to the limit won 76% of playtests.
+  creditSpread: 0.05, // PLACEHOLDER
+  // Lenders also lend against earnings, like a debt covenant: loans and leases together are capped
+  // at this many times the company's average yearly profit, never below startupCredit and never
+  // above loanLimit.
+  debtToEarnings: 3, // PLACEHOLDER
+  startupCredit: M(1000), // PLACEHOLDER
   earningsYears: 2, // PLACEHOLDER
   priceToBook: [0.5, 3], // PLACEHOLDER: the lowest and highest the market will go
   activistCash: 0.4, // PLACEHOLDER: Activist Investor card: cash above this share of total assets is excess...
@@ -92,6 +101,18 @@ export const CONFIG = {
   auctionMin: 0.5,
   // Change 6b: supply contracts between independent companies' factories and stores.
   contracts: { maxUnits: 50000, maxYears: 3, shortfallPenalty: 0.25, breakTurns: 3 }, // PLACEHOLDER
+  // Miles (design principles, change 7): accounting choices a CFO owns, each with a trade-off.
+  // Accelerated depreciation writes buildings off at twice the straight-line rate on what's left,
+  // so profit (and tax) is lower early and higher later. A lease puts a building up with no cash
+  // down. As under today's lease standards (ASC 842 / IFRS 16) it goes on the balance sheet: a
+  // right-of-use asset in PP&E, depreciated like any building, and a lease liability. Each year end
+  // pays this share of the building's price, interest first; once the liability is paid off the
+  // company owns the building. Lenders count leases as debt: Bank loans and leases together stay
+  // within loanLimit (a lease that only did what a loan does, unlimited, won every playtest).
+  // A public company can sell new shares to raise equity once a fiscal year.
+  leaseRate: 0.15, // PLACEHOLDER
+  leaseInterest: 0.1, // PLACEHOLDER
+  secondaryShares: 10, // PLACEHOLDER: most new shares sold in one secondary offering
   // Miles (change 8): every company shares one calendar. The fiscal year ends for everyone at once
   // after this many rounds (about one lap of the board on average); the FYE corner gives an extra
   // board decision instead.

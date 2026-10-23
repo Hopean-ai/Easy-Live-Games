@@ -4,7 +4,7 @@
 //   node scripts/tournament-cfo.mjs [games per strategy] [players] [strategy,strategy,...]
 //
 // About ±2 points of win rate is noise at 600 games.
-import { createGame, act, canBuild, companyCash } from '../src/cfo/rules.js';
+import { createGame, act, canBuild, companyCash, creditLimit } from '../src/cfo/rules.js';
 import { SQUARES, RARITIES, CONFIG, M } from '../src/cfo/data.js';
 
 // The normal bot: keeps a cash buffer, buys and builds (factories and stores first), goes public,
@@ -14,6 +14,7 @@ const NORMAL = {
   zones: ['retail', 'industrial', 'banking', 'residential'],
   board: [], // board decisions to try each turn, in order, while keeping the buffer
   bid: 0.6, // share of the list price it bids for a lot at auction
+  borrow: 0.5, // share of its credit limit it keeps borrowed
 };
 
 export const STRATEGIES = {
@@ -27,6 +28,10 @@ export const STRATEGIES = {
   researcher: { board: ['research'] },
   boardroom: { board: ['research', 'marketing'] },
   noBids: { bid: 0 },
+  accelerated: { policy: 'accelerated' },
+  leaser: { lease: true },
+  borrower: { borrow: 1 },
+  noDebt: { borrow: 0 },
   bigBidder: { bid: 1 },
 };
 
@@ -37,6 +42,7 @@ function zoneCount(g, seat, zone) {
 function turn(g, seat, s) {
   const p = g.players[seat];
   if (g.phase === 'roll') return act(g, seat, { a: 'roll' });
+  if (s.policy && !p.policySet) act(g, seat, { a: 'policy', option: s.policy });
   if (g.phase === 'buy') {
     const sq = SQUARES[p.pos];
     if (companyCash(p) - (sq.price ?? 0) >= s.reserve) {
@@ -53,8 +59,15 @@ function turn(g, seat, s) {
     if (canBuild(g, pos)) continue;
     const order = g.ppeRow.map((r, i) => [RARITIES[r].price, i]).sort((a, b) => b[0] - a[0]);
     for (const [price, card] of order) if (companyCash(p) - price >= s.reserve && !act(g, seat, { a: 'build', pos, card })) break;
+    // Leasing: put up the dearest building whose yearly payment it can spare, with nothing down.
+    if (s.lease && canBuild(g, pos) === null) for (const [price, card] of order) if (companyCash(p) - price * CONFIG.leaseRate >= s.reserve && !act(g, seat, { a: 'build', pos, card, lease: true })) break;
   }
   if (p.sale) act(g, seat, { a: 'sell', option: 'premium' });
+  // Borrowing: call the bank and borrow this share of what it will lend.
+  const room = Math.floor((creditLimit(p, g) * (s.borrow ?? 0)) + p.ledger.loan + (p.ledger.lease ?? 0));
+  if (s.borrow && room > M(100) && act(g, seat, { a: 'borrow', amount: room })) {
+    if (!act(g, seat, { a: 'board', option: 'financing' })) act(g, seat, { a: 'borrow', amount: room });
+  }
   for (const option of s.board) if (companyCash(p) > M(3000) && !act(g, seat, { a: 'board', option })) break;
   if (s.ipo && !p.isPublic) act(g, seat, { a: 'ipo' });
   const extra = companyCash(p) - s.payAbove;
