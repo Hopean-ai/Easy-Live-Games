@@ -7,7 +7,7 @@
 // assets sit outside the company, as they would for a real owner.
 import {
   CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
-  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, HEDGES, HEDGE_RATES, PROFILES, PROFILE_CHOICES,
+  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, HEDGES, HEDGE_RATES, PROFILES, PROFILE_CHOICES, MODULES,
 } from './data.js';
 
 export const ACCOUNTS = {
@@ -74,17 +74,19 @@ const MEMO_SIZE = 80;
 // longer offer it (Miles: no); tests and simulations use it to play fast.
 export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, options = {}) {
   if (names.length < CONFIG.minPlayers || names.length > CONFIG.maxPlayers) throw new Error('bad player count');
+  const modules = moduleOptions(options.modules);
   const g = {
     seed: seed >>> 0,
+    modules,
     // What a widget goes into inventory at. Games begun before factory overhead keep $1 widgets.
     widgetCost: ZONES.industrial.variableCost + ZONES.industrial.overhead,
     costing: true, // inventory at average cost, with freight in it (older games keep a fixed cost per widget)
-    credit: true, // sales and supplier credit (games begun before it settle everything in cash)
+    credit: modules.credit, // sales and supplier credit (games begun before it settle everything in cash)
     calendar: options.calendar !== false, // one shared fiscal year (games begun before it close each year at the FYE corner)
     eras: options.calendar !== false && options.eras !== false, // eras and the economic outlook run on the shared calendar
     rescue: options.calendar !== false,
-    markets: options.calendar !== false, // lot auctions and supply contracts (change 6)
-    profiles: options.profiles !== false, // company profiles (change 10)
+    markets: options.calendar !== false && modules.markets, // lot auctions and supply contracts (change 6)
+    profiles: options.profiles !== false && modules.profiles, // company profiles (change 10)
     turnCount: 0, // Chapter 11 and new jobs instead of knock-outs (they rejoin at the shared year end)
     round: 0,
     turn: 0,
@@ -99,7 +101,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     fraudDeck: [],
     fraudDiscard: deckOf(FRAUD_CARDS),
     marketDeck: [],
-    marketDiscard: deckOf(MARKET_CARDS),
+    marketDiscard: deckOf(MARKET_CARDS).filter((id) => cardInPlay(modules, id)),
     log: [],
     winner: null,
     endReason: null,
@@ -141,6 +143,18 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   if (g.profiles) dealProfiles(g, seed);
   log(g, `${g.players[0].name} goes first.`);
   return g;
+}
+
+// Change 11: which optional modules a game uses; anything not given is on.
+export function moduleOptions(o = {}) {
+  return Object.fromEntries(Object.keys(MODULES).map((id) => [id, o?.[id] !== false]));
+}
+
+// Old games have no module settings: everything is on.
+const moduleOn = (g, id) => g.modules?.[id] !== false;
+
+function cardInPlay(modules, id) {
+  return !Object.entries(MODULES).some(([m, mod]) => modules[m] === false && mod.cards?.includes(id));
 }
 
 // Change 10: deal each player two different profiles. A separate random stream, so dealing
@@ -597,6 +611,7 @@ export function act(g, who, raw) {
   }
   // Change 9: buy cover against one Market Forces event until the fiscal year end.
   if (action.a === 'hedge') {
+    if (!moduleOn(g, 'hedging')) return 'This game is played without insurance.';
     const quote = hedgeQuote(g, p, action.option);
     if (typeof quote === 'string') return quote;
     if (companyCash(p) < quote.premium) return `The premium is ${money(quote.premium)}.`;
@@ -738,6 +753,7 @@ const ACTIONS = {
     const owner = g.tiles[airport].owner;
     const jet = p.assets.includes('jet');
     if (!home && owner === null && !jet) return 'Nobody runs flights from this airport yet.';
+    if (!home && !moduleOn(g, 'island')) return 'This game is played without the island.';
     if (!home && !eraOf(g).island) return `Flights to the island start in the ${ERAS.find((e) => e.island).name}.`;
     if (jet) {
       log(g, `${p.name} takes the corporate jet.`);
@@ -927,6 +943,7 @@ const ACTIONS = {
     const q = g.players[target];
     if (p.parent !== null) return 'A subsidiary cannot buy other companies.';
     if (!q || q === p || q.out || q.parent !== null) return 'Pick a rival independent company.';
+    if (!moduleOn(g, 'subsidiaries')) return 'This game is played without buyouts.';
     if (!eraOf(g).buyouts) return `Buyouts open in the ${ERAS.find((e) => e.buyouts).name}.`;
     const price = acquisitionPrice(q, g);
     if (companyCash(p) < price) return `Buying ${q.name}'s company costs ${money(price)}.`;
@@ -936,6 +953,7 @@ const ACTIONS = {
 
   hire(g, p, { target, amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
+    if (!moduleOn(g, 'subsidiaries')) return 'This game is played without subsidiaries.';
     if (g.players.length < 3) return 'Subsidiaries need a game of three or more.';
     if (p.parent !== null) return 'A subsidiary cannot hire its own subsidiary.';
     const q = g.players[target];
@@ -952,6 +970,7 @@ const ACTIONS = {
   },
 
   personal(g, p) {
+    if (!moduleOn(g, 'perks')) return 'This game is played without executive perks.';
     if (g.phase === 'buy') return 'Buy or pass first.';
     const price = personalPrice(p);
     if (p.personalCash < price) return `You need ${money(price)} of personal cash.`;
@@ -1631,7 +1650,7 @@ function afterAction(g) {
   const big = independent.find((p) => shareholderValue(p, g) >= win.valueTarget);
   if (big) return finish(g, big, `${money(win.valueTarget)} of shareholder value`);
   // Miles: the portfolio only wins after a lap of the island.
-  const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
+  const rich = moduleOn(g, 'perks') && alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && (p.islandLaps > 0 || !moduleOn(g, 'island')));
   if (rich) return finish(g, rich, `a portfolio of executive perks worth ${money(CONFIG.portfolioGoal)}`);
   if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
     const card = scorecard(g);
@@ -2099,9 +2118,10 @@ function eraAllows(g, rarity) {
 
 // Change 4b: a random event that hits every company, weighted by its Market Forces card count.
 function outlookEvent(g) {
-  const total = OUTLOOK.events.reduce((n, id) => n + MARKET_CARDS[id].count, 0);
+  const events = OUTLOOK.events.filter((id) => cardInPlay(g.modules ?? {}, id));
+  const total = events.reduce((n, id) => n + MARKET_CARDS[id].count, 0);
   let r = rand(g) * total;
-  return OUTLOOK.events.find((id) => (r -= MARKET_CARDS[id].count) < 0) ?? OUTLOOK.events[0];
+  return events.find((id) => (r -= MARKET_CARDS[id].count) < 0) ?? events[0];
 }
 
 export function yearProgress(g) {
@@ -2987,6 +3007,7 @@ export function viewFor(g, who) {
     shareholderValues: g.players.map((p, i) => (open(i) || p.isPublic ? shareholderValue(p, g) : null)),
     scorecard: g.phase === 'over' && g.win?.maxYears ? scorecard(g) : null,
     calendar: yearProgress(g),
+    modules: moduleOptions(g.modules),
     era: g.eras ? { ...eraOf(g), year: calendarYear(g) } : null,
     rescue: Boolean(g.rescue),
     markets: Boolean(g.markets),
@@ -3070,7 +3091,7 @@ export function viewFor(g, who) {
         lastCheck: p.lastCheck,
         misstatements: p.misstatements,
       } : {}),
-      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction, outsourced: Boolean(p.outsourced), hedgeQuotes: Object.fromEntries(Object.keys(HEDGES).map((id) => [id, hedgeQuote(g, p, id)])) } : {}),
+      ...(i === who ? { bankOptions: bankOptions(g, i), hand: p.hand, journal: g.easyBooks ? p.journal : undefined, frauds: p.frauds, fraudRisk: { audit: fraudRisk(p, CONFIG.auditFraudChance), fye: fraudRisk(p, CONFIG.fyeFraudChance) }, taxWaived: p.taxWaived, deduction: p.deduction, outsourced: Boolean(p.outsourced), hedgeQuotes: moduleOn(g, 'hedging') && Object.fromEntries(Object.keys(HEDGES).map((id) => [id, hedgeQuote(g, p, id)])) } : {}),
     })),
   };
 }
