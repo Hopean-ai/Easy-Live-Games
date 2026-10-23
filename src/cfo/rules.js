@@ -45,6 +45,8 @@ export const ACCOUNTS = {
 const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
+const DOC_KEEP = 150;
+const MEMO_SIZE = 80;
 
 // ---- Setup ----
 
@@ -101,7 +103,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       // Shares in the company this player is CFO of: who holds how many. Miles: the CFO starts with
       // a stake (CONFIG.cfoShares of 100) and the founders, who aren't players, hold the rest.
       shares: { holders: { [g.players.length]: CONFIG.cfoShares }, founders: 100 - CONFIG.cfoShares, public: 0 }, isPublic: false, parent: null,
-      manual: !g.easyBooks, docs: [], docSeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
+      manual: !g.easyBooks, docs: [], docSeq: 0, entries: [], entrySeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
     // Later seats can start with a little more, to offset going first.
@@ -167,7 +169,9 @@ export function post(p, text, lines, { doc = true } = {}) {
   if (p.journal.length > JOURNAL_SIZE) p.journal.shift();
   if (p.manual && doc) {
     p.docSeq += 1;
-    p.docs.push({ id: p.docSeq, text: describe(text, entry), year: p.years + 1, lines: entry, recorded: null });
+    p.docs.push({ id: p.docSeq, text: describe(text, entry), year: p.years + 1, lines: entry, archived: false });
+    // Filed documents only fill the archive; the oldest go first.
+    while (p.docs.length > DOC_KEEP && p.docs[0].filed) p.docs.shift();
   }
 }
 
@@ -278,7 +282,7 @@ export function current(g) {
 
 // Actions come straight from browsers, so keep only the fields actions use, with the right types.
 // Names are looked up as own keys, so 'constructor' or '__proto__' can't reach object internals.
-const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer'];
+const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer', 'entry', 'year'];
 const MAX_AMOUNT = 1e9;
 function cleanAction(action) {
   if (!action || typeof action !== 'object' || typeof action.a !== 'string') return null;
@@ -289,6 +293,7 @@ function cleanAction(action) {
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
+  if (typeof action.memo === 'string') out.memo = action.memo.slice(0, MEMO_SIZE);
   if (typeof action.accept === 'boolean') out.accept = action.accept;
   if (typeof action.level === 'string' && (Object.hasOwn(SUPPLY.levels, action.level) || Object.hasOwn(RETAIL.pricing, action.level))) out.level = action.level;
   for (const k of ['income', 'balance']) {
@@ -310,6 +315,20 @@ function upgrade(g) {
     for (const a of Object.keys(ACCOUNTS)) {
       p.ledger[a] ??= 0;
       if (p.bookLedger) p.bookLedger[a] ??= 0;
+    }
+    // Games saved when each document had its own entry: those entries join the open journal and
+    // their documents go to the archive.
+    if (p.manual && !p.entries) {
+      p.entries = [];
+      p.entrySeq = 0;
+      for (const d of p.docs ?? []) {
+        if (d.recorded) {
+          p.entrySeq += 1;
+          p.entries.push({ id: p.entrySeq, year: d.year, memo: d.text.slice(0, MEMO_SIZE), lines: d.recorded });
+        }
+        d.archived = Boolean(d.recorded);
+        delete d.recorded;
+      }
     }
   }
   // Games begun with typed statements switch to statements built from entries. Their books so far
@@ -390,7 +409,7 @@ export function timeout(g) {
   const p = current(g);
   // Their books are kept for them, so fines don't bankrupt someone who has only stepped away.
   if (p.manual) {
-    for (const d of p.docs) d.recorded ??= d.lines;
+    catchUp(p, Infinity, 'Entries made for you while you were away');
     if (p.fyePending) BOOKS.statements(g, p, p.fyePending.truth);
   }
   if (g.phase === 'roll') ACTIONS.roll(g, p);
@@ -1384,7 +1403,7 @@ function acquireCompany(g, p, q, price) {
     delete c.shares.holders[them];
   }
   discardHand(g, q);
-  Object.assign(q, { out: true, carried: 0, docs: [], fyePending: null, peakLoan: 0, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
+  Object.assign(q, { out: true, carried: 0, docs: [], entries: [], fyePending: null, peakLoan: 0, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
   log(g, `${p.name} buys ${q.name}'s company for ${money(paid)}. ${q.name} is out of the game.`);
 }
 
@@ -1456,7 +1475,7 @@ function restart(g, q, parent, capital) {
     ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     journal: [], report: null, hand: [], frauds: 0, taxWaived: false, carried: 0,
     receivables: [], payables: [], terms: null,
-    docs: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
+    docs: [], entries: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, founders: 0, public: 0 },
     isPublic: false, parent,
@@ -1584,7 +1603,7 @@ function fiscalYearEnd(g, p) {
     truth.balance = balanceFields(p);
     p.fyePending = { year: p.years, truth };
     if (p.outsourced) {
-      for (const d of p.docs) if (d.year <= p.years) d.recorded = d.lines;
+      catchUp(p, p.years, "Your bookkeeper's entries");
       BOOKS.statements(g, p, structuredClone(truth));
     }
   }
@@ -1937,23 +1956,61 @@ export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe',
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
 
-// The statements a player's own recorded entries add up to, for auto statements: their books so
-// far plus this year's recorded documents, with the year then closed into retained earnings.
-function statementsFromEntries(p, year) {
+// Miles: documents and the journal are kept apart. Documents pile up for the player to archive
+// whenever they like, and they post journal entries whenever they like, one entry for many
+// documents or many for one. Nothing ties an entry to a document; each entry is dated to a fiscal
+// year, and the year's statements are built from that year's entries.
+
+// The ledger before the year end close: the books so far plus the entries, or the documents' true
+// lines, dated up to that year.
+function openLedger(p, year, items) {
   const ledger = { ...(p.bookLedger ?? Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0]))) };
-  for (const d of p.docs) {
-    if (d.year > year || !d.recorded) continue;
-    for (const [acct, v] of d.recorded) ledger[acct] = round(ledger[acct] + v);
+  for (const x of items) {
+    if (x.year > year || x.filed) continue;
+    for (const [acct, v] of x.lines) ledger[acct] = round((ledger[acct] ?? 0) + v);
   }
+  return ledger;
+}
+
+// The years a player may post to: the year whose statements are due, and the one under way.
+function openYears(p) {
+  return p.fyePending ? [p.fyePending.year, p.years + 1] : [p.years + 1];
+}
+
+// Posts whatever the journal is missing for documents dated up to `year`, as one entry a year, and
+// archives those documents. For a bookkeeper, and for a player whose turn timed out.
+function catchUp(p, year, memo) {
+  const years = [...p.docs.filter((d) => !d.filed), ...p.entries].map((x) => x.year).filter((y) => y <= year);
+  for (const y of new Set(years)) {
+    const diff = {};
+    for (const d of p.docs) if (d.year === y && !d.filed) for (const [a, v] of d.lines) diff[a] = (diff[a] ?? 0) + v;
+    for (const e of p.entries) if (e.year === y) for (const [a, v] of e.lines) diff[a] = (diff[a] ?? 0) - v;
+    const lines = Object.entries(diff).map(([a, v]) => [a, round(v)]).filter(([, v]) => v !== 0);
+    if (lines.length) {
+      p.entrySeq = (p.entrySeq ?? 0) + 1;
+      p.entries.push({ id: p.entrySeq, year: y, memo, lines });
+    }
+  }
+  for (const d of p.docs) if (d.year <= year) d.archived = true;
+}
+
+// The statements a player's own entries add up to: their books so far plus the entries dated up to
+// that year, with the year then closed into retained earnings.
+function statementsFromEntries(p, year) {
+  const ledger = openLedger(p, year, p.entries);
   const books = { ledger };
   const income = incomeFields(books);
+  closeLedger(ledger);
+  return { income, balance: balanceFields(books), ledger };
+}
+
+function closeLedger(ledger) {
   let total = 0;
   for (const a of TEMPORARY) {
     total += ledger[a];
     ledger[a] = 0;
   }
   ledger.retained = round(ledger.retained + total);
-  return { income, balance: balanceFields(books), ledger };
 }
 
 function incomeFields(p) {
@@ -1971,20 +2028,6 @@ function balanceFields(p) {
     else out[f] = round(CREDIT_NORMAL.has(f) ? -p.ledger[f] : p.ledger[f]);
   }
   return out;
-}
-
-function sameEntry(a, b) {
-  const net = (lines) => {
-    const m = {};
-    for (const [acct, v] of lines) m[acct] = (m[acct] ?? 0) + v;
-    return m;
-  };
-  const x = net(a);
-  const y = net(b);
-  for (const acct of new Set([...Object.keys(x), ...Object.keys(y)])) {
-    if (Math.abs((x[acct] ?? 0) - (y[acct] ?? 0)) > TOLERANCE) return false;
-  }
-  return true;
 }
 
 // ---- Deals between players ----
@@ -2072,11 +2115,23 @@ const BOOKS = {
     log(g, `${p.name} ${p.outsourced ? 'hires' : 'lets go of'} a bookkeeper.`);
     return null;
   },
-  record(g, p, { doc, lines } = {}) {
+  // Moves documents to the archive, or back to the inbox. With no document named, archives them all.
+  archive(g, p, { doc, on = true } = {}) {
     if (!p.manual) return 'This game keeps the books for you.';
-    const d = p.docs.find((x) => x.id === doc);
-    if (!d) return 'Pick a document to record.';
-    if (!Array.isArray(lines) || !lines.length || lines.length > 8) return 'An entry needs one to eight lines.';
+    const list = doc === undefined ? p.docs.filter((d) => !d.archived) : p.docs.filter((d) => d.id === doc);
+    if (!list.length) return doc === undefined ? 'Your inbox is empty.' : 'Pick a document.';
+    for (const d of list) d.archived = Boolean(on);
+    return null;
+  },
+  // Posts a new journal entry, or changes one (named by `entry`) in a year not yet filed.
+  entry(g, p, { entry, year, memo, lines } = {}) {
+    if (!p.manual) return 'This game keeps the books for you.';
+    const old = entry === undefined ? null : p.entries.find((e) => e.id === entry);
+    if (entry !== undefined && !old) return 'That entry is no longer in your journal.';
+    const years = openYears(p);
+    year ??= old?.year ?? years[0];
+    if (!years.includes(year)) return `Entries can go in fiscal year ${years.join(' or ')}.`;
+    if (!Array.isArray(lines) || !lines.length || lines.length > 12) return 'An entry needs one to twelve lines.';
     const clean = [];
     let sum = 0;
     for (const line of lines) {
@@ -2088,44 +2143,50 @@ const BOOKS = {
       sum += v;
     }
     if (Math.abs(sum) > 0.005) return 'Debits must equal credits.';
-    d.recorded = clean;
+    memo = (memo ?? old?.memo ?? '').trim();
+    if (old) Object.assign(old, { year, memo, lines: clean });
+    else {
+      if (p.entries.length >= 400) return 'Your journal is full until you file your statements.';
+      p.entrySeq = (p.entrySeq ?? 0) + 1;
+      p.entries.push({ id: p.entrySeq, year, memo, lines: clean });
+    }
+    return null;
+  },
+  unpost(g, p, { entry } = {}) {
+    if (!p.manual) return 'This game keeps the books for you.';
+    if (!p.entries.some((e) => e.id === entry)) return 'That entry is no longer in your journal.';
+    p.entries = p.entries.filter((e) => e.id !== entry);
     return null;
   },
 
   statements(g, p, { income = {}, balance = {} } = {}) {
     const pending = p.fyePending;
     if (!pending) return 'You have no statements due.';
-    if (g.autoStatements) {
-      const own = statementsFromEntries(p, pending.year);
-      ({ income, balance } = own);
-      p.bookLedger = own.ledger;
-    }
+    if (g.autoStatements) ({ income, balance } = statementsFromEntries(p, pending.year));
     const read = (src, fields) => Object.fromEntries(fields.map((f) => [f, round(Number(src?.[f]) || 0)]));
     const filed = { year: pending.year, income: read(income, INCOME_FIELDS), balance: read(balance, BALANCE_FIELDS) };
     const wrongFields = [];
     for (const [kind, fields] of [['income', INCOME_FIELDS], ['balance', BALANCE_FIELDS]]) {
       for (const f of fields) if (Math.abs(filed[kind][f] - pending.truth[kind][f]) > TOLERANCE) wrongFields.push(f);
     }
-    const yearDocs = p.docs.filter((d) => d.year <= pending.year);
-    const wrongDocs = yearDocs.filter((d) => !d.recorded || !sameEntry(d.recorded, d.lines));
-    p.docs = p.docs.filter((d) => d.year > pending.year);
-    // A wrong entry is one misstatement; with typed statements, each statement with a wrong line
-    // is one more (a single slip throws off several totals, which isn't fined again).
+    // With no entry tied to a document, the review compares each account with the true books. A
+    // slip throws off two accounts, so two wrong accounts make one misstatement (Miles's choice).
+    const truthLedger = openLedger(p, pending.year, p.docs);
+    const ownLedger = openLedger(p, pending.year, p.entries);
+    const corrections = Object.keys(ACCOUNTS)
+      .filter((a) => Math.abs((ownLedger[a] ?? 0) - (truthLedger[a] ?? 0)) > TOLERANCE)
+      .map((a) => ({ account: a, recorded: ownLedger[a] ?? 0, correct: truthLedger[a] ?? 0 }));
     const wrongStatements = g.autoStatements ? 0 : ['income', 'balance'].filter((k) => wrongFields.some((f) => (k === 'income' ? INCOME_FIELDS : BALANCE_FIELDS).includes(f))).length;
-    const errors = wrongStatements + wrongDocs.length;
+    const errors = wrongStatements + Math.ceil(corrections.length / 2);
     // The reviewer's corrections go into the books, so a slip isn't carried into later years.
-    if (g.autoStatements) {
-      const fix = p.bookLedger;
-      for (const d of wrongDocs) {
-        for (const [acct, v] of d.lines) fix[acct] = round(fix[acct] + v);
-        for (const [acct, v] of d.recorded ?? []) fix[acct] = round(fix[acct] - v);
-      }
-      let closed = 0;
-      for (const a of TEMPORARY) {
-        closed += fix[a];
-        fix[a] = 0;
-      }
-      fix.retained = round(fix.retained + closed);
+    const entries = p.entries.filter((e) => e.year <= pending.year).length;
+    closeLedger(truthLedger);
+    p.bookLedger = truthLedger;
+    p.entries = p.entries.filter((e) => e.year > pending.year);
+    for (const d of p.docs) {
+      if (d.year > pending.year || d.filed) continue;
+      d.filed = true;
+      delete d.lines;
     }
     p.misstatements += errors;
     p.filed = filed;
@@ -2135,8 +2196,8 @@ const BOOKS = {
       errors,
       truth: pending.truth,
       wrongFields,
-      corrections: wrongDocs.map((d) => ({ text: d.text, lines: d.lines, recorded: d.recorded })),
-      entries: yearDocs.length,
+      corrections,
+      entries,
     };
     if (!errors && !p.outsourced) post(p, 'Bonus for clean books', { cash: CONFIG.cleanBooksBonus, revOther: -CONFIG.cleanBooksBonus });
     log(g, `${p.name} files statements for fiscal year ${pending.year}.`);
@@ -2217,7 +2278,9 @@ export function viewFor(g, who) {
       // The recap charts; kept back until the game ends, since manual books hide a rival's true figures.
       history: g.phase === 'over' ? p.history ?? [] : null,
       ...(i === who && !g.easyBooks ? {
-        docs: p.docs.map(({ id, text, year, recorded }) => ({ id, text, year, recorded })),
+        docs: p.docs.map(({ id, text, year, archived }) => ({ id, text, year, archived })),
+        entries: p.entries,
+        openYears: openYears(p),
         lastCheck: p.lastCheck,
         misstatements: p.misstatements,
       } : {}),

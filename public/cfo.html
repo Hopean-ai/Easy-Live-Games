@@ -90,10 +90,13 @@
       <div class="panels">
         <section id="books-panel" class="panel wide-panel" hidden>
           <h2>Your books</h2>
-          <p id="books-intro" class="small">Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players' turns. At each fiscal year end your statements are built from these entries for you to review and submit, and an Interim Review fines every wrong entry.</p>
+          <p id="books-intro" class="small">Every company transaction lands in your inbox as a source document. Your journal is kept separately: post entries whenever you like, even on other players' turns, one for each document or one for a whole stack, and archive documents as you work through them. Debits go on the left, credits on the right, and they must balance. At each fiscal year end your statements are built from that year's entries for you to review and submit. The reviewer checks every account against the true books, and each pair of wrong accounts is a misstatement fined at the next Interim Review.</p>
           <div id="bookkeeper"></div>
           <div id="check"></div>
-          <div id="docs" class="docs"></div>
+          <div class="books-cols">
+            <div id="journal" class="docs"></div>
+            <div id="docs" class="docs"></div>
+          </div>
         </section>
         <section class="panel players-panel">
           <h2>Players</h2>

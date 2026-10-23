@@ -994,54 +994,86 @@ function filedTables(p) {
   ];
 }
 
+let archiveOpen = false; // the archive list remembers being open across renders
+
 function renderBooks() {
   const g = state.game;
   const me = g.players[mySeat];
   const manual = !g.easyBooks && me?.docs && g.phase !== 'over';
   $('books-panel').hidden = !manual;
   if (!manual) return;
-  $('books-intro').textContent = 'Every company transaction lands here as a source document. Record each one as a journal entry: debits on the left, credits on the right, and they must balance. You can record at any time, even on other players\' turns. At each fiscal year end your statements are built from these entries for you to review and submit, and an Interim Review fines every wrong entry.';
   renderCheck(me);
   $('bookkeeper').replaceChildren(me.outsourced
-    ? el('p', { class: 'small' }, `A bookkeeper records your entries and files your statements for ${money(rules.config.bookkeeperFee)} a year. Clean-books bonuses go to people who keep their own books. `,
+    ? el('p', { class: 'small' }, `A bookkeeper posts your entries and files your statements for ${money(rules.config.bookkeeperFee)} a year. Clean-books bonuses go to people who keep their own books. `,
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: false }) }, 'Keep my own books'))
-    : el('p', { class: 'small' }, `Not an accountant? A bookkeeper records every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} a year, but you give up the clean-books bonus. `,
+    : el('p', { class: 'small' }, `Not an accountant? A bookkeeper posts every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} a year, but you give up the clean-books bonus. `,
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: true }) }, 'Hire a bookkeeper')));
-  // Miles: with a bookkeeper there is nothing to record, so the documents stay out of the way.
+  // Miles: with a bookkeeper there is nothing to post, so the documents and journal stay out of the way.
   if (me.outsourced) {
     editing = null;
-    $('docs').replaceChildren(el('p', { class: 'small' }, 'Your bookkeeper records every document at each fiscal year end.'));
+    $('journal').replaceChildren();
+    $('docs').replaceChildren(el('p', { class: 'small' }, 'Your bookkeeper posts the entries for every document at each fiscal year end.'));
     return;
   }
-  const docs = [...me.docs].reverse();
-  if (editing && !docs.some((d) => d.id === editing.id)) editing = null;
-  if (editing?.saving) {
-    const d = docs.find((x) => x.id === editing.id);
-    if (d?.recorded && JSON.stringify(d.recorded) === editing.sent) editing = null;
+  renderDocs(me);
+  if (editing) {
+    const e = editing.id === 'new' ? me.entries.find((x) => x.id > editing.seq) : me.entries.find((x) => x.id === editing.id);
+    if (editing.id !== 'new' && !e) editing = null;
+    else if (editing.saving && e && JSON.stringify(e.lines) === editing.sent) editing = null;
   }
-  // Rebuilding the list would pull the cursor out of an entry being typed.
+  // Rebuilding the journal would pull the cursor out of an entry being typed.
   if (editing && editing.node.contains(document.activeElement)) return;
-  const open = docs.filter((d) => !d.recorded).length;
-  const rows = [el('p', { class: 'small' }, open ? `${open} document${open > 1 ? 's' : ''} still to record.` : 'Everything is recorded.')];
-  for (const d of docs) {
-    rows.push(el('div', { class: `doc ${d.recorded ? 'done' : 'todo'}` },
-      el('span', { class: 'doc-text' }, d.text),
-      el('span', { class: 'small' }, `Year ${d.year} · ${d.recorded ? entryText(d.recorded) : 'not recorded'}`),
-      el('button', { class: d.recorded ? 'link' : 'secondary', onclick: () => startEditing(d) }, d.recorded ? 'Edit' : 'Record')));
-    if (editing?.id === d.id) rows.push(editing.node);
+  const years = me.openYears;
+  const rows = [el('div', { class: 'row' }, el('h3', {}, 'Journal'),
+    el('button', { class: 'secondary', onclick: () => startEditing(null) }, 'New entry'))];
+  if (editing?.id === 'new') rows.push(editing.node);
+  for (const year of [...years].reverse()) {
+    const list = me.entries.filter((e) => e.year === year).reverse();
+    rows.push(el('p', { class: 'small year-head' }, `Fiscal year ${year}${year === me.fyeDue ? ', statements due' : ', under way'}: ${list.length} entr${list.length === 1 ? 'y' : 'ies'}`));
+    for (const e of list) {
+      rows.push(el('div', { class: 'doc' },
+        el('span', { class: 'doc-text' }, e.memo || 'Journal entry'),
+        el('span', { class: 'small' }, entryText(e.lines)),
+        el('span', { class: 'doc-actions' },
+          el('button', { class: 'link', onclick: () => startEditing(e) }, 'Edit'),
+          el('button', { class: 'link', onclick: () => confirm('Delete this entry?') && actNow({ a: 'unpost', entry: e.id }) }, 'Delete'))));
+      if (editing?.id === e.id) rows.push(editing.node);
+    }
   }
-  $('docs').replaceChildren(...rows);
+  $('journal').replaceChildren(...rows);
+}
+
+// The documents are a pile to work through: archive each one whenever you like. Archiving is only a
+// bookmark for yourself; it posts nothing and the journal is kept separately.
+function renderDocs(me) {
+  const inbox = [...me.docs].filter((d) => !d.archived).reverse();
+  const archived = [...me.docs].filter((d) => d.archived).reverse();
+  const doc = (d) => el('div', { class: `doc ${d.archived ? 'done' : 'todo'}` },
+    el('span', { class: 'doc-text' }, d.text),
+    el('span', { class: 'small' }, `Year ${d.year}`),
+    el('button', { class: d.archived ? 'link' : 'secondary', onclick: () => actNow({ a: 'archive', doc: d.id, on: !d.archived }) }, d.archived ? 'Back to inbox' : 'Archive'));
+  $('docs').replaceChildren(...[
+    el('div', { class: 'row' }, el('h3', {}, `Documents (${inbox.length} in the inbox)`),
+      inbox.length > 1 ? el('button', { class: 'link', onclick: () => actNow({ a: 'archive' }) }, 'Archive all') : null),
+    me.docs.length ? null : el('p', { class: 'small' }, 'No documents yet.'),
+    ...inbox.map(doc),
+    archived.length ? el('details', { class: 'archive', open: archiveOpen, ontoggle: (ev) => { archiveOpen = ev.target.open; } },
+      el('summary', {}, `Archive (${archived.length})`), el('div', { class: 'docs' }, archived.map(doc))) : null,
+  ].filter(Boolean));
 }
 
 function entryText(lines) {
   return lines.map(([a, v]) => `${v > 0 ? 'Dr' : 'Cr'} ${rules.accounts[a]} ${money(Math.abs(v))}`).join(', ');
 }
 
-function startEditing(doc) {
-  if (editing?.id === doc.id) {
+// Writes a new journal entry (entry null) or changes one already posted.
+function startEditing(entry) {
+  const id = entry ? entry.id : 'new';
+  if (editing?.id === id) {
     editing = null;
     return renderBooks();
   }
+  const me = state.game.players[mySeat];
   const body = el('tbody');
   const totals = el('p', { class: 'small' });
   // The plug: whatever the amounts typed so far leave unbalanced is filled in, on the other side,
@@ -1097,8 +1129,13 @@ function startEditing(doc) {
     body.append(row);
     return row;
   }
-  for (const [a, v] of doc.recorded ?? [['', 0], ['', 0]]) addLine(a, v);
+  for (const [a, v] of entry?.lines ?? [['', 0], ['', 0]]) addLine(a, v);
   plug();
+  const memo = el('input', { type: 'text', maxLength: 80, placeholder: 'What this entry is for (optional)', value: entry?.memo ?? '' });
+  // A new entry goes to the year whose statements are due while that year has documents waiting.
+  const years = me.openYears;
+  const waiting = me.docs.some((d) => d.year === years[0] && !d.archived);
+  const year = el('select', {}, years.map((y) => el('option', { value: y, selected: y === (entry?.year ?? (waiting ? years[0] : years.at(-1))) }, `Fiscal year ${y}`)));
   const err = el('p', { class: 'error' });
   const node = el('form', { class: 'entry-editor', onsubmit: (e) => {
     e.preventDefault();
@@ -1109,17 +1146,18 @@ function startEditing(doc) {
     err.textContent = '';
     editing.saving = true;
     editing.sent = JSON.stringify(lines.map(([a, v]) => [a, Math.round(v * 100) / 100]));
-    actNow({ a: 'record', doc: doc.id, lines });
+    editing.seq = Math.max(0, ...state.game.players[mySeat].entries.map((x) => x.id));
+    actNow({ a: 'entry', ...(entry ? { entry: entry.id } : {}), year: Number(year.value), memo: memo.value, lines });
   } },
-  el('p', { class: 'small' }, doc.text),
+  el('div', { class: 'row' }, memo, years.length > 1 ? year : el('span', { class: 'small' }, `Fiscal year ${years[0]}`)),
   el('table', { class: 'entry' }, el('thead', {}, el('tr', {}, el('th', {}, 'Account'), el('th', {}, 'Debit'), el('th', {}, 'Credit'), el('th'))), body),
   totals,
   el('div', { class: 'row' },
     el('button', { type: 'button', class: 'secondary', onclick: () => { addLine(); plug(); } }, 'Add a line'),
-    el('button', {}, 'Save entry'),
+    el('button', {}, entry ? 'Save entry' : 'Post entry'),
     el('button', { type: 'button', class: 'link', onclick: () => ((editing = null), renderBooks()) }, 'Cancel')),
   err);
-  editing = { id: doc.id, node, saving: false };
+  editing = { id, node, saving: false };
   renderBooks();
 }
 
@@ -1135,9 +1173,12 @@ function renderCheck(me) {
     const kind = rules.incomeFields.includes(f) ? 'income' : 'balance';
     return el('tr', {}, el('td', {}, fieldLabel(f)), el('td', {}, money(filed[kind][f] ?? 0)), el('td', {}, money(c.truth[kind][f])));
   });
-  const fixes = c.corrections.map((x) => el('li', {}, `${x.text}. You: ${x.recorded ? entryText(x.recorded) : 'not recorded'}. Correct: ${entryText(x.lines)}.`));
+  // The reviewer compares each account with the true books and puts the right balances in yours.
+  const side = (v) => (v ? `${v > 0 ? 'Dr' : 'Cr'} ${money(Math.abs(v))}` : '$0');
+  const fixes = (c.corrections ?? []).filter((x) => x.account).map((x) => el('li', {}, `${rules.accounts[x.account]}: your books ${side(x.recorded)}, correct ${side(x.correct)}.`));
   $('check').replaceChildren(el('details', { class: 'check' }, el('summary', {}, head),
     lines.length ? el('table', { class: 'fs' }, el('thead', {}, el('tr', {}, el('th', {}, 'Line'), el('th', {}, 'You filed'), el('th', {}, 'Correct'))), el('tbody', {}, lines)) : null,
+    fixes.length ? el('p', { class: 'small' }, 'Account balances before the year end close; the reviewer has corrected them in your books:') : null,
     fixes.length ? el('ul', { class: 'small' }, fixes) : null));
 }
 
@@ -1234,13 +1275,13 @@ function renderFye() {
   const preview = me.preview ?? { income: {}, balance: {} };
   const table = (title, fields, values) => el('table', { class: 'fs fye-table' }, el('caption', {}, title),
     el('tbody', {}, fields.map((f) => el('tr', { class: /^total|netIncome/.test(f) ? 'total' : '' }, el('td', {}, fieldLabel(f)), el('td', { class: 'num' }, money(values[f] ?? 0))))));
-  const open = me.docs.filter((d) => d.year <= due && !d.recorded).length;
+  const open = me.docs.filter((d) => d.year <= due && !d.archived).length;
   if (fyeForm?.year !== due) {
     const statements = el('div', { class: 'statements' });
     const todo = el('p', { class: 'small warn' });
     const node = el('div', {},
       el('h2', {}, `Fiscal year ${due} is over: review and submit your statements`),
-      el('p', { class: 'small' }, 'These are built from the journal entries you recorded, so a mistake in an entry shows up here too. You can fix entries below until you submit. Play goes on meanwhile, and anything not submitted by your next fiscal year end is submitted as it stands.'),
+      el('p', { class: 'small' }, `These are built from the journal entries you dated to fiscal year ${due}, so a mistake in an entry shows up here too. You can post, fix or delete entries below until you submit. Play goes on meanwhile, and anything not submitted by your next fiscal year end is submitted as it stands.`),
       todo,
       statements,
       el('button', { onclick: () => { fyeForm.sending = true; actNow({ a: 'statements' }); } }, 'Submit statements'),
@@ -1249,7 +1290,7 @@ function renderFye() {
     $('fye').replaceChildren(node);
   }
   fyeForm.statements.replaceChildren(table('Income statement', rules.incomeFields, preview.income), table('Balance sheet', rules.balanceFields, preview.balance));
-  fyeForm.todo.textContent = open ? `${open} document${open > 1 ? 's' : ''} from this year still to record. Anything left unrecorded counts as a misstatement.` : '';
+  fyeForm.todo.textContent = open ? `${open} document${open > 1 ? 's' : ''} from fiscal year ${due} still in your inbox. Anything missing from your entries counts as a misstatement.` : '';
 }
 
 // ---- Shares ----
