@@ -67,7 +67,7 @@ export function nextMove(view, seat, tried = new Set()) {
       if (m) return m;
     }
   }
-  // Spend spare personal cash on personal assets: they count toward the portfolio win.
+  // Spend spare personal cash on executive perks: they count toward the portfolio win.
   if (me.personalCash >= (me.personalPrice ?? CONFIG.personalAssetPrice)) {
     const m = ok({ a: 'personal' });
     if (m) return m;

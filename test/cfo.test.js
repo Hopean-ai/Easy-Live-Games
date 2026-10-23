@@ -588,7 +588,7 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
     Object.assign(g.tiles[posOfSpace(3)], { owner: 1, zone: 'residential', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
     a.ledger.inventory += M(50);
     a.ledger.capital -= M(50);
-    b.assets.push('wealthy');
+    b.assets.push('deferred');
     a.frauds = 2; // so the cards that clear frauds have something to clear
     post(a, 'Legal fees', { expOther: M(500), cash: -M(500) }); // something for Cook the Books to move
     post(a, 'Supplies on credit', { expOther: M(10), payable: -M(10) }); // a bill to dispute
@@ -699,7 +699,7 @@ test('the island: fly in for a fare, loop it, buy a landmark, and fly home from 
 test('the portfolio win needs a lap of the island', () => {
   const g = createGame(['A', 'B'], 9);
   const a = g.players[0];
-  a.assets.push(...Array(200).fill('mansion'));
+  a.assets.push(...Array(200).fill('deferred'));
   a.personalCash = CONFIG.portfolioGoal;
   Object.assign(g, { turn: 0, phase: 'act' });
   act(g, 0, { a: 'end' });
@@ -1012,19 +1012,20 @@ test('the Personal Assets square always gives a free card or a discount on one c
   for (const [k, n] of Object.entries(seen)) assert.ok(n > 30, `${k} happened ${n} times in 300`);
 });
 
-test('plain personal assets pay perks', () => {
+test('executive perks pay out', () => {
   const g = createGame(['A', 'B'], 7, { calendar: false });
   const p = g.players[0];
-  // Mountain Cabin: no sitting out at CPE.
-  p.assets = ['cabin'];
+  // Executive Coach: no sitting out at CPE.
+  p.assets = ['coach'];
   while (p.pos !== 31) {
     Object.assign(g, { turn: 0, phase: 'roll' });
     p.pos = 31 - 7;
     act(g, 0, { a: 'roll' });
   }
   assert.equal(Boolean(p.skip), false);
-  // Country Mansion: income each fiscal year.
-  p.assets = ['mansion', 'mansion'];
+  // Deferred Compensation and an outside board seat: income each fiscal year.
+  p.assets = ['deferred', 'deferred', 'boardSeat'];
+  p.lastValue = Infinity; // so the options below don't pay
   const kept = p.ledger.cash;
   post(p, 'Test: empty the company so no salary is paid', { cash: -kept, capital: kept });
   const before = p.personalCash;
@@ -1032,10 +1033,10 @@ test('plain personal assets pay perks', () => {
   p.pos = BOARD_SIZE - 2;
   p.raced = true;
   act(g, 0, { a: 'roll' });
-  assert.equal(p.personalCash - before, 2 * PERSONAL_CARDS.mansion.yearly);
+  assert.equal(p.personalCash - before, 2 * PERSONAL_CARDS.deferred.yearly + PERSONAL_CARDS.boardSeat.perRival);
   post(p, 'Test: refill the company', { cash: kept, capital: -kept });
-  // Horses: one win at the races per fiscal year, on doubles.
-  p.assets = ['horses'];
+  // Club Membership: one win on the golf course per fiscal year, on doubles.
+  p.assets = ['club'];
   p.raced = false;
   let wins = 0;
   for (let i = 0; i < 60; i++) {
@@ -1046,14 +1047,82 @@ test('plain personal assets pay perks', () => {
     if (p.personalCash > cash) wins += 1;
   }
   assert.equal(wins, 1);
-  // Beach House: rent on each island lap.
-  p.assets = ['beach'];
+  // Conference Circuit: speaking fees on each island lap.
+  p.assets = ['conference'];
   Object.assign(g, { turn: 0, phase: 'roll' });
   p.pos = ISLAND_START + 23;
   p.raced = true;
   const cash = p.personalCash;
   act(g, 0, { a: 'roll' });
-  assert.ok(p.personalCash >= cash + PERSONAL_CARDS.beach.lap);
+  assert.ok(p.personalCash >= cash + PERSONAL_CARDS.conference.lap);
+});
+
+test('stock options pay when shareholder value rose over the year', () => {
+  const g = createGame(['A', 'B'], 7, { calendar: false });
+  const p = g.players[0];
+  p.assets = ['options'];
+  p.lastValue = -1; // any value at the year end is a rise
+  post(p, 'Test: no salary', { cash: -p.ledger.cash, capital: p.ledger.cash });
+  const before = p.personalCash;
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  p.raced = true;
+  act(g, 0, { a: 'roll' });
+  assert.equal(p.personalCash - before, PERSONAL_CARDS.options.payout);
+  assert.ok(p.lastValue >= 0);
+});
+
+test('a golden parachute pays out once when its holder loses their company, not on resigning', () => {
+  let opened = 0;
+  for (let seed = 0; seed < 20; seed++) {
+    const g = createGame(['A', 'B', 'C'], 900 + seed, { easyBooks: true });
+    const [a, b] = g.players;
+    b.frauds = 20;
+    b.assets = ['parachute', 'parachute'];
+    Object.assign(g, { turn: 0, phase: 'act' });
+    a.hand = ['whistle'];
+    const cash = b.personalCash;
+    act(g, 0, { a: 'play', card: 0, target: 1 });
+    if (!b.out) continue;
+    opened += 1;
+    assert.equal(b.personalCash - cash, PERSONAL_CARDS.parachute.payout);
+    assert.deepEqual(b.assets, ['parachute']);
+  }
+  assert.ok(opened > 0);
+  const g = createGame(['A', 'B', 'C'], 7);
+  const c = g.players[2];
+  c.assets = ['parachute'];
+  const cash = c.personalCash;
+  act(g, 2, { a: 'resign' });
+  assert.ok(c.out);
+  assert.equal(c.personalCash, cash);
+});
+
+test('a headhunter lures away a perk, but never the jet', () => {
+  const g = createGame(['A', 'B'], 7);
+  const [a, b] = g.players;
+  a.personalCash = M(2000);
+  b.assets = ['jet'];
+  a.hand = ['headhunter'];
+  assert.match(act(g, 0, { a: 'play', card: 0, target: 1 }), /no perks/);
+  b.assets = ['jet', 'club'];
+  assert.equal(act(g, 0, { a: 'play', card: 0, target: 1 }), null);
+  assert.deepEqual(b.assets, ['jet']);
+  assert.deepEqual(a.assets, ['club']);
+  assert.equal(a.personalCash, M(1000));
+});
+
+test('the corporate jet flies to the island from any airport, free', () => {
+  const g = createGame(['A', 'B'], 7, { eras: false });
+  const a = g.players[0];
+  const airport = SQUARES.findIndex((s) => s.kind === 'transport' && s.mode === 'air');
+  a.assets = ['jet'];
+  a.pos = airport;
+  Object.assign(g, { turn: 0, phase: 'act' });
+  const cash = a.ledger.cash;
+  assert.equal(act(g, 0, { a: 'fly' }), null);
+  assert.equal(a.pos, ISLAND_START);
+  assert.equal(a.ledger.cash, cash);
 });
 
 test('frauds age off the record, one every few fiscal years', () => {
