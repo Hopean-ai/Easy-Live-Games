@@ -736,7 +736,7 @@ function renderTile() {
       fye: state.game?.calendar ? `Board room. Landing here calls an extra board meeting: two board decisions that turn. Every company's fiscal year ends together after round ${rules.config.roundsPerYear}.` : 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year, charged on the most you owe during the year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
-      review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
+      review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught loses you your company${state.game?.rescue ? ', and you sit out until the year end before taking a new job' : ' and the game'}. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
       terminal: `The island's airport. Passing or landing here completes a lap of the island${state.game?.calendar ? '' : ' and closes your fiscal year'}. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
@@ -899,14 +899,14 @@ function renderHand() {
     const fraud = Boolean(rules.fraud[id]);
     const node = el('div', { class: `card ${fraud ? 'fraud' : 'market'}` },
       el('strong', {}, card.name),
-      el('span', { class: 'small' }, `${fraud ? 'Fraud: if you are ever caught, you are out of the game' : 'Market Forces'}${card.placeholder ? ' · placeholder' : ''}`),
+      el('span', { class: 'small' }, `${fraud ? `Fraud: if you are ever caught, you lose your company${state.game?.rescue ? '' : ' and the game'}` : 'Market Forces'}${card.placeholder ? ' · placeholder' : ''}`),
       el('p', {}, card.text));
     if (myTurn() && g.phase === 'act') node.append(playControls(id, i));
     return node;
   });
   if (me.frauds) {
     const pct = (x) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
-    cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed. Chance of being caught: ${pct(me.fraudRisk.audit)} at an Interim Review or Customs, ${pct(me.fraudRisk.fye)} at each fiscal year end. Getting caught puts you out of the game. One fraud ages off your record every ${rules.config.fraudExpiryYears} fiscal years.`));
+    cards.push(el('p', { class: 'small warn' }, `${me.frauds} fraud${me.frauds > 1 ? 's' : ''} committed. Chance of being caught: ${pct(me.fraudRisk.audit)} at an Interim Review or Customs, ${pct(me.fraudRisk.fye)} at each fiscal year end. Getting caught loses you your company${state.game?.rescue ? ' (you take a new job at the next year end, your conviction on record)' : ' and the game'}. One fraud ages off your record every ${rules.config.fraudExpiryYears} fiscal years.`));
   }
   $('hand').replaceChildren(...(cards.length ? cards : [el('p', { class: 'small' }, 'No cards.')]));
 

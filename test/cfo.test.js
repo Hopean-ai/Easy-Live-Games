@@ -1867,3 +1867,65 @@ test('the economic outlook forecasts the events that hit every company, one each
   assert.ok(g.log.some((l) => /The economy: Boom/.test(l)));
   assert.ok(g.players.every((p, i) => companyCash(p) !== cash[i]));
 });
+
+test('Chapter 11: a company that cannot pay reorganizes instead of failing, once', () => {
+  const g = createGame(['A', 'B'], 79, { easyBooks: true, valueTarget: M(1e6) });
+  const [a] = g.players;
+  const lot = posOfSpace(1);
+  Object.assign(g.tiles[lot], { owner: 0, zone: 'retail' });
+  post(a, 'Lot and loan', { land: SQUARES[lot].price, loan: -M(1000), cash: M(1000) - SQUARES[lot].price });
+  post(a, 'Spend the rest', { expOther: companyCash(a) - M(100), cash: -(companyCash(a) - M(100)) });
+  const lawsuit = () => {
+    while (a.pos !== posOfSpace(8)) {
+      Object.assign(g, { turn: 0, phase: 'roll' });
+      a.pos = posOfSpace(8) - 2;
+      g.marketDeck = ['lawsuit'];
+      act(g, 0, { a: 'roll' });
+    }
+    a.pos = 0;
+  };
+  lawsuit();
+  assert.equal(a.out, false, 'still in business');
+  assert.equal(a.reorganized, true);
+  assert.equal(g.tiles[lot].owner, 0, 'it keeps its land');
+  assert.equal(a.shares.holders[0], CONFIG.chapter11.cfoShares);
+  assert.equal(a.shares.founders, 0);
+  assert.ok(-a.ledger.loan < M(1000) + M(750), 'part of the loan was forgiven');
+  assert.ok(g.log.some((l) => /Chapter 11/.test(l)));
+  const s = balanceSheet(a);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  // A second failure sells everything and the CFO is out until the year end.
+  post(a, 'Spend it', { expOther: companyCash(a), cash: -companyCash(a) });
+  g.tiles[lot].owner = null;
+  lawsuit();
+  assert.equal(a.out, true);
+  assert.equal(viewFor(g, 1).players[0].rejoin, true);
+  assert.equal(g.phase === 'over', false, 'the game waits for them to come back');
+});
+
+test('a fired CFO takes a new job at the next shared year end; one who resigns does not', () => {
+  const g = createGame(['A', 'B', 'C'], 80, { easyBooks: true, valueTarget: M(1e6) });
+  const [a, , c] = g.players;
+  a.frauds = 10;
+  // An Interim Review with ten frauds on record always finds them.
+  const review = SQUARES.findIndex((sq) => sq.kind === 'review');
+  a.pos = review - 1;
+  act(g, 0, { a: 'roll', steps: 1 });
+  assert.equal(a.out, true);
+  assert.equal(a.convicted, true);
+  act(g, 2, { a: 'resign' });
+  assert.equal(c.out, true);
+  assert.equal(g.phase === 'over', false);
+  // Play on to the year end.
+  for (let i = 0; i < 40 && a.out; i++) {
+    const w = g.turn;
+    if (g.phase === 'roll') act(g, w, { a: 'roll' });
+    if (g.phase === 'buy') act(g, w, { a: 'pass' });
+    act(g, w, { a: 'end' });
+  }
+  assert.equal(a.out, false, 'A is back as CFO of a new company');
+  assert.equal(a.convicted, true, 'with the conviction on record');
+  assert.equal(companyCash(a), CONFIG.newJob.capital);
+  assert.equal(a.shares.holders[0], CONFIG.newJob.cfoShares);
+  assert.equal(c.out, true, 'C resigned and stays out');
+});

@@ -79,6 +79,13 @@ export const CONFIG = {
   maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings
   settlement: M(5000), // PLACEHOLDER: paid at island Customs to settle one fraud and clear it from your record
   islandFare: M(1500), // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
+  // Miles (design principles, change 5): nobody is knocked out for good. A company that can't pay
+  // reorganizes once (Chapter 11): the Bank forgives part of its loans, the old shareholders are
+  // mostly wiped out, a rescue loan covers the shortfall, and for a while the market won't value
+  // it above its books. A fired CFO (a second failure, or a fraud conviction) sits out the rest of
+  // the year, then joins a new small company; a conviction stays on their record.
+  chapter11: { debtCut: 0.5, cfoShares: 10, stigmaYears: 2 }, // PLACEHOLDER
+  newJob: { capital: M(1500), cfoShares: 10 }, // PLACEHOLDER
   // Miles (change 8): every company shares one calendar. The fiscal year ends for everyone at once
   // after this many rounds (about one lap of the board on average); the FYE corner gives an extra
   // board decision instead.

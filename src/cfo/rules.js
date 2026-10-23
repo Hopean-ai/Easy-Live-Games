@@ -79,6 +79,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     credit: true, // sales and supplier credit (games begun before it settle everything in cash)
     calendar: options.calendar !== false, // one shared fiscal year (games begun before it close each year at the FYE corner)
     eras: options.calendar !== false && options.eras !== false, // eras and the economic outlook run on the shared calendar
+    rescue: options.calendar !== false, // Chapter 11 and new jobs instead of knock-outs (they rejoin at the shared year end)
     round: 0,
     turn: 0,
     phase: 'roll', // roll | buy | act | over
@@ -280,7 +281,7 @@ export function priceToBook(p, g = null) {
   if (!years.length || business <= 0) return 1;
   const earnings = years.reduce((a, b) => a + b, 0) / years.length;
   const [lo, hi] = CONFIG.priceToBook;
-  return Math.min(hi, Math.max(lo, earnings / (business * CONFIG.requiredReturn)));
+  return Math.min(p.stigma > 0 ? 1 : hi, Math.max(lo, earnings / (business * CONFIG.requiredReturn)));
 }
 
 // Miles (change 1): total shareholder return, for the company's original 100 shares: the share
@@ -498,6 +499,7 @@ export function act(g, who, raw) {
   const action = cleanAction(raw);
   if (!action) return 'Unknown action.';
   if (action.a === 'resign') {
+    p.resigned = true;
     bankrupt(g, p, `${p.name} resigns.`);
     afterAction(g);
     return null;
@@ -1414,8 +1416,9 @@ function afterAction(g) {
   const win = g.win ?? winOptions();
   const alive = g.players.filter((p) => !p.out);
   const independent = alive.filter((p) => p.parent === null);
-  if (independent.length === 1) return finish(g, independent[0], 'the last company standing');
-  if (!independent.length) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
+  const waiting = g.players.some((p) => p.out && p.rejoin); // change 5: they'll be back at the year end
+  if (independent.length === 1 && !waiting) return finish(g, independent[0], 'the last company standing');
+  if (!independent.length && !waiting) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
   const big = independent.find((p) => shareholderValue(p, g) >= win.valueTarget);
   if (big) return finish(g, big, `${money(win.valueTarget)} of shareholder value`);
   // Miles: the portfolio only wins after a lap of the island.
@@ -1585,6 +1588,7 @@ function liquidate(g, p, need) {
       log(g, `${p.name} dumps ${stock.toLocaleString('en-US')} widgets for ${money(proceeds)}.`);
     }
   }
+  if (companyCash(p) < need && g.rescue && !p.reorganized && owned.length) return reorganize(g, p, need);
   const buildings = owned.filter(({ t, pos }) => t.building && SQUARES[pos].kind === 'land').sort((a, b) => a.t.building.cost - b.t.building.cost);
   for (const { t, pos } of buildings) {
     if (companyCash(p) >= need) return;
@@ -1670,6 +1674,35 @@ function acquireCompany(g, p, q, price) {
   log(g, `${p.name} buys ${q.name}'s company for ${money(paid)}. ${q.name} is out of the game.`);
 }
 
+// Change 5: Chapter 11. The company keeps its land and buildings; the Bank forgives part of what
+// it's owed, the old shareholders are mostly wiped out (the CFO keeps a small stake, creditors take
+// the rest), and a rescue loan covers the shortfall.
+function reorganize(g, p, need) {
+  const c = CONFIG.chapter11;
+  const owed = -p.ledger.loan;
+  const forgiven = Math.round(owed * c.debtCut);
+  if (forgiven > 0) post(p, `Chapter 11: the Bank forgives ${Math.round(c.debtCut * 100)}% of the company's loan`, { loan: forgiven, revOther: -forgiven });
+  const rescue = Math.ceil(need - companyCash(p));
+  if (rescue > 0) post(p, 'Chapter 11: rescue loan from the Bank', { cash: rescue, loan: -rescue });
+  const me = g.players.indexOf(p);
+  p.shares = { holders: { [me]: c.cfoShares }, founders: 0, public: START_SHARES - c.cfoShares };
+  p.dividendsPerShare = 0;
+  p.reorganized = true;
+  p.stigma = c.stigmaYears;
+  log(g, `${p.name}'s company files for Chapter 11. Creditors take over most of its shares, ${money(forgiven)} of its loan is forgiven and ${money(Math.max(0, rescue))} is lent to keep it running.`);
+}
+
+// Change 5: a CFO who lost their company joins a new small one at the next shared year end.
+function newJob(g, q) {
+  const c = CONFIG.newJob;
+  const me = g.players.indexOf(q);
+  const years = Math.max(0, ...g.players.filter((x) => !x.out).map((x) => x.years));
+  freshCompany(q, { pos: 0, years, parent: null, shares: { holders: { [me]: c.cfoShares }, founders: START_SHARES - c.cfoShares, public: 0 } });
+  q.rejoin = false;
+  post(q, 'Founders invest starting capital', { cash: c.capital, capital: -c.capital });
+  log(g, `${q.name} is hired as CFO of a new company with ${money(c.capital)} of capital${q.convicted ? ', their conviction still on record' : ''}.`);
+}
+
 function bankrupt(g, p, text) {
   if (p.out) return;
   const idx = g.players.indexOf(p);
@@ -1691,6 +1724,9 @@ function bankrupt(g, p, text) {
   p.receivables = [];
   p.payables = [];
   p.out = true;
+  // Change 5: anyone but a player who resigned gets a new job at the year end. (A bought-out
+  // player is taken out by acquireCompany, as Miles wants, and can still be hired as a subsidiary.)
+  if (g.rescue && !p.resigned) p.rejoin = true;
   log(g, text);
   // A parent's investment in a failed subsidiary is lost.
   const host = g.players[p.parent];
@@ -1733,17 +1769,22 @@ function personalIncome(q, amount) {
 function restart(g, q, parent, capital) {
   const me = g.players.indexOf(q);
   const host = g.players[parent];
+  freshCompany(q, { pos: host.pos, years: host.years, parent, shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, founders: 0, public: 0 } });
+  q.rejoin = false;
+  post(q, `Capital from ${host.name}`, { cash: capital, capital: -capital });
+}
+
+// A clean set of books for a player starting over; their fraud conviction stays on record.
+function freshCompany(q, { pos, years, parent, shares }) {
   Object.assign(q, {
-    out: false, skip: false, pos: host.pos, years: host.years, atBank: false, sale: null,
+    out: false, skip: false, pos, years, atBank: false, sale: null,
     ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     journal: [], report: null, hand: [], frauds: 0, taxWaived: false, carried: 0,
     receivables: [], payables: [], terms: null,
     docs: [], entries: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
-    shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, founders: 0, public: 0 },
-    isPublic: false, parent, earnings: [], roeYears: [], dividendsPerShare: 0,
+    shares, isPublic: false, parent, earnings: [], roeYears: [], dividendsPerShare: 0, reorganized: false, stigma: 0,
   });
-  post(q, `Capital from ${host.name}`, { cash: capital, capital: -capital });
 }
 
 // ---- Fiscal year end ----
@@ -1767,6 +1808,7 @@ function sharedYearEnd(g) {
   }
   const next = eraOf(g);
   if (next !== era) log(g, `The ${next.name} begins. ${next.text}`);
+  for (const q of g.players) if (q.out && q.rejoin) newJob(g, q);
   for (const p of g.players) {
     const plan = p.plan;
     p.plan = null;
@@ -1933,6 +1975,7 @@ function fiscalYearEnd(g, p) {
   p.terms = null; // card terms last for the rest of the fiscal year
   p.marketing = false; // and so does a marketing campaign
   p.planned = false; // a planned move can be used again next year
+  if (p.stigma > 0) p.stigma -= 1; // the market forgives a Chapter 11 in time
 
   p.years += 1;
   const statement = incomeStatement(p);
@@ -2314,7 +2357,7 @@ export function fraudRisk(p, chance) {
 function fraudCheck(g, p, chance, who) {
   if (!p.frauds || rand(g) >= fraudRisk(p, chance)) return false;
   p.convicted = true; // a rehired manager's record follows them
-  bankrupt(g, p, `${who} uncovers fraud at ${p.name}'s company. ${p.name} is convicted and out of the game.`);
+  bankrupt(g, p, `${who} uncovers fraud at ${p.name}'s company. ${p.name} is convicted${g.rescue ? ' and fired; they can take a new job at the year end' : ' and out of the game'}.`);
   return true;
 }
 
@@ -2602,6 +2645,7 @@ export function viewFor(g, who) {
     scorecard: g.phase === 'over' && g.win?.maxYears ? scorecard(g) : null,
     calendar: yearProgress(g),
     era: g.eras ? { ...eraOf(g), year: calendarYear(g) } : null,
+    rescue: Boolean(g.rescue),
     outlook: g.outlook ?? null,
     offers: g.offers ?? [],
     easyBooks: g.easyBooks,
@@ -2631,6 +2675,8 @@ export function viewFor(g, who) {
       priceToBook: open(i) || p.isPublic ? round(priceToBook(p, g)) : null,
       dividendsPerShare: p.dividendsPerShare ?? 0,
       boardAction: p.boardAction ?? null,
+      reorganized: Boolean(p.reorganized),
+      rejoin: Boolean(p.out && p.rejoin),
       marketing: Boolean(p.marketing),
       research: p.research ?? 0,
       unitCost: unitCost(g, p),
