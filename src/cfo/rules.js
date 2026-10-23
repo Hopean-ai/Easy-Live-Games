@@ -625,11 +625,11 @@ const ACTIONS = {
     } else {
       log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
     }
-    if (steps === undefined && d[0] === d[1] && p.assets.includes('horses') && !p.raced) {
+    if (steps === undefined && d[0] === d[1] && p.assets.includes('club') && !p.raced) {
       p.raced = true;
-      const prize = p.assets.filter((x) => x === 'horses').length * PERSONAL_CARDS.horses.prize;
+      const prize = perks(p, 'club') * PERSONAL_CARDS.club.prize;
       p.personalCash += prize;
-      log(g, `${p.name}'s horses win ${money(prize)} at the races.`);
+      log(g, `${p.name} wins ${money(prize)} on the golf course at the club.`);
     }
     // Step square by square: widgets are picked up, dropped off and shipped along the way.
     for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
@@ -641,10 +641,10 @@ const ACTIONS = {
         p.islandLaps = (p.islandLaps ?? 0) + 1;
         p.atTerminal = true;
         log(g, `${p.name} completes a lap of the island.`);
-        const houses = p.assets.filter((a) => a === 'beach').length;
-        if (houses) {
-          p.personalCash += houses * PERSONAL_CARDS.beach.lap;
-          log(g, `${p.name} collects ${money(houses * PERSONAL_CARDS.beach.lap)} renting out beach houses.`);
+        const talks = perks(p, 'conference');
+        if (talks) {
+          p.personalCash += talks * PERSONAL_CARDS.conference.lap;
+          log(g, `${p.name} collects ${money(talks * PERSONAL_CARDS.conference.lap)} in conference speaking fees.`);
         }
         if (!g.calendar) fiscalYearEnd(g, p);
       }
@@ -683,9 +683,12 @@ const ACTIONS = {
     if (home && !p.atTerminal) return 'Flights leave the island from its Terminal.';
     if (SQUARES[airport]?.kind !== 'transport' || SQUARES[airport].mode !== 'air') return 'Pick an airport.';
     const owner = g.tiles[airport].owner;
-    if (!home && owner === null) return 'Nobody runs flights from this airport yet.';
+    const jet = p.assets.includes('jet');
+    if (!home && owner === null && !jet) return 'Nobody runs flights from this airport yet.';
     if (!home && !eraOf(g).island) return `Flights to the island start in the ${ERAS.find((e) => e.island).name}.`;
-    if (owner !== null && owner !== g.turn) {
+    if (jet) {
+      log(g, `${p.name} takes the corporate jet.`);
+    } else if (owner !== null && owner !== g.turn) {
       if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
       const fare = charge(g, p, CONFIG.islandFare, 'expTravel', `Airfare on ${g.players[owner].name}'s ${SQUARES[airport].name}`);
       post(g.players[owner], `Airfare from ${p.name}`, { cash: fare, revFreight: -fare });
@@ -1056,7 +1059,7 @@ function payDividend(g, p, amount, text = 'Dividend paid to shareholders') {
   }
 }
 
-// The Exchange on the island sells personal assets at half price; a Personal Assets square can
+// The Exchange on the island sells executive perks at half price; an Executive Perks square can
 // discount one card. The better of the two applies.
 export function personalPrice(p) {
   const off = Math.max(p.atExchange ? 0.5 : 0, p.personalOffer ?? 0);
@@ -1069,7 +1072,7 @@ function personalSquare(g, p) {
   const hit = odds.find((o) => (r -= o.chance) < 0) ?? odds[odds.length - 1];
   if (hit.free) return gainPersonal(g, p, drawPersonal(g), 'is given');
   p.personalOffer = hit.discount;
-  log(g, `${p.name} is offered ${Math.round(hit.discount * 100)}% off one personal asset this turn.`);
+  log(g, `${p.name} is offered ${Math.round(hit.discount * 100)}% off one executive perk this turn.`);
 }
 
 // Island landmarks come with their zone and building, so they are bought whole.
@@ -1573,7 +1576,7 @@ function afterAction(g) {
   if (big) return finish(g, big, `${money(win.valueTarget)} of shareholder value`);
   // Miles: the portfolio only wins after a lap of the island.
   const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
-  if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
+  if (rich) return finish(g, rich, `a portfolio of executive perks worth ${money(CONFIG.portfolioGoal)}`);
   if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
     const card = scorecard(g);
     return finish(g, g.players[card[0].seat], `the best CFO scorecard after ${win.maxYears} fiscal years`);
@@ -1653,7 +1656,7 @@ function land(g, p) {
       p.boardLeft = (p.boardLeft ?? 1) + 1;
       return log(g, `${p.name} calls an extra board meeting: two board decisions this turn.`);
     case 'cpe':
-      if (p.assets.includes('cabin')) return log(g, `${p.name} studies at their mountain cabin and carries on.`);
+      if (p.assets.includes('coach') || p.assets.includes('cabin')) return log(g, `${p.name} keeps up their training with an executive coach and carries on.`);
       p.skip = true;
       log(g, `${p.name} is at Continuing Professional Education and will sit out a turn.`);
       return;
@@ -1675,7 +1678,7 @@ function land(g, p) {
       return;
     case 'exchange':
       p.atExchange = true;
-      return log(g, `${p.name} visits the Exchange, where personal assets are half price this turn.`);
+      return log(g, `${p.name} visits the Exchange, where executive perks are half price this turn.`);
     case 'deck':
       if (sq.deck === 'personal') return personalSquare(g, p);
       return drawCard(g, p, sq.deck);
@@ -1828,6 +1831,7 @@ function acquireCompany(g, p, q, price) {
   discardHand(g, q);
   Object.assign(q, { out: true, carried: 0, docs: [], entries: [], fyePending: null, peakLoan: 0, ledger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])) });
   log(g, `${p.name} buys ${q.name}'s company for ${money(paid)}. ${q.name} is out of the game.`);
+  parachute(g, q);
 }
 
 // Change 5: Chapter 11. The company keeps its land and buildings; the Bank forgives part of what
@@ -1846,6 +1850,7 @@ function reorganize(g, p, need) {
   p.reorganized = true;
   p.stigma = c.stigmaYears;
   log(g, `${p.name}'s company files for Chapter 11. Creditors take over most of its shares, ${money(forgiven)} of its loan is forgiven and ${money(Math.max(0, rescue))} is lent to keep it running.`);
+  parachute(g, p);
 }
 
 // Change 5: a CFO who lost their company joins a new small one at the next shared year end.
@@ -1884,6 +1889,7 @@ function bankrupt(g, p, text) {
   // player is taken out by acquireCompany, as Miles wants, and can still be hired as a subsidiary.)
   if (g.rescue && !p.resigned) p.rejoin = true;
   log(g, text);
+  if (!p.resigned) parachute(g, p);
   // A parent's investment in a failed subsidiary is lost.
   const host = g.players[p.parent];
   if (host && !host.out && p.invested) {
@@ -2191,22 +2197,32 @@ function personalYearEnd(g, p) {
   p.yearTax = 0;
   p.taxFree = false;
   p.raced = false;
-  const count = (id) => p.assets.filter((a) => a === id).length;
-  p.personalCash += count('mansion') * PERSONAL_CARDS.mansion.yearly + count('cabin') * PERSONAL_CARDS.cabin.yearly;
-  p.deduction = count('intelligent') ? M(100) : 0;
-  const wealthy = count('wealthy');
-  if (wealthy) p.personalCash += M(10 ** wealthy);
-  let attractive = count('attractive');
-  while (attractive) {
-    const cost = M(count('loyal') && attractive > 1 ? 25 : 10 ** attractive);
-    if (p.personalCash >= cost) {
-      p.personalCash -= cost;
-      break;
-    }
-    p.assets.splice(p.assets.indexOf('attractive'), 1);
-    attractive -= 1;
-    log(g, `${p.name} cannot keep up an Attractive Spouse.`);
+  p.deduction = 0;
+  // Change 7b: executive perks pay out once a year.
+  const value = shareholderValue(p, g);
+  let income = perks(p, 'deferred') * PERSONAL_CARDS.deferred.yearly;
+  const rivals = g.players.filter((q) => q !== p && !q.out).length;
+  income += perks(p, 'boardSeat') * PERSONAL_CARDS.boardSeat.perRival * rivals;
+  if (p.lastValue !== undefined && value > p.lastValue) income += perks(p, 'options') * PERSONAL_CARDS.options.payout;
+  p.lastValue = value;
+  if (income) {
+    p.personalCash += income;
+    log(g, `${p.name}'s executive perks pay ${money(income)}.`);
   }
+}
+
+// How many copies of a perk a player holds.
+function perks(p, id) {
+  return p.assets.filter((a) => a === id).length;
+}
+
+// A Golden Parachute pays out when its holder loses their company, and is used up.
+function parachute(g, p) {
+  const i = p.assets.indexOf('parachute');
+  if (i < 0) return;
+  p.assets.splice(i, 1);
+  p.personalCash += PERSONAL_CARDS.parachute.payout;
+  log(g, `${p.name}'s golden parachute opens: ${money(PERSONAL_CARDS.parachute.payout)} of personal cash.`);
 }
 
 // ---- Cards ----
@@ -2219,11 +2235,8 @@ function drawPersonal(g) {
 
 function gainPersonal(g, p, id, verb) {
   const card = PERSONAL_CARDS[id];
-  if (card.spouse && id !== 'loyal') {
-    p.assets = p.assets.filter((a) => !PERSONAL_CARDS[a].spouse || a === 'loyal' || a === id);
-  }
   p.assets.push(id);
-  log(g, `${p.name} ${verb} a personal asset: ${card.name} (${money(card.value)}).`);
+  log(g, `${p.name} ${verb} an executive perk: ${card.name} (${money(card.value)}).`);
 }
 
 function drawCard(g, p, deck) {
@@ -2481,19 +2494,21 @@ const PLAYS = {
     }
     return null;
   },
-  alienation(g, p, { target }) {
+  headhunter(g, p, { target }) {
     const q = g.players[target];
     if (!q || q === p || q.out) return 'Pick another player.';
-    if (q.assets.includes('loyal')) return `${q.name} has a Loyal Spouse; their spouses can't be taken.`;
-    const spouses = q.assets.filter((a) => PERSONAL_CARDS[a].spouse);
-    if (!spouses.length) return `${q.name} has no Spouse cards.`;
+    const open = q.assets.map((id, i) => [id, i]).filter(([id]) => id !== 'jet');
+    if (!open.length) return `${q.name} has no perks a headhunter can take.`;
     if (p.personalCash < M(1000)) return `You need ${money(M(1000))} of personal cash.`;
     p.personalCash -= M(1000);
-    q.assets = q.assets.filter((a) => !PERSONAL_CARDS[a].spouse);
-    p.assets = p.assets.filter((a) => !PERSONAL_CARDS[a].spouse || a === 'loyal');
-    p.assets.push(...spouses);
-    log(g, `${p.name} pays ${money(M(1000))} and takes ${q.name}'s spouse cards.`);
+    const [id, i] = open[Math.floor(rand(g) * open.length)];
+    q.assets.splice(i, 1);
+    p.assets.push(id);
+    log(g, `${p.name} pays a headhunter ${money(M(1000))} and lures away ${q.name}'s ${PERSONAL_CARDS[id].name}.`);
     return null;
+  },
+  alienation(g, p, args) {
+    return PLAYS.headhunter(g, p, args);
   },
   contractor(g, p, { pos, rarity }) {
     const err = canBuild(g, pos);

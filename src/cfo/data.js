@@ -20,8 +20,8 @@ export const CONFIG = {
   depreciation: 0.1, // PLACEHOLDER: straight line, 10 years
   landRent: 0.1, // PLACEHOLDER: share of the land price, doubled for a full colour set
   liquidation: 0.5, // PLACEHOLDER: the bank buys assets back at half their cost
-  personalAssetPrice: M(1000), // PLACEHOLDER: personal cash paid per Personal Assets draw
-  // Miles: landing on a Personal Assets square is a chance of a free card, a discount, or nothing.
+  personalAssetPrice: M(1000), // PLACEHOLDER: personal cash paid per Executive Perks draw
+  // Miles: landing on an Executive Perks square is a chance of a free card, a discount, or nothing.
   // A discount is off one card bought that turn. PLACEHOLDER odds; they add up to 1.
   personalSquareOdds: [
     { chance: 1 / 6, free: true },
@@ -388,10 +388,11 @@ export const FRAUD_CARDS = {
 };
 
 export const MARKET_CARDS = {
-  alienation: {
-    name: 'Alienation of Affection', count: 5, keep: true,
-    text: `Pay ${usd(1000)} to the bank to take all "Spouse" cards from another player. If you already have Spouse cards, discard them.`,
+  headhunter: {
+    name: 'Headhunter', count: 5, keep: true,
+    text: `Pay ${usd(1000)} of personal cash to lure away one of another player's executive perks, picked at random. The Corporate Jet can't be taken.`,
   },
+  alienation: { name: 'Alienation of Affection', count: 0, keep: true, text: 'A retired card: plays as a Headhunter.' },
   limitations: { name: 'Statute of Limitations', count: 2, keep: true, placeholder: true, text: 'Clear one fraud from your record.' },
   contractor: { name: 'Contractor Connections', count: 5, keep: true, text: 'Search the PP&E deck and build any card for 90% of its price.' },
   recession: { name: 'Recession', count: 3, placeholder: true, text: 'Every company loses 10% of its cash.' },
@@ -413,22 +414,28 @@ export const MARKET_CARDS = {
   whistle: { name: 'Whistleblower', count: 2, keep: true, placeholder: true, text: `Tip off the regulators about a rival: they face a fraud check at Interim Review odds. If they're convicted, you collect a ${usd(1000)} reward.` },
 };
 
+// Design change 7b (Miles: replace the personal asset cards entirely): executive perks. Each is a
+// perk a real CFO negotiates, worth something on its own and with a small effect in play. The old
+// spouse and property cards stay below with no copies in the deck, so saved games still read.
+// PLACEHOLDER amounts; a draw is worth about the same as before on average.
 export const PERSONAL_CARDS = {
-  loyal: {
-    name: 'Loyal Spouse', count: 1, value: M(10000), spouse: true,
-    text: `Cannot be discarded or transferred, and protects your other Spouse cards. With several Attractive Spouses you only pay ${usd(25)} a year.`,
-  },
-  attractive: {
-    name: 'Attractive Spouse', count: 3, value: M(2000), spouse: true,
-    text: `Pay ${usd(10)} x 10 for each of these you hold beyond the first, each fiscal year, discarding them until you can.`,
-  },
-  wealthy: { name: 'Wealthy Spouse', count: 2, value: M(1000), spouse: true, text: `Receive ${usd(10)} x 10 for each of these you hold beyond the first, each fiscal year.` },
-  intelligent: { name: 'Intelligent Spouse', count: 2, value: M(1000), spouse: true, text: `Deduct ${usd(100)} from your personal taxes each fiscal year.` },
-  // Miles: small effects, nothing too disruptive; the Beach House ties to the island. PLACEHOLDER amounts.
-  horses: { name: 'Horses', count: 5, value: M(25), prize: M(250), text: `The first time you roll doubles each fiscal year, each of your horses wins ${usd(250)} at the races.` },
-  beach: { name: 'Beach House', count: 5, value: M(250), lap: M(250), text: `Rent it to tourists: receive ${usd(250)} each time you complete a lap of the island.` },
-  cabin: { name: 'Mountain Cabin', count: 5, value: M(250), yearly: M(100), text: `Study at your cabin: you never sit out a turn at Continuing Professional Education. Rent it out for ${usd(100)} each fiscal year.` },
-  mansion: { name: 'Country Mansion', count: 5, value: M(1500), yearly: M(250), text: `Host weddings and events: receive ${usd(250)} each fiscal year.` },
+  options: { name: 'Stock Options', count: 5, value: M(1000), payout: M(150), text: `Receive ${usd(150)} at each fiscal year end when your company's shareholder value rose over the year.` },
+  deferred: { name: 'Deferred Compensation', count: 5, value: M(750), yearly: M(100), text: `Receive ${usd(100)} each fiscal year.` },
+  boardSeat: { name: 'Outside Board Seat', count: 4, value: M(1000), perRival: M(50), text: `Director fees: receive ${usd(50)} each fiscal year for every rival company still in business.` },
+  parachute: { name: 'Golden Parachute', count: 2, value: M(2500), payout: M(2500), text: `If you lose your company (Chapter 11, bankruptcy, a buyout or a conviction), receive ${usd(2500)} of personal cash. The card is then used up.` },
+  coach: { name: 'Executive Coach', count: 4, value: M(250), text: 'You never sit out a turn at Continuing Professional Education.' },
+  club: { name: 'Club Membership', count: 4, value: M(250), prize: M(100), text: `The first time you roll doubles each fiscal year, each membership wins you ${usd(100)} on the golf course.` },
+  jet: { name: 'Corporate Jet', count: 1, value: M(10000), text: 'Fly to and from the island free, from any airport, even one nobody runs yet. It can\'t be taken by a Headhunter.' },
+  conference: { name: 'Conference Circuit', count: 3, value: M(250), lap: M(150), text: `Speaking fees: receive ${usd(150)} each time you complete a lap of the island.` },
+  // Retired cards, never drawn.
+  loyal: { name: 'Loyal Spouse', count: 0, value: M(10000), text: 'A retired card.' },
+  attractive: { name: 'Attractive Spouse', count: 0, value: M(2000), text: 'A retired card.' },
+  wealthy: { name: 'Wealthy Spouse', count: 0, value: M(1000), text: 'A retired card.' },
+  intelligent: { name: 'Intelligent Spouse', count: 0, value: M(1000), text: 'A retired card.' },
+  horses: { name: 'Horses', count: 0, value: M(25), text: 'A retired card.' },
+  beach: { name: 'Beach House', count: 0, value: M(250), text: 'A retired card.' },
+  cabin: { name: 'Mountain Cabin', count: 0, value: M(250), text: 'A retired card.' },
+  mansion: { name: 'Country Mansion', count: 0, value: M(1500), text: 'A retired card.' },
 };
 
 export function deckOf(cards) {

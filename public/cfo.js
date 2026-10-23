@@ -333,7 +333,7 @@ function winLines(o) {
   return [
     'Last company standing: drive every other independent company out of business.',
     `Shareholder value: the first company whose original 100 shares are worth ${money(o.valueTarget ?? cfg.valueTarget)}, counting the share price plus every dividend paid per share.`,
-    `Personal portfolio: the first player with ${money(cfg.portfolioGoal)} of personal assets who has made a lap of the island.`,
+    `Executive perks: the first player holding ${money(cfg.portfolioGoal)} of perks who has made a lap of the island.`,
     ...(o.maxYears ? [`After ${o.maxYears} fiscal years, the best CFO scorecard: points for shareholder value, personal net worth, return on equity and clean filings.`] : []),
   ];
 }
@@ -370,7 +370,7 @@ const CORNER_NAMES = {
 };
 const LANDMARK_COLOR = '#f5f5f5';
 const isAirport = (pos) => rules.squares[pos]?.mode === 'air';
-const DECK_NAMES = { market: 'Market Forces', fraud: 'Fraud', personal: 'Personal Assets' };
+const DECK_NAMES = { market: 'Market Forces', fraud: 'Fraud', personal: 'Executive Perks' };
 const MODE_ICONS = { truck: '🚚', rail: '🚆', air: '✈️' };
 
 let squareEls = [];
@@ -500,7 +500,7 @@ function renderTurn() {
     row.append(el('button', { onclick: () => actNow({ a: 'end' }) }, 'End turn'));
     const assetPrice = me.personalPrice ?? rules.config.personalAssetPrice;
     row.append(el('button', { class: 'secondary', disabled: me.personalCash < assetPrice, onclick: () => actNow({ a: 'personal' }) },
-      `Buy a personal asset (${money(assetPrice)})`));
+      `Buy an executive perk (${money(assetPrice)})`));
     box.append(row);
     box.append(boardControls(me));
     box.append(...flightControls(me));
@@ -742,18 +742,18 @@ function renderTile() {
     if (sq.mode === 'air') box.push(el('p', { class: 'small' }, `Land here to fly to the island for ${money(rules.config.islandFare)}, paid to the owner. The owner flies free.`));
   } else if (sq.kind === 'deck') {
     $('tile-title').textContent = DECK_NAMES[sq.deck];
-    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here for a free Personal Assets card (1 in 6), or half off one card (1 in 3), or a quarter off one card (1 in 2), bought that turn.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
+    box.push(el('p', {}, sq.deck === 'personal' ? 'Land here for a free Executive Perks card (1 in 6), or half off one card (1 in 3), or a quarter off one card (1 in 2), bought that turn.' : `Land here to draw a ${DECK_NAMES[sq.deck]} card.`));
   } else {
     $('tile-title').textContent = CORNER_NAMES[sq.kind][1];
     box.push(el('p', {}, {
-      fye: state.game?.calendar ? `Board room. Landing here calls an extra board meeting: two board decisions that turn. Every company's fiscal year ends together after round ${rules.config.roundsPerYear}.` : 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
+      fye: state.game?.calendar ? `Board room. Landing here calls an extra board meeting: two board decisions that turn. Every company's fiscal year ends together after round ${rules.config.roundsPerYear}.` : 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, executive perks, then statements.',
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year, charged on the most you owe during the year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught loses you your company${state.game?.rescue ? ', and you sit out until the year end before taking a new job' : ' and the game'}. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
       terminal: `The island's airport. Passing or landing here completes a lap of the island${state.game?.calendar ? '' : ' and closes your fiscal year'}. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
-      exchange: `The Exchange. Land here and personal assets cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,
+      exchange: `The Exchange. Land here and executive perks cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,
     }[sq.kind]));
   }
   if (tile) {
@@ -980,7 +980,7 @@ function renderHand() {
       : 'You have no Retail stores. Land on someone else\'s to sell through it, or build one.'),
     creditText(me),
   );
-  // Everyone's personal assets are public, like a Monopoly player's deeds.
+  // Everyone's perks are public, like a Monopoly player's deeds.
   const others = g.players.map((p, i) => ({ p, i })).filter(({ p, i }) => i !== mySeat && !p.out);
   $('assets').replaceChildren(
     el('p', { class: 'small' }, `Portfolio ${money(me.portfolio)} of the ${money(rules.config.portfolioGoal)} goal.`),
@@ -1003,7 +1003,7 @@ function groupAssets(ids) {
 function playControls(id, i) {
   const g = state.game;
   const play = (extra = {}) => actNow({ a: 'play', card: i, ...extra });
-  if (id === 'alienation' || id === 'whistle') {
+  if (id === 'headhunter' || id === 'alienation' || id === 'whistle') {
     const others = g.players.map((p, j) => ({ p, j })).filter(({ p, j }) => j !== mySeat && !p.out);
     return el('div', { class: 'row' }, others.map(({ p, j }) => el('button', { class: 'secondary', onclick: () => play({ target: j }) }, `Use on ${p.name}`)));
   }
