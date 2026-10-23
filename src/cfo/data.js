@@ -53,7 +53,7 @@ export const CONFIG = {
   // share of your salary is paid in new shares at the market price (a stock award).
   cfoShares: 20, // PLACEHOLDER
   minIssuePrice: M(1), // PLACEHOLDER: new shares are never issued below this, even when equity is gone
-  bookkeeperFee: M(100), // PLACEHOLDER: yearly fee for a bookkeeper who records entries and files statements (no clean-books bonus)
+  bookkeeperFee: M(3), // PLACEHOLDER: per document a bookkeeper posts at the year end (about $10k for a typical year); no clean-books bonus
   seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
   personalUnit: 1, // Miles: personal cash is as granular as company cash (one cent); this used to be $10,000
   salvage: 0.5, // PLACEHOLDER: Miles: destroyed PP&E (upgrading or rezoning) returns this share of its book value
