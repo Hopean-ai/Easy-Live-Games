@@ -34,15 +34,26 @@ export const ACCOUNTS = {
   revOps: 'Operating revenue',
   revOther: 'Other revenue',
   gain: 'Gain (loss) on asset sales',
+  expIdle: 'Idle factory capacity',
+  expInvLoss: 'Inventory losses',
   expRent: 'Rent expense',
   expSalary: 'Salaries',
   expDep: 'Depreciation expense',
   expFreight: 'Freight expense',
+  expTravel: 'Travel expense',
+  expCommission: 'Sales commissions',
+  expPropTax: 'Property tax',
+  expProfessional: 'Professional fees',
+  expBadDebt: 'Bad debts and factoring fees',
+  expLegal: 'Legal costs and fines',
   expOther: 'Other expenses',
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
-const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws'];
+// Miles: expenses split by what they are for, as a real income statement shows them.
+const EXPENSE_DETAIL = ['expIdle', 'expInvLoss', 'expTravel', 'expCommission', 'expPropTax', 'expProfessional', 'expBadDebt', 'expLegal'];
+const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws',
+  ...EXPENSE_DETAIL];
 const LOG_SIZE = 40;
 const JOURNAL_SIZE = 60;
 const DOC_KEEP = 150;
@@ -194,7 +205,11 @@ export function companyCash(p) {
 export function incomeStatement(p) {
   const l = p.ledger;
   const revenue = { revSales: -l.revSales, revRent: -l.revRent, revInterest: -l.revInterest, revFreight: -l.revFreight, revDividends: -l.revDividends, revOps: -l.revOps, revOther: -l.revOther, gain: -l.gain };
-  const expenses = { cogs: l.cogs, expFreight: l.expFreight, expRent: l.expRent, expSalary: l.expSalary ?? 0, expDep: l.expDep, expInterest: l.expInterest, expOther: l.expOther };
+  const expenses = {
+    cogs: l.cogs, expIdle: l.expIdle ?? 0, expInvLoss: l.expInvLoss ?? 0, expFreight: l.expFreight, expRent: l.expRent, expSalary: l.expSalary ?? 0, expDep: l.expDep,
+    expPropTax: l.expPropTax ?? 0, expTravel: l.expTravel ?? 0, expCommission: l.expCommission ?? 0, expProfessional: l.expProfessional ?? 0,
+    expBadDebt: l.expBadDebt ?? 0, expLegal: l.expLegal ?? 0, expInterest: l.expInterest, expOther: l.expOther,
+  };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
   const preTax = totalRevenue - totalExpenses;
@@ -229,28 +244,31 @@ export function totalShares(p) {
   return Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + (p.shares.founders ?? 0) + p.shares.public;
 }
 
-// What the market pays for the whole company.
-export function companyValue(p) {
-  return Math.max(0, balanceSheet(p).totalEquity) * (p.isPublic ? CONFIG.publicPremium : 1);
+// What the market pays for the whole company. Miles: a parent is valued on its consolidated
+// books, so what its subsidiaries earn counts, less the share their managers own.
+export function companyValue(p, g = null) {
+  const c = g && consolidated(g, p);
+  const equity = c ? c.balance.parentEquity : balanceSheet(p).totalEquity;
+  return Math.max(0, equity) * (p.isPublic ? CONFIG.publicPremium : 1);
 }
 
 // New shares are issued at the market price, never below CONFIG.minIssuePrice.
-export function issuePrice(p) {
-  return Math.max(CONFIG.minIssuePrice, Math.ceil(sharePrice(p)));
+export function issuePrice(p, g = null) {
+  return Math.max(CONFIG.minIssuePrice, Math.ceil(sharePrice(p, g)));
 }
 
 function issueShares(p, who, n) {
   p.shares.holders[who] = (p.shares.holders[who] ?? 0) + n;
 }
 
-export function sharePrice(p) {
-  return round(companyValue(p) / totalShares(p));
+export function sharePrice(p, g = null) {
+  return round(companyValue(p, g) / totalShares(p));
 }
 
 // Shares change hands with personal cash: buyers pay the market price rounded up to the cent,
 // sellers get it rounded down.
-export function tradePrice(p) {
-  return sharePrice(p);
+export function tradePrice(p, g = null) {
+  return sharePrice(p, g);
 }
 
 function tradeTotal(price, count) {
@@ -264,7 +282,7 @@ export function netWorth(g, p) {
   let worth = p.personalCash + portfolio(p);
   for (const c of g.players) {
     const held = c.parent === idx ? 0 : (c.shares.holders[idx] ?? 0);
-    if (held && !c.out) worth += (companyValue(c) * held) / totalShares(c);
+    if (held && !c.out) worth += (companyValue(c, g) * held) / totalShares(c);
   }
   return round(worth);
 }
@@ -272,6 +290,91 @@ export function netWorth(g, p) {
 // How hard auditors look: public companies and convicted managers get caught and fined more.
 function scrutiny(p) {
   return (p.isPublic ? CONFIG.publicScrutiny : 1) * (p.convicted ? CONFIG.publicScrutiny : 1);
+}
+
+// ---- Consolidated statements ----
+// Miles: a parent's books add in its subsidiaries' line by line, as real group accounts do. The
+// parent's investment is replaced by what it bought (the subsidiaries' assets and debts), the
+// share its managers own shows as a noncontrolling interest, and dealings inside the group (rent,
+// freight, fares, commissions, dividends) cancel out, since a group can't earn from itself. Each
+// company closes its own fiscal year, so a subsidiary's figures are its own year to date.
+
+export function subsidiariesOf(g, p) {
+  const idx = g.players.indexOf(p);
+  return g.players.filter((c) => c !== p && !c.out && c.parent === idx);
+}
+
+// Records a payment between two companies of one group, so consolidation can cancel it.
+function intercompany(g, payer, payee, expAcct, revAcct, amount) {
+  if (!(amount > 0) || payer === payee) return;
+  const top = (c) => (c.parent !== null && g.players[c.parent] && !g.players[c.parent].out ? c.parent : g.players.indexOf(c));
+  if (top(payer) !== top(payee)) return;
+  payer.intra = { ...payer.intra, [expAcct]: round((payer.intra?.[expAcct] ?? 0) + amount) };
+  payee.intra = { ...payee.intra, [revAcct]: round((payee.intra?.[revAcct] ?? 0) + amount) };
+}
+
+const INTRA_PAIRS = [['expRent', 'revRent'], ['expFreight', 'revFreight'], ['expTravel', 'revFreight'], ['expCommission', 'revOther']];
+
+export function consolidated(g, p) {
+  if (p.out || p.parent !== null) return null;
+  const subs = subsidiariesOf(g, p);
+  if (!subs.length) return null;
+  const idx = g.players.indexOf(p);
+  const group = [p, ...subs];
+  const ledger = Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, round(sum(group.map((c) => c.ledger[a] ?? 0)))]));
+  let nci = 0;
+  let nciIncome = 0;
+  let retainedAdj = 0;
+  const rows = [];
+  for (const c of subs) {
+    const own = (c.shares.holders[idx] ?? 0) / totalShares(c);
+    const equity = balanceSheet(c).totalEquity;
+    const net = incomeStatement(c).netIncome;
+    const invested = Math.min(c.invested ?? 0, p.ledger.investments);
+    // Out go the parent's investment and the subsidiary's own equity accounts...
+    ledger.investments = round(ledger.investments - invested);
+    for (const a of ['capital', 'retained', 'draws']) ledger[a] = round(ledger[a] - c.ledger[a]);
+    // ...and in comes the parent's share of what the subsidiary has built up, less what it paid.
+    retainedAdj += own * (equity - net) - invested;
+    nci += (1 - own) * equity;
+    nciIncome += (1 - own) * net;
+    rows.push({ name: c.name, own: round(own * 100), equity, netIncome: net, invested });
+  }
+  // Dealings inside the group cancel: as much of each as both sides still show this year.
+  const total = (acct) => sum(group.map((c) => c.intra?.[acct] ?? 0));
+  const eliminated = {};
+  for (const [exp, rev] of INTRA_PAIRS) {
+    const x = Math.min(total(exp), total(rev), ledger[exp], -ledger[rev]);
+    if (x > 0) {
+      ledger[exp] = round(ledger[exp] - x);
+      ledger[rev] = round(ledger[rev] + x);
+      eliminated[exp] = round((eliminated[exp] ?? 0) + x);
+    }
+  }
+  // Dividends from a subsidiary aren't income to the group; they were the parent's own profit already.
+  const dividends = Math.min(total('dividends'), -ledger.revDividends);
+  if (dividends > 0) {
+    ledger.revDividends = round(ledger.revDividends + dividends);
+    retainedAdj += dividends;
+    eliminated.dividends = dividends;
+  }
+  const income = incomeStatement({ ledger });
+  const parentIncome = round(income.netIncome - nciIncome);
+  const assets = { cash: ledger.cash, receivable: ledger.receivable, inventory: ledger.inventory, land: ledger.land, ppe: ledger.ppe, accDep: ledger.accDep, investments: ledger.investments, goodwill: ledger.goodwill };
+  const liabilities = { payable: -ledger.payable || 0, loan: -ledger.loan || 0, affiliateLoan: -ledger.affiliateLoan || 0 };
+  const equity = { capital: -ledger.capital, retained: round(-ledger.retained + retainedAdj), netIncome: parentIncome, draws: -ledger.draws, nci: round(nci) };
+  const totalLiabilities = sum(Object.values(liabilities));
+  const totalEquity = sum(Object.values(equity));
+  return {
+    subsidiaries: rows,
+    eliminated,
+    income: { ...income, nciIncome: round(nciIncome), parentIncome },
+    balance: {
+      assets, liabilities, equity,
+      totalAssets: sum(Object.values(assets)), totalLiabilities, totalEquity, totalLiabilitiesAndEquity: round(totalLiabilities + totalEquity),
+      parentEquity: round(totalEquity - equity.nci),
+    },
+  };
 }
 
 // ---- Turn flow ----
@@ -373,7 +476,7 @@ export function act(g, who, raw) {
     if (!(amount > 0)) return 'Enter an amount.';
     if (p.parent !== null) return 'Your company is a subsidiary; its parent company funds it.';
     if (amount > p.personalCash) return 'You do not have that much personal cash.';
-    const price = issuePrice(p);
+    const price = issuePrice(p, g);
     const n = Math.floor(amount / price);
     if (!n) return `New shares cost ${money(price)} each.`;
     const paid = round(n * price);
@@ -504,11 +607,12 @@ const ACTIONS = {
     if (!home && owner === null) return 'Nobody runs flights from this airport yet.';
     if (owner !== null && owner !== g.turn) {
       if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
-      const fare = charge(g, p, CONFIG.islandFare, 'expFreight', `Airfare on ${g.players[owner].name}'s ${SQUARES[airport].name}`);
+      const fare = charge(g, p, CONFIG.islandFare, 'expTravel', `Airfare on ${g.players[owner].name}'s ${SQUARES[airport].name}`);
       post(g.players[owner], `Airfare from ${p.name}`, { cash: fare, revFreight: -fare });
+      intercompany(g, p, g.players[owner], 'expTravel', 'revFreight', fare);
     } else if (owner === null) {
       if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
-      charge(g, p, CONFIG.islandFare, 'expFreight', 'Airfare');
+      charge(g, p, CONFIG.islandFare, 'expTravel', 'Airfare');
     }
     p.flew = true;
     p.atTerminal = false;
@@ -609,6 +713,7 @@ const ACTIONS = {
       if (!part || q.out) continue;
       if (Number(h) === p.parent) {
         post(q, `Dividend from ${p.name}`, { cash: part, revDividends: -part });
+        q.intra = { ...q.intra, dividends: (q.intra?.dividends ?? 0) + part };
         log(g, `${q.name}'s company receives a ${money(part)} dividend from ${p.name}.`);
       } else {
         const tax = personalIncome(q, part);
@@ -644,7 +749,7 @@ const ACTIONS = {
     count = Math.trunc(Number(count));
     if (!count) return 'Enter how many shares.';
     const me = String(g.players.indexOf(p));
-    const price = tradePrice(c);
+    const price = tradePrice(c, g);
     const total = tradeTotal(price, count);
     if (count > 0) {
       if (count > c.shares.public) return `Only ${c.shares.public} shares are on the market.`;
@@ -676,7 +781,7 @@ const ACTIONS = {
     const q = g.players[target];
     if (p.parent !== null) return 'A subsidiary cannot buy other companies.';
     if (!q || q === p || q.out || q.parent !== null) return 'Pick a rival independent company.';
-    const price = acquisitionPrice(q);
+    const price = acquisitionPrice(q, g);
     if (companyCash(p) < price) return `Buying ${q.name}'s company costs ${money(price)}.`;
     acquireCompany(g, p, q, price);
     return null;
@@ -730,7 +835,7 @@ const ACTIONS = {
     if (g.phase !== 'act' || !p.atCustoms) return 'You can only settle at island Customs.';
     if (!p.frauds) return 'You have no frauds to settle.';
     if (companyCash(p) < CONFIG.settlement) return `Settling costs ${money(CONFIG.settlement)}.`;
-    post(p, 'Legal settlement', { expOther: CONFIG.settlement, cash: -CONFIG.settlement });
+    post(p, 'Legal settlement', { expLegal: CONFIG.settlement, cash: -CONFIG.settlement });
     p.frauds -= 1;
     p.atCustoms = false;
     log(g, `${p.name} pays ${money(CONFIG.settlement)} in legal fees at Customs.`);
@@ -779,8 +884,9 @@ const ACTIONS = {
       for (const t of stock) sold += sellWidgets(g, p, t, units - sold / price, price, `Widgets sold through ${g.players[owner].name}'s ${SQUARES[pos].name}`);
       const cut = Math.round(sold * RETAIL.commission);
       if (cut) {
-        post(p, `Commission to ${g.players[owner].name}`, { expOther: cut, cash: -cut });
+        post(p, `Commission to ${g.players[owner].name}`, { expCommission: cut, cash: -cut });
         post(g.players[owner], `Commission from ${p.name}`, { cash: cut, revOther: -cut });
+        intercompany(g, p, g.players[owner], 'expCommission', 'revOther', cut);
       }
     }
     p.sale = null;
@@ -930,7 +1036,7 @@ function factor(p, text = 'Receivables sold to a factor') {
   const amount = billTotal(real);
   if (!amount) return 0;
   const fee = round(amount * CREDIT.factoringFee);
-  post(p, text, { cash: round(amount - fee), expOther: fee, receivable: -amount });
+  post(p, text, { cash: round(amount - fee), expBadDebt: fee, receivable: -amount });
   p.receivables = p.receivables.filter((b) => b.fake);
   return amount;
 }
@@ -947,7 +1053,7 @@ function writeOff(p, share, text, fakeOnly = false) {
   }
   p.receivables = (p.receivables ?? []).filter((b) => b.amount > 0);
   total = round(total);
-  if (total) post(p, text, { expOther: total, receivable: -total });
+  if (total) post(p, text, { expBadDebt: total, receivable: -total });
   return total;
 }
 
@@ -1008,7 +1114,7 @@ function writeDownInventory(g, p) {
   const r = retailTerms(g, g.players.indexOf(p));
   const market = r.stores ? r.minPrice : RETAIL.prices.common * (1 - RETAIL.commission);
   const loss = round(p.ledger.inventory - units * market);
-  if (loss > 0) post(p, `Inventory written down to market ($${market.toFixed(2)} a widget)`, { cogs: loss, inventory: -loss });
+  if (loss > 0) post(p, `Inventory written down to market ($${market.toFixed(2)} a widget)`, { expInvLoss: loss, inventory: -loss });
 }
 export function widgetsHeld(g, p) {
   const idx = g.players.indexOf(p);
@@ -1073,7 +1179,7 @@ function operate(g, p) {
     budget -= made;
     // The overhead on capacity left idle isn't absorbed by any widget, so it is a cost of the turn.
     const idle = g.widgetCost === undefined ? 0 : round((cap - made) * ZONES.industrial.overhead);
-    if (idle > 0) charge(g, p, idle, 'cogs', `Idle capacity at ${SQUARES[pos].name}: overhead on ${(cap - made).toLocaleString('en-US')} widgets not made`);
+    if (idle > 0) charge(g, p, idle, 'expIdle', `Idle capacity at ${SQUARES[pos].name}: overhead on ${(cap - made).toLocaleString('en-US')} widgets not made`);
     if (p.out) return;
   }
   // Paying for idle capacity may have meant selling buildings, so ship only between what is left.
@@ -1094,6 +1200,7 @@ function operate(g, p) {
         // With inventory costing, freight to your own stores is part of what the widgets cost.
         const fee = charge(g, p, n * RETAIL.freight, g.costing ? 'inventory' : 'expFreight', `Freight on ${by} to ${SQUARES[s.pos].name}`);
         if (fee && carrier.owner) post(carrier.owner, `Freight from ${p.name}`, { cash: fee, revFreight: -fee });
+        if (fee && carrier.owner && !g.costing) intercompany(g, p, carrier.owner, 'expFreight', 'revFreight', fee);
         if (p.out) return;
       }
       const m = Math.min(n, f.t.stock); // paying the freight may have meant selling widgets
@@ -1183,7 +1290,7 @@ function afterAction(g) {
   const independent = alive.filter((p) => p.parent === null);
   if (independent.length === 1) return finish(g, independent[0], 'the last company standing');
   if (!independent.length) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
-  const big = independent.find((p) => companyValue(p) >= win.valueTarget);
+  const big = independent.find((p) => companyValue(p, g) >= win.valueTarget);
   if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
   // Miles: the portfolio only wins after a lap of the island.
   const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
@@ -1197,7 +1304,7 @@ function afterAction(g) {
 
 // One point on the end-of-game recap charts: where a company and its owner stood.
 function snapshot(g, p, year, netIncome = null) {
-  (p.history ??= []).push({ year, value: companyValue(p), cash: companyCash(p), netWorth: netWorth(g, p), netIncome });
+  (p.history ??= []).push({ year, value: companyValue(p, g), cash: companyCash(p), netWorth: netWorth(g, p), netIncome });
 }
 
 function finish(g, p, reason) {
@@ -1280,6 +1387,7 @@ export function rentFor(g, pos) {
 function payRent(g, p, owner, amount) {
   const paid = charge(g, p, amount, 'expRent', `Rent to ${owner.name}`);
   if (paid > 0) post(owner, `Rent from ${p.name}`, { cash: paid, revRent: -paid });
+  intercompany(g, p, owner, 'expRent', 'revRent', paid);
   log(g, `${p.name} pays ${owner.name} ${money(paid)} rent.`);
 }
 
@@ -1359,8 +1467,8 @@ function sellLand(g, p, t, pos) {
   log(g, `${p.name} sells ${sq.name} for ${money(proceeds)}.`);
 }
 
-export function acquisitionPrice(q) {
-  const raw = Math.max(CONFIG.acquireMin, companyValue(q) * CONFIG.acquirePremium);
+export function acquisitionPrice(q, g = null) {
+  const raw = Math.max(CONFIG.acquireMin, companyValue(q, g) * CONFIG.acquirePremium);
   return Math.ceil(raw / CONFIG.personalUnit) * CONFIG.personalUnit;
 }
 
@@ -1527,6 +1635,18 @@ function fiscalYearEnd(g, p) {
   }
   if (depreciation) post(p, `Depreciation for the year on ${depreciated} building${depreciated > 1 ? 's' : ''}`, { expDep: depreciation, accDep: -depreciation });
 
+  // Miles: a property tax. The town assesses every lot and transport tile the company owns at its
+  // list price, plus what its building cost, and bills a share of that each fiscal year end.
+  let assessed = 0;
+  let parcels = 0;
+  g.tiles.forEach((t, pos) => {
+    if (t?.owner !== idx) return;
+    assessed += (SQUARES[pos].kind === 'transport' ? transportLand(pos) : SQUARES[pos].price) + (t.building?.cost ?? 0);
+    parcels += 1;
+  });
+  if (assessed) charge(g, p, assessed * CONFIG.propertyTax, 'expPropTax', `Property tax (${CONFIG.propertyTax * 100}% of ${money(assessed)} assessed on ${parcels} propert${parcels > 1 ? 'ies' : 'y'})`);
+  if (p.out) return;
+
   // Miles: interest is on the most the company owed the Bank this year, so a loan repaid before
   // the year end still pays for the time it was out.
   const owed = Math.max(p.peakLoan ?? 0, -p.ledger.loan);
@@ -1535,7 +1655,7 @@ function fiscalYearEnd(g, p) {
   if (p.out) return;
   // Miles: a bookkeeper is paid by the document, for every one it posts at this year end.
   const covered = p.outsourced ? p.docs.filter((d) => !d.filed && d.year <= p.years + 1).length : 0;
-  if (covered) charge(g, p, covered * CONFIG.bookkeeperFee, 'expOther', `Bookkeeping fees (${covered} document${covered > 1 ? 's' : ''} at ${money(CONFIG.bookkeeperFee)})`);
+  if (covered) charge(g, p, covered * CONFIG.bookkeeperFee, 'expProfessional', `Bookkeeping fees (${covered} document${covered > 1 ? 's' : ''} at ${money(CONFIG.bookkeeperFee)})`);
   if (p.out) return;
   // Miles: the year end is payday. The company pays you automatically: a base salary plus a bonus
   // on the year's profit before your pay, as much as its cash allows. It is a company expense,
@@ -1543,9 +1663,9 @@ function fiscalYearEnd(g, p) {
   const bonus = Math.max(0, incomeStatement(p).preTax) * CONFIG.salaryBonus;
   // Miles: once the company is public, the profit share of the CFO's pay comes as new shares at
   // the market price (a stock award), which isn't cash so isn't taxed until the shares are sold.
-  const award = p.isPublic && p.parent === null ? Math.floor(bonus / issuePrice(p)) : 0;
+  const award = p.isPublic && p.parent === null ? Math.floor(bonus / issuePrice(p, g)) : 0;
   if (award) {
-    const value = round(award * issuePrice(p));
+    const value = round(award * issuePrice(p, g));
     issueShares(p, g.players.indexOf(p), award);
     post(p, `Stock award: ${award} new shares paid to you`, { expSalary: value, capital: -value });
     log(g, `${p.name} is awarded ${award} new shares (${money(value)}).`);
@@ -1601,6 +1721,7 @@ function fiscalYearEnd(g, p) {
     }
   }
   if (total || Object.keys(closing).length) post(p, `Close fiscal year ${p.years}`, { ...closing, retained: total }, { doc: false });
+  p.intra = null; // this year's dealings within the group, closed with the accounts they sit in
   if (p.manual) {
     truth.balance = balanceFields(p);
     p.fyePending = { year: p.years, truth };
@@ -1678,7 +1799,7 @@ const MARKET_NOW = {
     for (const q of alive(g)) post(q, 'Economic boom', { cash: M(500), revOther: -M(500) });
   },
   lawsuit(g, p) {
-    charge(g, p, M(750), 'expOther', 'Lawsuit settlement');
+    charge(g, p, M(750), 'expLegal', 'Lawsuit settlement');
   },
   shipping(g) {
     g.players.forEach((q, i) => {
@@ -1736,7 +1857,7 @@ const MARKET_NOW = {
           t.stock -= cut(t.stock);
         }
       }
-      if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expOther: round(lost * each), inventory: -round(lost * each) });
+      if (lost) post(q, `Widgets lost to supply chain disruption (${lost.toLocaleString('en-US')})`, { expInvLoss: round(lost * each), inventory: -round(lost * each) });
     });
   },
 };
@@ -1786,7 +1907,7 @@ const PLAYS = {
     const c = g.players[target];
     if (!c || c.out || !c.isPublic) return 'Pick a public company.';
     const count = Math.min(10, c.shares.public);
-    const price = tradePrice(c) / 2;
+    const price = tradePrice(c, g) / 2;
     let n = count;
     while (n && tradeTotal(price, n) > p.personalCash) n -= 1;
     if (!n) return 'You cannot afford any shares.';
@@ -1844,7 +1965,7 @@ const PLAYS = {
     const cost = M(100) * g.zoningRow.length;
     if (!g.zoningRow.length) return 'There are no zoning cards to replace.';
     if (companyCash(p) < cost) return 'Your company cannot afford it.';
-    post(p, 'Consulting fees', { expOther: cost, cash: -cost }); // the bribe, as it appears in the books
+    post(p, 'Consulting fees', { expProfessional: cost, cash: -cost }); // the bribe, as it appears in the books
     g.zoningDeck.unshift(...g.zoningRow.splice(0));
     refill(g.zoningRow, g.zoningDeck);
     log(g, `${p.name} has the zoning board's available cards replaced.`);
@@ -1863,7 +1984,7 @@ const PLAYS = {
   cook(g, p) {
     let left = M(2000);
     const lines = { ppe: 0 };
-    for (const acct of ['expOther', 'expRent', 'expFreight']) {
+    for (const acct of ['expOther', 'expRent', 'expFreight', 'expTravel', 'expCommission', 'expProfessional', 'expLegal', 'expPropTax', 'expIdle']) {
       const moved = Math.min(left, Math.max(0, p.ledger[acct]));
       if (!moved) continue;
       lines[acct] = -moved;
@@ -1927,7 +2048,7 @@ function audit(g, p) {
   if (n) {
     p.misstatements = 0;
     const fine = n * CONFIG.misstatementFine * scrutiny(p);
-    charge(g, p, fine, 'expOther', 'Audit adjustments');
+    charge(g, p, fine, 'expLegal', 'Audit adjustments');
     log(g, `Interim Review finds ${n} misstatement${n > 1 ? 's' : ''} in ${p.name}'s books: ${money(fine)} in fines.`);
     if (p.out) return;
   }
@@ -1953,7 +2074,7 @@ function fraudCheck(g, p, chance, who) {
 // ---- Players' own books ----
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
-export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expInterest', 'expOther', 'expTax', 'netIncome'];
 export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
@@ -2228,7 +2349,7 @@ export function viewFor(g, who) {
     second: g.second ?? null,
     endReason: g.endReason,
     win: g.win,
-    companyValues: g.players.map((p, i) => (open(i) ? companyValue(p) : null)),
+    companyValues: g.players.map((p, i) => (open(i) ? companyValue(p, g) : null)),
     offers: g.offers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
@@ -2253,9 +2374,10 @@ export function viewFor(g, who) {
       shares: p.shares,
       isPublic: p.isPublic,
       parent: p.parent,
-      sharePrice: open(i) || p.isPublic ? sharePrice(p) : null,
-      tradePrice: open(i) || p.isPublic ? tradePrice(p) : null,
-      acquisitionPrice: acquisitionPrice(p),
+      sharePrice: open(i) || p.isPublic ? sharePrice(p, g) : null,
+      tradePrice: open(i) || p.isPublic ? tradePrice(p, g) : null,
+      acquisitionPrice: acquisitionPrice(p, g),
+      consolidated: open(i) ? consolidated(g, p) : null,
       handCount: p.hand.length,
       // With manual books everyone sees only the statements a player filed; the truth stays hidden.
       ...(g.easyBooks ? { income: incomeStatement(p), balance: balanceSheet(p), report: p.report } : { filed: p.filed, loan: open(i) ? -p.ledger.loan : p.filed?.balance.loan ?? null }),
