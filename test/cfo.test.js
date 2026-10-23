@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -1928,4 +1928,67 @@ test('a fired CFO takes a new job at the next shared year end; one who resigns d
   assert.equal(companyCash(a), CONFIG.newJob.capital);
   assert.equal(a.shares.holders[0], CONFIG.newJob.cfoShares);
   assert.equal(c.out, true, 'C resigned and stays out');
+});
+
+test('a lot its lander passes on goes to a sealed-bid auction', () => {
+  const g = createGame(['A', 'B', 'C'], 81, { easyBooks: true, valueTarget: M(1e6) });
+  const [a, b, c] = g.players;
+  const lot = posOfSpace(1);
+  a.pos = lot - 1;
+  act(g, 0, { a: 'roll', steps: 1 });
+  assert.equal(g.phase, 'buy');
+  act(g, 0, { a: 'pass' });
+  assert.equal(g.auction.pos, lot);
+  const min = auctionMin(lot);
+  assert.match(act(g, 1, { a: 'bid', amount: min - 1 }), /start at/);
+  assert.equal(act(g, 1, { a: 'bid', amount: min, zone: 0 }), null);
+  assert.equal(act(g, 2, { a: 'bid', amount: min + M(10) }), null);
+  const view = viewFor(g, 0).auction;
+  assert.deepEqual(view.bidders, [1, 2]);
+  assert.equal(view.myBid, null, 'bids are sealed');
+  assert.equal(viewFor(g, 2).auction.myBid, min + M(10));
+  const cash = companyCash(c);
+  act(g, 0, { a: 'end' }); // closes at the end of the next player's turn
+  assert.ok(g.auction);
+  act(g, 1, { a: 'roll' });
+  if (g.phase === 'buy') act(g, 1, { a: 'buy', zone: 0 }) && act(g, 1, { a: 'pass' });
+  if (g.auction?.pos !== lot) assert.fail('a second auction should not replace this one before it closes');
+  act(g, 1, { a: 'end' });
+  assert.equal(g.tiles[lot].owner, 2, 'the highest bid wins');
+  assert.equal(companyCash(c), cash - min - M(10));
+  assert.equal(c.ledger.land, min + M(10));
+  assert.equal(g.tiles[lot].landBasis, min + M(10));
+  void b;
+});
+
+test('supply contracts deliver widgets each turn at the agreed price, with penalties for shortfalls', () => {
+  const g = createGame(['A', 'B'], 82, { easyBooks: true, valueTarget: M(1e6) });
+  const [a, b] = g.players;
+  const factory = posOfSpace(1);
+  const store = posOfSpace(3);
+  Object.assign(g.tiles[factory], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  Object.assign(g.tiles[store], { owner: 1, zone: 'retail', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  assert.equal(act(g, 0, { a: 'contract', target: 1, count: 1000, amount: 1.5, years: 2, sell: true }), null);
+  assert.equal(act(g, 1, { a: 'sign', offer: g.contractOffers[0].id, accept: true }), null);
+  assert.equal(g.contracts.length, 1);
+  g.tiles[factory].stock = 600;
+  post(a, 'Widgets', { inventory: 480, cash: -480 });
+  const bCash = companyCash(b);
+  g.players[0].production = 'idle';
+  act(g, 0, { a: 'roll' });
+  if (g.phase === 'buy') act(g, 0, { a: 'pass' });
+  act(g, 0, { a: 'end' });
+  assert.equal(g.tiles[store].stock >= 600, true, 'delivered to the buyer\'s store');
+  assert.ok(a.ledger.revSales < 0);
+  assert.ok(companyCash(b) < bCash);
+  assert.ok(a.ledger.expLegal > 0, 'a penalty for the 400 short');
+  for (const p of g.players) {
+    const s = balanceSheet(p);
+    assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+  }
+  // Breaking it costs a few turns' worth.
+  const fee = 1000 * 1.5 * CONFIG.contracts.breakTurns;
+  assert.equal(act(g, 1, { a: 'breach', offer: g.contracts[0].id }), null);
+  assert.equal(g.contracts.length, 0);
+  assert.equal(b.ledger.expLegal, fee);
 });

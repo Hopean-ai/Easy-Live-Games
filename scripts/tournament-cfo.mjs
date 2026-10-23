@@ -13,6 +13,7 @@ const NORMAL = {
   reserve: M(500), payAbove: M(20000), payHow: 'dividend', ipo: true,
   zones: ['retail', 'industrial', 'banking', 'residential'],
   board: [], // board decisions to try each turn, in order, while keeping the buffer
+  bid: 0.6, // share of the list price it bids for a lot at auction
 };
 
 export const STRATEGIES = {
@@ -25,6 +26,8 @@ export const STRATEGIES = {
   marketer: { board: ['marketing'] },
   researcher: { board: ['research'] },
   boardroom: { board: ['research', 'marketing'] },
+  noBids: { bid: 0 },
+  bigBidder: { bid: 1 },
 };
 
 function zoneCount(g, seat, zone) {
@@ -67,6 +70,13 @@ export function playGame(seed, strategies, options = {}) {
   for (let steps = 0; g.phase !== 'over' && steps < 20000; steps++) {
     const seat = g.turn;
     if (turn(g, seat, plans[seat]) && g.phase !== 'over' && g.turn === seat) act(g, seat, { a: 'end' });
+    // Sealed bids on any lot at auction, from every company that can spare the cash.
+    if (g.auction) {
+      g.players.forEach((p, i) => {
+        const amount = Math.round(SQUARES[g.auction.pos].price * plans[i].bid);
+        if (!p.out && plans[i].bid && !(i in g.auction.bids) && companyCash(p) - amount >= plans[i].reserve) act(g, i, { a: 'bid', amount, zone: 0 });
+      });
+    }
   }
   return g;
 }

@@ -79,7 +79,9 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     credit: true, // sales and supplier credit (games begun before it settle everything in cash)
     calendar: options.calendar !== false, // one shared fiscal year (games begun before it close each year at the FYE corner)
     eras: options.calendar !== false && options.eras !== false, // eras and the economic outlook run on the shared calendar
-    rescue: options.calendar !== false, // Chapter 11 and new jobs instead of knock-outs (they rejoin at the shared year end)
+    rescue: options.calendar !== false,
+    markets: options.calendar !== false, // lot auctions and supply contracts (change 6)
+    turnCount: 0, // Chapter 11 and new jobs instead of knock-outs (they rejoin at the shared year end)
     round: 0,
     turn: 0,
     phase: 'roll', // roll | buy | act | over
@@ -424,7 +426,7 @@ export function current(g) {
 
 // Actions come straight from browsers, so keep only the fields actions use, with the right types.
 // Names are looked up as own keys, so 'constructor' or '__proto__' can't reach object internals.
-const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer', 'entry', 'year', 'steps'];
+const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer', 'entry', 'year', 'steps', 'years'];
 const MAX_AMOUNT = 1e9;
 function cleanAction(action) {
   if (!action || typeof action !== 'object' || typeof action.a !== 'string') return null;
@@ -437,6 +439,7 @@ function cleanAction(action) {
   if (typeof action.on === 'boolean') out.on = action.on;
   if (typeof action.memo === 'string') out.memo = action.memo.slice(0, MEMO_SIZE);
   if (typeof action.accept === 'boolean') out.accept = action.accept;
+  if (typeof action.sell === 'boolean') out.sell = action.sell;
   if (typeof action.level === 'string' && (Object.hasOwn(SUPPLY.levels, action.level) || Object.hasOwn(RETAIL.pricing, action.level))) out.level = action.level;
   if (typeof action.pricing === 'string' && Object.hasOwn(RETAIL.pricing, action.pricing)) out.pricing = action.pricing;
   if (typeof action.production === 'string' && Object.hasOwn(SUPPLY.levels, action.production)) out.production = action.production;
@@ -643,17 +646,7 @@ const ACTIONS = {
       zoneId = g.zoningRow.splice(zone, 1)[0];
       refill(g.zoningRow, g.zoningDeck);
     }
-    if (sq.kind === 'transport') {
-      // The price covers the land and the structures on it, which are PP&E and depreciate.
-      const land = transportLand(p.pos);
-      const ppe = sq.price - land;
-      post(p, `Bought ${sq.name}: ${money(land)} land, ${money(ppe)} PP&E`, { land, ppe, cash: -sq.price });
-      Object.assign(tile, { landBasis: land, building: { rarity: 'transport', cost: ppe, basis: ppe, dep: 0 } });
-    } else {
-      post(p, `Bought ${sq.name}`, { land: sq.price, cash: -sq.price });
-    }
-    tile.owner = g.turn;
-    tile.zone = zoneId;
+    takeLot(g, p, p.pos, sq.price, zoneId);
     g.phase = 'act';
     log(g, `${p.name} buys ${sq.name} for ${money(sq.price)}${zoneId ? `, zoned ${ZONES[zoneId].name}` : ''}.`);
     return null;
@@ -698,6 +691,8 @@ const ACTIONS = {
   pass(g, p) {
     if (g.phase !== 'buy') return 'There is nothing to pass on.';
     g.phase = 'act';
+    // Change 6: the lot goes to auction among every company (landmarks stay with the bank).
+    if (g.markets && !SQUARES[p.pos].landmark) openAuction(g, p.pos);
     return null;
   },
 
@@ -1039,6 +1034,90 @@ function personalSquare(g, p) {
 }
 
 // Island landmarks come with their zone and building, so they are bought whole.
+// A lot or transport tile bought from the bank for `paid`: transport tiles are part land and part
+// PP&E (track, depots, runways), which depreciates.
+function takeLot(g, p, pos, paid, zoneId) {
+  const sq = SQUARES[pos];
+  const tile = g.tiles[pos];
+  if (sq.kind === 'transport') {
+    const land = Math.round(paid * CONFIG.transportLand);
+    const ppe = paid - land;
+    post(p, `Bought ${sq.name}: ${money(land)} land, ${money(ppe)} PP&E`, { land, ppe, cash: -paid });
+    Object.assign(tile, { landBasis: land, building: { rarity: 'transport', cost: sq.price - transportLand(pos), basis: ppe, dep: 0 } });
+  } else {
+    post(p, `Bought ${sq.name}`, { land: paid, cash: -paid });
+    if (paid !== sq.price) tile.landBasis = paid;
+  }
+  tile.owner = g.players.indexOf(p);
+  tile.zone = zoneId;
+}
+
+// ---- Supply contracts (change 6b) ----
+
+const contractsOf = (g, p) => (g.contracts ?? []).filter((k) => g.players[k.seller] === p);
+
+// At the end of the supplier's turn: widgets from its factories go onto the buyer's first store's
+// shelves at the contract price (freight included). A shortfall costs the supplier a penalty.
+function deliverContracts(g, p) {
+  for (const k of contractsOf(g, p)) {
+    const buyer = g.players[k.buyer];
+    const me = g.players.indexOf(p);
+    const store = g.tiles.find((t) => t?.owner === k.buyer && t.zone === 'retail' && t.building);
+    if (buyer.out || !store) continue;
+    let left = k.units;
+    for (const t of g.tiles) {
+      if (left <= 0) break;
+      if (t?.owner !== me || t.zone !== 'industrial' || !t.stock) continue;
+      const want = Math.min(left, Math.floor(companyCash(buyer) / k.price));
+      const before = t.stock;
+      const paid = sellWidgets(g, p, t, want, k.price, `Contract sales to ${buyer.name}`);
+      const units = before - t.stock;
+      if (!units) continue;
+      post(buyer, `Widgets bought under contract from ${p.name} (${units.toLocaleString('en-US')} at $${k.price.toFixed(2)})`, { inventory: paid, cash: -paid });
+      store.stock += units;
+      left -= units;
+    }
+    if (left > 0) {
+      const penalty = Math.round(left * k.price * CONFIG.contracts.shortfallPenalty);
+      const paid = charge(g, p, penalty, 'expLegal', `Penalty for ${left.toLocaleString('en-US')} widgets short on a contract with ${buyer.name}`);
+      if (paid) post(buyer, `Penalty from ${p.name} for a short delivery`, { cash: paid, revOther: -paid });
+      if (p.out) return;
+    }
+  }
+}
+
+// ---- Auctions (change 6) ----
+// Sealed bids from any company, open until the end of the next player's turn.
+function openAuction(g, pos) {
+  if (g.auction) closeAuction(g);
+  g.auction = { pos, closes: (g.turnCount ?? 0) + 2, bids: {} };
+  log(g, `${SQUARES[pos].name} goes to auction: sealed bids from ${money(auctionMin(pos))} until the end of the next turn.`);
+}
+
+export const auctionMin = (pos) => Math.round(SQUARES[pos].price * CONFIG.auctionMin);
+
+function closeAuction(g) {
+  const a = g.auction;
+  g.auction = null;
+  const sq = SQUARES[a.pos];
+  if (g.tiles[a.pos].owner !== null) return;
+  const bids = Object.entries(a.bids).map(([seat, b]) => ({ seat: Number(seat), ...b }))
+    .filter((b) => !g.players[b.seat].out && companyCash(g.players[b.seat]) >= b.amount)
+    .map((b) => ({ ...b, draw: rand(g) })) // equal bids are settled by lot
+    .sort((x, y) => y.amount - x.amount || x.draw - y.draw);
+  if (!bids.length) return log(g, `Nobody buys ${sq.name} at auction.`);
+  const win = bids[0];
+  const p = g.players[win.seat];
+  let zoneId = null;
+  if (sq.kind === 'land' && g.zoningRow.length) {
+    const i = Math.max(0, g.zoningRow.indexOf(win.zone));
+    zoneId = g.zoningRow.splice(i, 1)[0];
+    refill(g.zoningRow, g.zoningDeck);
+  }
+  takeLot(g, p, a.pos, win.amount, zoneId);
+  log(g, `${p.name} wins ${sq.name} at auction for ${money(win.amount)}${zoneId ? `, zoned ${ZONES[zoneId].name}` : ''} (${bids.length} bid${bids.length > 1 ? 's' : ''}).`);
+}
+
 function buyLandmark(g, p, sq, tile) {
   const lm = LANDMARKS[sq.landmark];
   if (companyCash(p) < sq.price + lm.building) return 'Your company cannot afford it.';
@@ -1290,7 +1369,8 @@ function operate(g, p) {
   const level = SUPPLY.levels[p.production] ?? SUPPLY.levels.demand;
   const target = ({ t, pos }) => storeSales(g, pos, t).units * level.cover;
   const onHand = p.carried + [...factories, ...stores].reduce((n, { t }) => n + t.stock, 0);
-  let budget = !level.make ? 0 : level.flatOut ? Infinity : Math.max(0, stores.reduce((n, s) => n + target(s), 0) - onHand);
+  const owed = contractsOf(g, p).reduce((n, k) => n + k.units, 0);
+  let budget = !level.make ? 0 : level.flatOut ? Infinity : Math.max(0, stores.reduce((n, s) => n + target(s), 0) + owed - onHand);
   for (const { t, pos } of factories) {
     if (!isMine(g, t, 'industrial')) continue; // sold to cover an earlier factory's idle overhead
     const cap = production(pos, t.building.cost);
@@ -1301,6 +1381,9 @@ function operate(g, p) {
     if (idle > 0) charge(g, p, idle, 'expIdle', `Idle capacity at ${SQUARES[pos].name}: overhead on ${(cap - made).toLocaleString('en-US')} widgets not made`);
     if (p.out) return;
   }
+  // Contracted deliveries come first.
+  deliverContracts(g, p);
+  if (p.out) return;
   // Paying for idle capacity may have meant selling buildings, so ship only between what is left.
   const open = (list, kind) => list.filter(({ t }) => isMine(g, t, kind));
   const shops = open(stores, 'retail');
@@ -1383,6 +1466,8 @@ function putBuilding(g, p, pos, rarity, price) {
 
 function nextTurn(g) {
   if (g.phase === 'over') return;
+  g.turnCount = (g.turnCount ?? 0) + 1;
+  if (g.auction && g.turnCount >= g.auction.closes) closeAuction(g);
   if (g.calendar) {
     // A round ends when play passes the last seat still playing.
     const last = g.players.reduce((m, p, i) => (p.out ? m : i), -1);
@@ -1809,6 +1894,9 @@ function sharedYearEnd(g) {
   const next = eraOf(g);
   if (next !== era) log(g, `The ${next.name} begins. ${next.text}`);
   for (const q of g.players) if (q.out && q.rejoin) newJob(g, q);
+  // Contracts run out, and contracts with a company that's gone lapse.
+  const year = Math.max(...g.players.map((x) => x.years));
+  g.contracts = (g.contracts ?? []).filter((k) => k.until > year && !g.players[k.seller].out && !g.players[k.buyer].out);
   for (const p of g.players) {
     const plan = p.plan;
     p.plan = null;
@@ -2448,6 +2536,68 @@ function balanceFields(p) {
 // transport tile, with whatever is built on it, and the other side accepts or declines. Deals can
 // be made at any time. Each player has at most one open offer.
 const DEALS = {
+  // Change 6: a sealed bid on the lot at auction, with the zoning card wanted. One bid each; a new
+  // bid replaces the old one.
+  bid(g, p, { amount, zone } = {}) {
+    const a = g.auction;
+    if (!a) return 'Nothing is at auction.';
+    amount = Math.round(Number(amount));
+    if (!(amount >= auctionMin(a.pos))) return `Bids start at ${money(auctionMin(a.pos))}.`;
+    if (amount > companyCash(p)) return 'Your company does not have that much cash.';
+    const z = SQUARES[a.pos].kind === 'land' ? g.zoningRow[zone] ?? g.zoningRow[0] ?? null : null;
+    a.bids[g.players.indexOf(p)] = { amount, zone: z };
+    log(g, `${p.name} places a sealed bid on ${SQUARES[a.pos].name}.`);
+    return null;
+  },
+
+  // Change 6b: a supply contract. The factory owner (seller) delivers `count` widgets to the store
+  // owner (buyer) at the end of each of the seller's turns, at `amount` a widget, for `years`
+  // fiscal years. Either side proposes; the other signs.
+  contract(g, p, { target, count, amount, years, sell } = {}) {
+    if (!g.markets) return 'This game has no supply contracts.';
+    const me = g.players.indexOf(p);
+    const q = g.players[target];
+    if (!q || q === p || q.out) return 'Pick another company.';
+    if (p.parent !== null || q.parent !== null) return 'Supply contracts are between independent companies.';
+    const c = CONFIG.contracts;
+    if (!(count > 0 && count <= c.maxUnits)) return `Contract for 1 to ${c.maxUnits.toLocaleString('en-US')} widgets a turn.`;
+    const price = Math.round(Number(amount) * 100) / 100;
+    if (!(price > 0)) return 'Enter a price per widget.';
+    if (!(years >= 1 && years <= c.maxYears)) return `Contracts run 1 to ${c.maxYears} fiscal years.`;
+    g.contractOffers = (g.contractOffers ?? []).filter((o) => o.from !== me);
+    g.contractSeq = (g.contractSeq ?? 0) + 1;
+    const [seller, buyer] = sell ? [me, target] : [target, me];
+    g.contractOffers.push({ id: g.contractSeq, from: me, to: target, seller, buyer, units: count, price, years });
+    log(g, `${p.name} offers ${q.name} a supply contract: ${count.toLocaleString('en-US')} widgets a turn at $${price.toFixed(2)} for ${years} year${years > 1 ? 's' : ''}, ${sell ? `${p.name}` : q.name} supplying.`);
+    return null;
+  },
+  sign(g, p, { offer, accept } = {}) {
+    const me = g.players.indexOf(p);
+    const o = (g.contractOffers ?? []).find((x) => x.id === offer && x.to === me);
+    if (!o) return 'That offer is no longer open.';
+    g.contractOffers = g.contractOffers.filter((x) => x !== o);
+    if (!accept) return log(g, `${p.name} turns down ${g.players[o.from].name}'s supply contract.`), null;
+    if (g.players[o.from].out) return 'That company is gone.';
+    g.contracts = g.contracts ?? [];
+    g.contracts.push({ id: o.id, seller: o.seller, buyer: o.buyer, units: o.units, price: o.price, until: Math.max(...g.players.map((x) => x.years)) + o.years });
+    log(g, `${g.players[o.seller].name} and ${g.players[o.buyer].name} sign a supply contract.`);
+    return null;
+  },
+  // Breaking a contract costs a few turns' worth of it, paid to the other side.
+  breach(g, p, { offer } = {}) {
+    const me = g.players.indexOf(p);
+    const k = (g.contracts ?? []).find((x) => x.id === offer && (x.seller === me || x.buyer === me));
+    if (!k) return 'Pick one of your contracts.';
+    const other = g.players[k.seller === me ? k.buyer : k.seller];
+    const fee = Math.round(k.units * k.price * CONFIG.contracts.breakTurns);
+    if (companyCash(p) < fee) return `Breaking it costs ${money(fee)}.`;
+    g.contracts = g.contracts.filter((x) => x !== k);
+    post(p, `Supply contract with ${other.name} broken`, { expLegal: fee, cash: -fee });
+    if (!other.out) post(other, `Compensation for ${p.name} breaking a supply contract`, { cash: fee, revOther: -fee });
+    log(g, `${p.name} breaks a supply contract with ${other.name} and pays ${money(fee)}.`);
+    return null;
+  },
+
   offer(g, p, { pos, target, amount } = {}) {
     if (g.phase === 'over') return 'The game is over.';
     const me = g.players.indexOf(p);
@@ -2646,8 +2796,12 @@ export function viewFor(g, who) {
     calendar: yearProgress(g),
     era: g.eras ? { ...eraOf(g), year: calendarYear(g) } : null,
     rescue: Boolean(g.rescue),
+    markets: Boolean(g.markets),
     outlook: g.outlook ?? null,
     offers: g.offers ?? [],
+    auction: g.auction ? { pos: g.auction.pos, closes: g.auction.closes, min: auctionMin(g.auction.pos), bidders: Object.keys(g.auction.bids).map(Number), myBid: g.auction.bids[who]?.amount ?? null } : null,
+    contracts: g.contracts ?? [],
+    contractOffers: g.contractOffers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
     log: g.log,

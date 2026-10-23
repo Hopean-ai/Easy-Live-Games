@@ -86,6 +86,12 @@ export const CONFIG = {
   // the year, then joins a new small company; a conviction stays on their record.
   chapter11: { debtCut: 0.5, cfoShares: 10, stigmaYears: 2 }, // PLACEHOLDER
   newJob: { capital: M(1500), cfoShares: 10 }, // PLACEHOLDER
+  // Miles (design principles, change 6): a lot its lander passes on goes to a sealed-bid auction
+  // among all companies, open until the end of the next player's turn. Bids start at this share of
+  // the list price. PLACEHOLDER
+  auctionMin: 0.5,
+  // Change 6b: supply contracts between independent companies' factories and stores.
+  contracts: { maxUnits: 50000, maxYears: 3, shortfallPenalty: 0.25, breakTurns: 3 }, // PLACEHOLDER
   // Miles (change 8): every company shares one calendar. The fiscal year ends for everyone at once
   // after this many rounds (about one lap of the board on average); the FYE corner gives an extra
   // board decision instead.
