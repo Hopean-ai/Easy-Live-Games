@@ -41,7 +41,7 @@ Durable Objects with SQLite storage are available on the Workers Free plan, so n
 
 ## Claude players (CFO)
 
-An admin in a CFO lobby can press **Add Claude players**. The Worker (`src/claude.js`) calls a Claude Code routine through its API trigger, passing the room code and seat tokens; the routine runs `scripts/claude-players.mjs`, which joins that room and plays with `src/cfo/bot.js` (a bookkeeper keeps its books). If a run stops mid-game, an admin can press **Reconnect Claude players** and a new run takes the same seats back.
+An admin in a CFO lobby can press **Add Claude players**. The Worker (`src/claude.js`) calls a Claude Code routine through its API trigger, passing the room code and seat tokens; the routine runs `scripts/claude-players.mjs`, which joins that room and plays with `src/cfo/bot.js` (a bookkeeper keeps its books). The players log off on their own five minutes after every other player has left. If a run stops mid-game, an admin can press **Reconnect Claude players** and a new run takes the same seats back.
 
 Setup, once:
 
@@ -60,7 +60,9 @@ it as follows, and do nothing else with it:
 3. Run `node scripts/claude-players.mjs /tmp/cfo-players.json` as a background command with the
    longest timeout allowed, and wait for it to finish without polling.
 4. If it stops before printing "All Claude players are done" (a timeout or lost connection), run it
-   again with the same file: the players get their seats back.
+   again with the same file: the players get their seats back. Once it prints "All Claude players
+   are done" (the game ended, or every other player left and the players logged off), do not run it
+   again; the run is finished.
 5. Finish with the script's last line. If the game host is refused by the network (403,
    host_not_allowed), say that host must be added to this environment's allowed domains.
 Do not change, commit or push any code.
