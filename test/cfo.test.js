@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, consolidated, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -645,7 +645,7 @@ test('the island: fly in for a fare, loop it, buy a landmark, and fly home from 
   assert.equal(act(g, 0, { a: 'fly' }), null);
   assert.equal(a.pos, ISLAND_START);
   assert.equal(b.ledger.cash, bCash + CONFIG.islandFare);
-  assert.equal(incomeStatement(a).expenses.expFreight, CONFIG.islandFare);
+  assert.equal(incomeStatement(a).expenses.expTravel, CONFIG.islandFare);
   assert.match(act(g, 0, { a: 'fly', to: airport }), /already flown/);
 
   // Landmarks come with their zone and building.
@@ -1518,4 +1518,79 @@ test('lower of cost or market: widgets that cost more than they sell for are wri
   const held = g.tiles[posOfSpace(30)].stock;
   assert.ok(a.journal.some((e) => e.text.startsWith('Inventory written down to market')));
   assert.ok(Math.abs(a.ledger.inventory - held * RETAIL.prices.common) < 0.02);
+});
+
+test('property tax: each year end bills a share of every property\'s list price plus its building\'s cost', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const p = g.players[0];
+  Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'residential', building: { rarity: 'rare', cost: M(1500), dep: 0 } });
+  Object.assign(g.tiles[posOfSpace(2)], { owner: 0 });
+  const rail = posOfSpace(5);
+  Object.assign(g.tiles[rail], { owner: 0, landBasis: Math.round(SQUARES[rail].price * CONFIG.transportLand), building: { rarity: 'transport', cost: SQUARES[rail].price - Math.round(SQUARES[rail].price * CONFIG.transportLand), dep: 0 } });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  // A transport tile is assessed once at its price, split between its land and its structures.
+  const assessed = SQUARES[posOfSpace(1)].price + M(1500) + SQUARES[posOfSpace(2)].price + SQUARES[rail].price;
+  assert.equal(p.report.income.expenses.expPropTax, Math.round(assessed * CONFIG.propertyTax));
+  const s = p.report.balance;
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('consolidated statements: a parent adds in its subsidiary, less the manager\'s share and dealings inside the group', () => {
+  const g = createGame(['A', 'B', 'C'], 32, { easyBooks: true });
+  const [a, , c] = g.players;
+  assert.equal(consolidated(g, a), null, 'no subsidiaries, nothing to consolidate');
+  act(g, 2, { a: 'resign' });
+  g.phase = 'act';
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: M(1000) }), null);
+  const balanced = (b) => assert.ok(Math.abs(b.totalAssets - b.totalLiabilitiesAndEquity) < 0.01, 'consolidated balance sheet balances');
+
+  // At the start the subsidiary is just its cash; the investment is gone and the manager owns a quarter.
+  let k = consolidated(g, a);
+  balanced(k.balance);
+  assert.equal(k.balance.assets.investments, 0);
+  assert.equal(k.balance.assets.cash, a.ledger.cash + M(1000));
+  assert.equal(k.balance.equity.nci, M(250));
+  assert.equal(k.balance.parentEquity, balanceSheet(a).totalEquity - M(250));
+  assert.equal(companyValue(a, g), k.balance.parentEquity);
+
+  // The subsidiary pays the parent rent: both sides cancel, and the group's profit is the same.
+  const lot = posOfSpace(1);
+  Object.assign(g.tiles[lot], { owner: 0 });
+  c.pos = lot - 1;
+  g.turn = 2;
+  g.phase = 'roll';
+  g.dice = null;
+  const before = consolidated(g, a).income.netIncome;
+  post(c, 'Rent to A', { expRent: M(50), cash: -M(50) });
+  post(a, 'Rent from C', { revRent: -M(50), cash: M(50) });
+  k = consolidated(g, a);
+  assert.equal(k.income.revenue.revRent, M(50), 'not yet known to be intercompany');
+  c.intra = { expRent: M(50) };
+  a.intra = { revRent: M(50) };
+  k = consolidated(g, a);
+  assert.equal(Math.abs(k.income.revenue.revRent), 0);
+  assert.equal(k.income.expenses.expRent, 0);
+  assert.equal(k.eliminated.expRent, M(50));
+  assert.equal(k.income.netIncome, before);
+  balanced(k.balance);
+
+  // The subsidiary earns: three quarters of it is the parent's, and its value rises with it.
+  const value = companyValue(a, g);
+  const nci = k.income.nciIncome;
+  post(c, 'Sales', { cash: M(400), revSales: -M(400) });
+  k = consolidated(g, a);
+  assert.equal(k.income.nciIncome - nci, M(100));
+  assert.equal(k.balance.parentEquity - (value), M(300));
+  assert.ok(companyValue(a, g) > companyValue(a), 'consolidation counts what subsidiaries build');
+
+  // Its dividend to the parent is not group income.
+  g.phase = 'act';
+  assert.equal(act(g, 2, { a: 'dividend', amount: M(400) }), null);
+  k = consolidated(g, a);
+  assert.equal(Math.abs(k.income.revenue.revDividends), 0);
+  assert.equal(k.eliminated.dividends, M(300));
+  assert.equal(k.balance.parentEquity - value, M(300), 'paying the parent moves cash inside the group');
+  balanced(k.balance);
+  assert.equal(viewFor(g, 0).players[0].consolidated.balance.parentEquity, k.balance.parentEquity);
 });

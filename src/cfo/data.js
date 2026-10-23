@@ -59,6 +59,7 @@ export const CONFIG = {
   salvage: 0.5, // PLACEHOLDER: Miles: destroyed PP&E (upgrading or rezoning) returns this share of its book value
   transportLand: 0.3, // PLACEHOLDER: Miles: a transport tile's price is 30% land, 70% PP&E (track, depots, runways) that depreciates
   rezoneFee: 0.25, // PLACEHOLDER: Miles: rezoning costs this share of the land's price, and the PP&E on it must be rebuilt
+  propertyTax: 0.015, // PLACEHOLDER: Miles: a property tax, this share of each lot's list price plus its building's cost, at each fiscal year end
   loanLimit: M(5000), // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
   rowSize: 3, // face-up zoning cards

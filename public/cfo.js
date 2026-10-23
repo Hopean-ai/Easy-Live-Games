@@ -922,10 +922,6 @@ function renderStatements() {
     el('button', { class: i === statementSeat ? '' : 'secondary', onclick: () => ((statementSeat = i), renderStatements()) }, p.name)));
   const p = g.players[statementSeat];
   const A = rules.accounts;
-  if (!g.easyBooks) {
-    $('statements').replaceChildren(...filedTables(p));
-    return;
-  }
   const line = (label, value, cls = '') => el('tr', { class: cls }, el('td', {}, label), el('td', {}, money(value)));
   const income = (s, title) => el('table', { class: 'fs' },
     el('caption', {}, title),
@@ -944,7 +940,39 @@ function renderStatements() {
       Object.entries(b.liabilities).filter(([, v]) => v).map(([k, v]) => line(A[k], v)),
       Object.entries(b.equity).filter(([, v]) => v).map(([k, v]) => line(k === 'netIncome' ? 'Net income this year' : k === 'draws' ? A.draws : A[k], v)),
       line('Total liabilities and equity', b.totalLiabilitiesAndEquity, 'total')));
+  // A parent's group accounts: its own books with its subsidiaries' added in (see consolidated in rules.js).
+  const group = (k) => {
+    const subs = k.subsidiaries.map((c) => `${c.name} (${c.own}% owned)`).join(', ');
+    const out = Object.entries(k.eliminated).map(([a, v]) => `${a === 'dividends' ? 'dividends' : A[a].toLowerCase()} ${money(v)}`).join(', ');
+    return [
+      el('p', { class: 'small' }, `Consolidated with ${subs}. Each subsidiary's figures are its own year to date.${out ? ` Cancelled inside the group: ${out}.` : ''}`),
+      el('table', { class: 'fs' },
+        el('caption', {}, 'Consolidated income statement, to date'),
+        el('tbody', {},
+          Object.entries(k.income.revenue).filter(([, v]) => v).map(([a, v]) => line(A[a], v)),
+          line('Total revenue', k.income.totalRevenue, 'total'),
+          Object.entries(k.income.expenses).filter(([, v]) => v).map(([a, v]) => line(A[a], -v)),
+          line('Income before tax', k.income.preTax, 'total'),
+          line(A.expTax, -k.income.tax),
+          line('Net income', k.income.netIncome, 'total'),
+          line('Less: noncontrolling interest', -k.income.nciIncome),
+          line(`Net income to ${p.name}'s company`, k.income.parentIncome, 'total'))),
+      el('table', { class: 'fs' },
+        el('caption', {}, 'Consolidated balance sheet, now'),
+        el('tbody', {},
+          Object.entries(k.balance.assets).filter(([, v]) => v).map(([a, v]) => line(A[a], v)),
+          line('Total assets', k.balance.totalAssets, 'total'),
+          Object.entries(k.balance.liabilities).filter(([, v]) => v).map(([a, v]) => line(A[a], v)),
+          Object.entries(k.balance.equity).filter(([, v]) => v).map(([a, v]) => line({ netIncome: 'Net income this year', nci: 'Noncontrolling interest', draws: A.draws }[a] ?? A[a], v)),
+          line('Total liabilities and equity', k.balance.totalLiabilitiesAndEquity, 'total'))),
+    ];
+  };
+  if (!g.easyBooks) {
+    $('statements').replaceChildren(...filedTables(p), ...(p.consolidated ? group(p.consolidated) : []));
+    return;
+  }
   const parts = [income(p.income, `Income statement, year ${p.years + 1} to date`), balance(p.balance, 'Balance sheet, now')];
+  if (p.consolidated) parts.push(...group(p.consolidated));
   if (p.report) {
     parts.push(income(p.report.income, `Income statement, fiscal year ${p.report.year}`), balance(p.report.balance, `Balance sheet, end of year ${p.report.year}`));
   }
