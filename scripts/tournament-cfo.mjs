@@ -4,8 +4,8 @@
 //   node scripts/tournament-cfo.mjs [games per strategy] [players] [strategy,strategy,...]
 //
 // About ±2 points of win rate is noise at 600 games.
-import { createGame, act, canBuild, companyCash, creditLimit } from '../src/cfo/rules.js';
-import { SQUARES, RARITIES, CONFIG, M } from '../src/cfo/data.js';
+import { createGame, act, canBuild, companyCash, creditLimit, hedgeQuote } from '../src/cfo/rules.js';
+import { SQUARES, RARITIES, CONFIG, M, HEDGES } from '../src/cfo/data.js';
 
 // The normal bot: keeps a cash buffer, buys and builds (factories and stores first), goes public,
 // and pays dividends out of company cash above what it saves for the dearest buildings.
@@ -33,6 +33,8 @@ export const STRATEGIES = {
   borrower: { borrow: 1 },
   noDebt: { borrow: 0 },
   bigBidder: { bid: 1 },
+  insured: { hedge: 'all' },
+  forecaster: { hedge: 'forecast' },
 };
 
 function zoneCount(g, seat, zone) {
@@ -69,6 +71,11 @@ function turn(g, seat, s) {
     if (!act(g, seat, { a: 'board', option: 'financing' })) act(g, seat, { a: 'borrow', amount: room });
   }
   for (const option of s.board) if (companyCash(p) > M(3000) && !act(g, seat, { a: 'board', option })) break;
+  // Insurance: against everything, or only against the event forecast for this year end.
+  for (const id of Object.keys(HEDGES)) {
+    const q = hedgeQuote(g, p, id);
+    if (typeof q !== 'string' && (s.hedge === 'all' || (s.hedge === 'forecast' && g.outlook?.[0] === id)) && companyCash(p) - q.premium >= s.reserve) act(g, seat, { a: 'hedge', option: id });
+  }
   if (s.ipo && !p.isPublic) act(g, seat, { a: 'ipo' });
   const extra = companyCash(p) - s.payAbove;
   if (extra > 0) act(g, seat, { a: s.payHow, amount: Math.floor(extra) });

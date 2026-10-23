@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT, HEDGES, HEDGE_RATES } from '../src/cfo/data.js';
+import { createGame, hedgeQuote, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -1936,6 +1936,63 @@ test('the economic outlook forecasts the events that hit every company, one each
   assert.equal(g.outlook.length, OUTLOOK.size);
   assert.ok(g.log.some((l) => /The economy: Boom/.test(l)));
   assert.ok(g.players.every((p, i) => companyCash(p) !== cash[i]));
+});
+
+test('insurance: the premium is prepaid, used up at the year end, and pays out a forecast recession', () => {
+  const g = createGame(['A', 'B'], 78, { easyBooks: true, valueTarget: M(1e6) });
+  const a = g.players[0];
+  g.outlook = ['recession', 'boom'];
+  Object.assign(g, { turn: 0, phase: 'act' });
+  const quote = hedgeQuote(g, a, 'recession');
+  assert.equal(quote.limit, Math.round(companyCash(a) * 0.1));
+  assert.equal(quote.rate, HEDGE_RATES.forecast, 'insurers price in the forecast');
+  assert.equal(hedgeQuote(g, a, 'spoilage').rate ?? HEDGE_RATES.base, HEDGE_RATES.base);
+  assert.match(act(g, 0, { a: 'hedge', option: 'rates' }), /too little at risk/, 'no loan, nothing to cap');
+  const cash = companyCash(a);
+  assert.equal(act(g, 0, { a: 'hedge', option: 'recession' }), null);
+  assert.equal(a.ledger.prepaid, quote.premium);
+  assert.equal(companyCash(a), cash - quote.premium);
+  assert.match(act(g, 0, { a: 'hedge', option: 'recession' }), /already/);
+  assert.equal(viewFor(g, 0).players[0].cover.recession, quote.limit);
+  // The year ends: the premium is expensed and the recession hits; A's loss is paid back.
+  g.round = CONFIG.roundsPerYear - 1;
+  Object.assign(g, { turn: 1, phase: 'act' });
+  act(g, 1, { a: 'end' });
+  assert.equal(a.ledger.prepaid, 0);
+  assert.ok(g.log.some((l) => /business interruption insurance pays out/.test(l)));
+  assert.ok(a.journal.some((e) => e.text === 'Insurance premiums used up' && e.lines.some(([k, v]) => k === 'expInsurance' && v === quote.premium)));
+  assert.ok(a.journal.some((e) => /Insurance claim/.test(e.text)));
+  assert.deepEqual(a.cover, {}, 'the cover ends with the year');
+  const bs = balanceSheet(a);
+  assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('supply chain insurance and a rate cap pay back their events, up to the cover bought', () => {
+  const g = createGame(['A', 'B'], 81, { easyBooks: true, calendar: false });
+  const a = g.players[0];
+  post(a, 'Test: widgets', { inventory: M(1000), capital: -M(1000) });
+  a.carried = 10000;
+  post(a, 'Test: loan', { cash: M(1000), loan: -M(1000) });
+  Object.assign(g, { turn: 0, phase: 'act' });
+  assert.equal(hedgeQuote(g, a, 'rates').rate, HEDGE_RATES.base);
+  assert.equal(act(g, 0, { a: 'hedge', option: 'rates' }), null);
+  assert.equal(act(g, 0, { a: 'hedge', option: 'spoilage' }), null);
+  post(a, 'Test: more loan', { cash: M(1000), loan: -M(1000) });
+  a.hand = [];
+  for (const id of ['rates', 'spoilage']) {
+    g.marketDeck = [id];
+    a.pos = posOfSpace(8) - 2;
+    while (a.pos !== posOfSpace(8)) {
+      Object.assign(g, { turn: 0, phase: 'roll' });
+      a.pos = posOfSpace(8) - 2;
+      g.marketDeck = [id];
+      act(g, 0, { a: 'roll' });
+    }
+  }
+  // The rate hike cost $200 on a $2,000 loan; the cap covered $100 of it.
+  assert.equal(a.cover.rates, 0);
+  assert.ok(a.journal.some((e) => /rate cap/.test(e.text)));
+  assert.ok(a.journal.some((e) => /supply chain insurance/.test(e.text)));
 });
 
 test('Chapter 11: a company that cannot pay reorganizes instead of failing, once', () => {

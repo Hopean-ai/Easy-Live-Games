@@ -519,6 +519,14 @@ function renderTurn() {
     if (me.isPublic && me.issuedYear !== me.years) {
       box.append(amountForm('Sell new shares', `Raise equity: sell up to ${cfg.secondaryShares} new shares to the market at about ${money(me.sharePrice)} each, once a fiscal year. No interest to pay, but every shareholder's stake, yours included, gets smaller.`, (count) => actNow({ a: 'issue', count: Math.floor(count) })));
     }
+    // Change 9: insurance and hedges, bought until the fiscal year end.
+    const quotes = Object.entries(me.hedgeQuotes ?? {});
+    if (quotes.length) {
+      box.append(el('div', { class: 'row' }, [el('span', { class: 'small' }, `Insurance and hedges, until your fiscal year end. The premium is paid now as a prepaid expense; cover against the event forecast for this year end costs ${Math.round(rules.hedgeRates.forecast * 100)}% of the cover, otherwise ${Math.round(rules.hedgeRates.base * 100)}%.`),
+        ...quotes.map(([id, q]) => typeof q === 'string'
+          ? el('span', { class: 'small', title: rules.hedges[id].text }, `${rules.hedges[id].name}: ${me.cover?.[id] !== undefined ? `${money(me.cover[id])} of cover left` : q}`)
+          : el('button', { class: 'secondary', title: rules.hedges[id].text, disabled: me.cash < q.premium, onclick: () => actNow({ a: 'hedge', option: id }) }, `${rules.hedges[id].name}: ${money(q.limit)} of cover for ${money(q.premium)}`))]));
+    }
     if (!me.policySet) {
       box.append(el('div', { class: 'row' }, [el('span', { class: 'small' }, 'Depreciation policy (choose once): straight-line spreads a building\'s cost evenly; accelerated writes off more early, lowering profit and tax now and raising them later.'),
         el('button', { class: 'secondary', onclick: () => actNow({ a: 'policy', option: 'straight' }) }, 'Straight-line'),
