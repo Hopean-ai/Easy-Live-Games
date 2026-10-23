@@ -468,6 +468,12 @@ function renderTurn() {
     box.lastChild.title = g.outlook.map((id) => `${rules.market[id].name}: ${rules.market[id].text}`).join('\n');
   }
   if (mySeat !== null && g.calendar && !g.players[mySeat]?.out) box.append(planForm(g.players[mySeat]));
+  // Change 10: pick a company profile from the two dealt, before the first roll.
+  const choices = mySeat !== null && g.players[mySeat]?.profileChoices;
+  if (choices) {
+    box.append(el('div', { class: 'row' }, [el('span', { class: 'small' }, 'Choose your company profile before your first roll (rolling takes the first):'),
+      ...choices.map((id) => el('button', { class: 'secondary', title: rules.profiles[id].text, onclick: () => actNow({ a: 'profile', option: id }) }, `${rules.profiles[id].name}: ${rules.profiles[id].text}`))]));
+  }
   if (!myTurn()) return;
   const me = g.players[mySeat];
   const sq = rules.squares[me.pos];
@@ -712,10 +718,10 @@ function amountForm(label, hint, onSubmit) {
 
 function renderPlayers() {
   const g = state.game;
-  const head = el('tr', {}, ...['', 'Company', 'Personal', 'Portfolio', 'Net worth', 'Year'].map((h, k) => el('th', { title: ['', 'Company cash', 'Personal cash', 'Personal asset portfolio', 'Net worth', 'Fiscal years closed'][k] }, h)));
+  const head = el('tr', {}, ...['', 'Company', 'Personal', 'Portfolio', 'Net worth', 'Year'].map((h, k) => el('th', { title: ['', 'Company cash', 'Personal cash', 'Executive perks', 'Net worth', 'Fiscal years closed'][k] }, h)));
   const rows = g.players.map((p, i) =>
     el('tr', { class: `${p.out ? 'out' : ''} ${i === g.turn ? 'current' : ''}` },
-      el('td', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === mySeat ? ' (you)' : ''}${p.out ? ' · out' : p.skip ? ' · at CPE' : ''}${p.isPublic ? ' · public' : ''}${p.parent !== null && !p.out ? ` · runs ${g.players[p.parent].name}'s subsidiary` : ''}${state.seats[i]?.connected ? '' : ' · away'}`),
+      el('td', {}, el('span', { class: 'dot', style: { background: COLORS[i] } }), `${p.name}${i === mySeat ? ' (you)' : ''}${p.out ? ' · out' : p.skip ? ' · at CPE' : ''}${p.profile ? ` · ${rules.profiles[p.profile].name.toLowerCase()}` : ''}${p.isPublic ? ' · public' : ''}${p.parent !== null && !p.out ? ` · runs ${g.players[p.parent].name}'s subsidiary` : ''}${state.seats[i]?.connected ? '' : ' · away'}`),
       el('td', { title: p.cash === null ? 'Hidden until they file statements' : i !== mySeat && !g.easyBooks ? 'As of their last filed statements' : '' }, p.cash === null ? '—' : money(p.cash)),
       el('td', {}, money(p.personalCash)),
       el('td', {}, money(p.portfolio)),

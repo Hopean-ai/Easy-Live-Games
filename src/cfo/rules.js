@@ -7,7 +7,7 @@
 // assets sit outside the company, as they would for a real owner.
 import {
   CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
-  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, HEDGES, HEDGE_RATES,
+  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, HEDGES, HEDGE_RATES, PROFILES, PROFILE_CHOICES,
 } from './data.js';
 
 export const ACCOUNTS = {
@@ -84,6 +84,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     eras: options.calendar !== false && options.eras !== false, // eras and the economic outlook run on the shared calendar
     rescue: options.calendar !== false,
     markets: options.calendar !== false, // lot auctions and supply contracts (change 6)
+    profiles: options.profiles !== false, // company profiles (change 10)
     turnCount: 0, // Chapter 11 and new jobs instead of knock-outs (they rejoin at the shared year end)
     round: 0,
     turn: 0,
@@ -137,9 +138,41 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     post(p, 'Founders invest starting capital', { cash: capital, capital: -capital });
   }
   for (const p of g.players) snapshot(g, p, 0);
+  if (g.profiles) dealProfiles(g, seed);
   log(g, `${g.players[0].name} goes first.`);
   return g;
 }
+
+// Change 10: deal each player two different profiles. A separate random stream, so dealing
+// doesn't change the rest of a seeded game.
+function dealProfiles(g, seed) {
+  const r = { seed: (seed ^ 0x5bd1e995) >>> 0 };
+  for (const p of g.players) {
+    const ids = Object.keys(PROFILES);
+    p.profileChoices = [];
+    while (p.profileChoices.length < PROFILE_CHOICES) p.profileChoices.push(ids.splice(Math.floor(rand(r) * ids.length), 1)[0]);
+  }
+}
+
+function pickProfile(g, p, id) {
+  const card = PROFILES[id];
+  p.profile = id;
+  p.profileChoices = null;
+  if (card.capital) {
+    const back = Math.round(companyCash(p) * (1 - card.capital));
+    post(p, 'Startup: the founders invest less up front', { capital: back, cash: -back });
+  }
+  if (card.cfoShares) {
+    const me = g.players.indexOf(p);
+    const extra = card.cfoShares - (p.shares.holders[me] ?? 0);
+    p.shares.holders[me] = card.cfoShares;
+    p.shares.founders -= extra;
+  }
+  log(g, `${p.name}'s company is a ${card.name.toLowerCase()}: ${card.text}`);
+}
+
+// A profile's effect on a company, or 1 (or 0) when it has none.
+const trait = (p, key, none = 1) => PROFILES[p?.profile]?.[key] ?? none;
 
 // The room's win settings, with anything missing or out of range set to its default.
 export function winOptions(o = {}) {
@@ -445,7 +478,7 @@ function cleanAction(action) {
   const out = { a: action.a };
   for (const f of INT_FIELDS) if (Number.isInteger(action[f]) && Math.abs(action[f]) <= MAX_AMOUNT) out[f] = action[f];
   if (Number.isFinite(action.amount) && Math.abs(action.amount) <= MAX_AMOUNT) out.amount = action.amount;
-  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option) || Object.hasOwn(HEDGES, action.option) || ['straight', 'accelerated'].includes(action.option))) out.option = action.option;
+  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option) || Object.hasOwn(HEDGES, action.option) || Object.hasOwn(PROFILES, action.option) || ['straight', 'accelerated'].includes(action.option))) out.option = action.option;
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
@@ -522,6 +555,13 @@ export function act(g, who, raw) {
   }
   // Miles: a production dial, which a company can turn at any time.
   // Miles: a pricing dial for the company's stores, also turned at any time.
+  // Change 10: pick a company profile, any time before your first roll.
+  if (action.a === 'profile') {
+    if (!p.profileChoices) return 'Your company profile is already set.';
+    if (!p.profileChoices.includes(action.option)) return 'Pick one of the profiles you were dealt.';
+    pickProfile(g, p, action.option);
+    return null;
+  }
   if (action.a === 'pricing') {
     if (!Object.hasOwn(RETAIL.pricing, action.level ?? '')) return 'Pick a price level.';
     p.pricing = action.level;
@@ -615,6 +655,7 @@ export function timeout(g) {
 const ACTIONS = {
   // Change 3b: `steps` plans the move instead of rolling, once per fiscal year.
   roll(g, p, { steps } = {}) {
+    if (p.profileChoices) pickProfile(g, p, p.profileChoices[0]);
     if (g.phase !== 'roll') return 'You have already rolled.';
     if (steps !== undefined) {
       if (!(steps >= PLANNED_MOVE.min && steps <= PLANNED_MOVE.max)) return `Plan a move of ${PLANNED_MOVE.min} to ${PLANNED_MOVE.max} squares.`;
@@ -830,17 +871,19 @@ const ACTIONS = {
     if (g.phase === 'buy') return 'Buy or pass first.';
     if (p.isPublic) return 'Your company is already public.';
     if (p.parent !== null) return 'A subsidiary cannot go public.';
-    if (!eraOf(g).ipo) return `IPOs open in the ${ERAS.find((e) => e.ipo).name}.`;
-    if (p.years < CONFIG.ipoYears) return `You need ${CONFIG.ipoYears} fiscal years of history to go public.`;
+    const early = trait(p, 'earlyIpo', false);
+    if (!eraOf(g).ipo && !early) return `IPOs open in the ${ERAS.find((e) => e.ipo).name}.`;
+    if (p.years < (early ? 1 : CONFIG.ipoYears)) return `You need ${early ? 1 : CONFIG.ipoYears} fiscal year${early ? '' : 's'} of history to go public.`;
     if (balanceSheet(p).totalEquity <= 0) return 'Investors will not buy into a company with no equity.';
     // Miles: realism. As with the SEC, investors want clean statements before a listing.
     if (p.manual && (p.misstatements || p.lastCheck?.errors)) return 'Investors want clean statements first: your last filing had misstatements.';
     const price = round((companyValue(p, g) * CONFIG.publicPremium) / totalShares(p));
-    const raised = Math.round(price * CONFIG.ipoShares);
-    p.shares.public += CONFIG.ipoShares;
+    const sold = trait(p, 'ipoShares', CONFIG.ipoShares);
+    const raised = Math.round(price * sold);
+    p.shares.public += sold;
     p.isPublic = true;
-    post(p, `Initial public offering of ${CONFIG.ipoShares} shares`, { cash: raised, capital: -raised });
-    log(g, `${p.name}'s company goes public, selling ${CONFIG.ipoShares} shares at ${money(price)} for ${money(raised)}.`);
+    post(p, `Initial public offering of ${sold} shares`, { cash: raised, capital: -raised });
+    log(g, `${p.name}'s company goes public, selling ${sold} shares at ${money(price)} for ${money(raised)}.`);
     return null;
   },
 
@@ -1209,7 +1252,7 @@ export function storeSales(g, pos, t) {
     share += RETAIL.competition * Math.sign(PRICE_RANK[g.players[r.owner].pricing ?? 'normal'] - PRICE_RANK[level]);
   });
   const boost = (g.players[t.owner]?.marketing ? 1 + BOARD.marketing.boost : 1) * eraOf(g).saturation;
-  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share) * boost), price: round(base.price * dial.price) };
+  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share) * boost), price: round(base.price * dial.price * trait(g.players[t.owner], 'storePrice')) };
 }
 
 // A company's stores: how many widgets they sell in a normal turn, and their prices.
@@ -1369,7 +1412,8 @@ export function widgetsHeld(g, p) {
 
 // What a company's factories pay per widget: research cuts it (change 3), with average costing only.
 export function unitCost(g, p) {
-  return g.costing ? round(widgetCost(g) - (p.research ?? 0) * BOARD.research.saving) : widgetCost(g);
+  const base = g.costing ? widgetCost(g) - (p.research ?? 0) * BOARD.research.saving : widgetCost(g);
+  return round(base * trait(p, 'unitCost'));
 }
 
 function makeWidgets(g, p, pos, want, why = 'Widgets made') {
@@ -2095,7 +2139,7 @@ function fiscalYearEnd(g, p) {
     if (earned) post(p, `Banking fees at ${name}`, { cash: earned, revInterest: -earned });
   });
   each('residential', (b, name, z) => {
-    const earned = Math.round(b.cost * z.yearly);
+    const earned = Math.round(b.cost * z.yearly * trait(p, 'rent'));
     if (earned) post(p, `Tenant rent at ${name}`, { cash: earned, revRent: -earned });
   });
   // Miles: one depreciation entry for the year, covering every building.
@@ -2143,7 +2187,7 @@ function fiscalYearEnd(g, p) {
   // the year end still pays for the time it was out.
   const owed = Math.max(p.peakLoan ?? 0, -p.ledger.loan);
   p.peakLoan = -p.ledger.loan;
-  const rate = Math.round((eraOf(g).loanInterest + (g.calendar ? CONFIG.creditSpread * Math.min(2, leverage(p)) : 0)) * 1000) / 1000;
+  const rate = Math.round((eraOf(g).loanInterest - trait(p, 'loanDiscount', 0) + (g.calendar ? CONFIG.creditSpread * Math.min(2, leverage(p)) : 0)) * 1000) / 1000;
   if (owed > 0) charge(g, p, owed * rate, 'expInterest', `Loan interest (${Math.round(rate * 100)}% of the most owed this year, ${money(owed)})`);
   if (p.out) return;
   // Miles: a bookkeeper is paid by the document, for every one it posts at this year end.
@@ -2983,6 +3027,8 @@ export function viewFor(g, who) {
       creditLimit: creditLimit(p, g),
       policySet: Boolean(p.policySet),
       cover: p.cover ?? {},
+      profile: p.profile ?? null,
+      profileChoices: p.profileChoices ?? null,
       issuedYear: p.issuedYear ?? null,
       rejoin: Boolean(p.out && p.rejoin),
       marketing: Boolean(p.marketing),
