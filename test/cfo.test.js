@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT, HEDGES, HEDGE_RATES } from '../src/cfo/data.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT, HEDGES, HEDGE_RATES, PROFILES } from '../src/cfo/data.js';
 import { createGame, hedgeQuote, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
@@ -1648,7 +1648,7 @@ test('companies are priced on earnings, and dividends count toward shareholder v
 });
 
 test('an Activist Investor makes companies pay out idle cash as a dividend', () => {
-  const g = createGame(['A', 'B'], 71, { easyBooks: true, valueTarget: M(1e6) });
+  const g = createGame(['A', 'B'], 71, { easyBooks: true, valueTarget: M(1e6), profiles: false });
   const [a, b] = g.players;
   post(b, 'Land', { land: M(2900), cash: -M(2900) }); // B's cash is under 40% of its assets
   const cash = companyCash(a);
@@ -1993,6 +1993,37 @@ test('supply chain insurance and a rate cap pay back their events, up to the cov
   assert.equal(a.cover.rates, 0);
   assert.ok(a.journal.some((e) => /rate cap/.test(e.text)));
   assert.ok(a.journal.some((e) => /supply chain insurance/.test(e.text)));
+});
+
+test('company profiles: two dealt, one picked before the first roll, each with its own strength', () => {
+  const g = createGame(['A', 'B', 'C'], 82, { easyBooks: true });
+  const [a, b, c] = g.players;
+  assert.equal(createGame(['A', 'B', 'C'], 82, { profiles: false }).seed, g.seed, 'dealing leaves the game\'s dice alone');
+  for (const p of g.players) assert.equal(new Set(p.profileChoices).size, 2);
+  const other = Object.keys(PROFILES).find((id) => !a.profileChoices.includes(id));
+  assert.match(act(g, 0, { a: 'profile', option: other }), /dealt/);
+  // Every effect, tried by setting the profile directly.
+  const lot = posOfSpace(1);
+  Object.assign(g.tiles[lot], { owner: 1, zone: 'retail', building: { rarity: 'common', cost: M(100), dep: 0 } });
+  const plain = storeSales(g, lot, g.tiles[lot]).price;
+  const cost = unitCost(g, b);
+  b.profile = 'retailer';
+  assert.equal(storeSales(g, lot, g.tiles[lot]).price, Math.round(plain * PROFILES.retailer.storePrice * 100) / 100);
+  b.profile = 'manufacturer';
+  assert.ok(unitCost(g, b) < cost);
+  // A startup: less cash, a bigger stake. Picked by rolling without choosing, if it was dealt first.
+  c.profileChoices = ['startup', 'lender'];
+  const cash = companyCash(c);
+  Object.assign(g, { turn: 2, phase: 'roll' });
+  act(g, 2, { a: 'roll' });
+  assert.equal(c.profile, 'startup');
+  assert.equal(c.shares.holders[2], PROFILES.startup.cfoShares);
+  assert.equal(c.shares.founders + c.shares.holders[2], 100);
+  assert.ok(companyCash(c) <= Math.round(cash * PROFILES.startup.capital) + M(1000));
+  assert.match(act(g, 2, { a: 'profile', option: 'lender' }), /already/);
+  assert.equal(viewFor(g, 0).players[2].profile, 'startup');
+  const bs = balanceSheet(c);
+  assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
 });
 
 test('Chapter 11: a company that cannot pay reorganizes instead of failing, once', () => {

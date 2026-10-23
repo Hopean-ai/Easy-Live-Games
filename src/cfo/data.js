@@ -359,6 +359,17 @@ export const HEDGES = {
 };
 export const HEDGE_RATES = { base: 0.25, forecast: 0.5, minimum: M(10) };
 
+// Design change 10: company profiles. Each player is dealt two and picks one before their first
+// roll, so every company starts with its own strength. PLACEHOLDER amounts.
+export const PROFILES = {
+  manufacturer: { name: 'Manufacturer', unitCost: 0.9, text: 'Your factories make widgets 10% cheaper.' },
+  retailer: { name: 'Retailer', storePrice: 1.05, text: 'Your stores charge 5% more per widget.' },
+  property: { name: 'Property company', rent: 1.25, text: 'Your Residential buildings earn 25% more tenant rent.' },
+  lender: { name: 'Lender', loanDiscount: 0.04, text: 'Your company borrows from the Bank at 4 points less interest.' },
+  startup: { name: 'Startup', capital: 0.8, cfoShares: 30, ipoShares: 50, earlyIpo: true, text: 'Founders put in 20% less cash, but you hold 30 shares instead of 20, and you can go public from your first fiscal year end, in any era, selling 50 shares instead of 25.' },
+};
+export const PROFILE_CHOICES = 2;
+
 export const OUTLOOK = { size: 2, events: ['recession', 'boom', 'rates', 'housing', 'shortage', 'rezoning', 'holiday', 'spoilage', 'default', 'crunch', 'shipping', 'activist'] };
 
 export const SUPPLY = {
