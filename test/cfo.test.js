@@ -1080,7 +1080,10 @@ test('a bookkeeper records and files everything for a fee, with no clean-books b
   act(g, 0, { a: 'roll' });
   assert.equal(p.fyePending, null, 'the statements are filed');
   assert.equal(p.misstatements, 0);
-  assert.ok(p.journal.some((e) => e.text === 'Bookkeeping fees'));
+  const fee = p.journal.find((e) => e.text.startsWith('Bookkeeping fees'));
+  const docs = Number(fee.text.match(/\((\d+) document/)[1]);
+  assert.ok(docs > 0);
+  assert.deepEqual(fee.lines.find(([a]) => a === 'expOther'), ['expOther', docs * CONFIG.bookkeeperFee], 'paid by the document');
   assert.ok(!p.journal.some((e) => e.text === 'Bonus for clean books'));
   assert.equal(act(g, 0, { a: 'outsource', on: false }), null);
   assert.equal(p.outsourced, false);

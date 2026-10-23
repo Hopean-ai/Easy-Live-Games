@@ -1533,7 +1533,9 @@ function fiscalYearEnd(g, p) {
   p.peakLoan = -p.ledger.loan;
   if (owed > 0) charge(g, p, owed * CONFIG.loanInterest, 'expInterest', `Loan interest (${Math.round(CONFIG.loanInterest * 100)}% of the most owed this year, ${money(owed)})`);
   if (p.out) return;
-  if (p.outsourced) charge(g, p, CONFIG.bookkeeperFee, 'expOther', 'Bookkeeping fees');
+  // Miles: a bookkeeper is paid by the document, for every one it posts at this year end.
+  const covered = p.outsourced ? p.docs.filter((d) => !d.filed && d.year <= p.years + 1).length : 0;
+  if (covered) charge(g, p, covered * CONFIG.bookkeeperFee, 'expOther', `Bookkeeping fees (${covered} document${covered > 1 ? 's' : ''} at ${money(CONFIG.bookkeeperFee)})`);
   if (p.out) return;
   // Miles: the year end is payday. The company pays you automatically: a base salary plus a bonus
   // on the year's profit before your pay, as much as its cash allows. It is a company expense,

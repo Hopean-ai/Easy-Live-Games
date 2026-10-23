@@ -1004,9 +1004,9 @@ function renderBooks() {
   if (!manual) return;
   renderCheck(me);
   $('bookkeeper').replaceChildren(me.outsourced
-    ? el('p', { class: 'small' }, `A bookkeeper posts your entries and files your statements for ${money(rules.config.bookkeeperFee)} a year. Clean-books bonuses go to people who keep their own books. `,
+    ? el('p', { class: 'small' }, `A bookkeeper posts your entries and files your statements for ${money(rules.config.bookkeeperFee)} per document, billed at each fiscal year end. Clean-books bonuses go to people who keep their own books. `,
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: false }) }, 'Keep my own books'))
-    : el('p', { class: 'small' }, `Not an accountant? A bookkeeper posts every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} a year, but you give up the clean-books bonus. `,
+    : el('p', { class: 'small' }, `Not an accountant? A bookkeeper posts every entry and files your statements correctly for ${money(rules.config.bookkeeperFee)} per document, billed at each fiscal year end, but you give up the clean-books bonus. `,
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'outsource', on: true }) }, 'Hire a bookkeeper')));
   // Miles: with a bookkeeper there is nothing to post, so the documents and journal stay out of the way.
   if (me.outsourced) {
