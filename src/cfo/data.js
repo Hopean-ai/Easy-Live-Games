@@ -33,7 +33,7 @@ export const CONFIG = {
   // price plus every dividend paid per share, for the company's original 100 shares. Paying out
   // dividends doesn't set a company back in the race; paying the CFO bonuses does.
   valueTarget: M(75000), // PLACEHOLDER: shareholder value that wins (bot tournament: reached around year 12-13, hoarding no better than paying dividends)
-  maxYears: 16, // room setting: end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
+  maxYears: 12, // room setting (Miles, change 4: eras give the game an arc, so the default is shorter; was 16): end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
   // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
   // adds to the chance, but fraud should break even at about 3-4 frauds. A check's chance is this
   // x the square of the frauds on record (PLACEHOLDER), and one fraud ages off every few years.
@@ -299,6 +299,21 @@ export const BOARD = {
 };
 // Change 3b: once per fiscal year, a CFO can plan a move of 1 to 6 squares instead of rolling.
 export const PLANNED_MOVE = { min: 1, max: 6 };
+
+// Miles (design principles, change 4): the economy moves through three eras on the shared
+// calendar. Each era sets the largest PP&E that can be built, what's open, and the Bank's rate.
+// saturation scales every store's sales once markets mature. PLACEHOLDERS.
+export const ERAS = [
+  { id: 'startup', name: 'Startup era', from: 1, maxRarity: 'rare', ipo: false, buyouts: false, island: false, loanInterest: 0.06, saturation: 1,
+    text: 'Cheap money and small buildings: up to Rare PP&E, Bank loans at 6%. No IPOs, buyouts or island flights yet.' },
+  { id: 'growth', name: 'Growth era', from: 5, maxRarity: 'epic', ipo: true, buyouts: true, island: false, loanInterest: 0.1, saturation: 1,
+    text: 'Capital markets open: IPOs and buyouts, Epic PP&E, Bank loans at 10%.' },
+  { id: 'maturity', name: 'Maturity era', from: 10, maxRarity: 'legendary', ipo: true, buyouts: true, island: true, loanInterest: 0.12, saturation: 0.85,
+    text: 'Markets saturate: stores sell 15% less, Legendary PP&E and the island open, Bank loans at 12%. Returning cash to shareholders matters more.' },
+];
+// Change 4b: the economic outlook shows the next events that will hit every company, one firing at
+// each shared year end, so players can prepare.
+export const OUTLOOK = { size: 2, events: ['recession', 'boom', 'rates', 'housing', 'shortage', 'rezoning', 'holiday', 'spoilage', 'default', 'crunch', 'shipping', 'activist'] };
 
 export const SUPPLY = {
   levels: {
