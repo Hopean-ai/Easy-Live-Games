@@ -79,6 +79,10 @@ export const CONFIG = {
   maxBankOptions: 2, // PLACEHOLDER: extra private PP&E choices from owning Banking buildings
   settlement: M(5000), // PLACEHOLDER: paid at island Customs to settle one fraud and clear it from your record
   islandFare: M(1500), // PLACEHOLDER: company cash paid to an airport's owner to fly to or from the island
+  // Miles (change 8): every company shares one calendar. The fiscal year ends for everyone at once
+  // after this many rounds (about one lap of the board on average); the FYE corner gives an extra
+  // board decision instead.
+  roundsPerYear: 9, // PLACEHOLDER
   turnSeconds: 0, // 0 = no turn timer (Miles: off for now). Set to e.g. 60 to auto-play idle turns.
 };
 

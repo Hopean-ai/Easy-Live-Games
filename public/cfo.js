@@ -446,6 +446,7 @@ function renderTurn() {
   $('claude-back').hidden = !state.seats[mySeat]?.admin || g.phase === 'over'
     || !state.seats.some((s, i) => s.guest && /^Claude \d+$/.test(s.name) && !s.connected && !g.players[i]?.out);
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
+  if (g.calendar && g.phase !== 'over') $('turn-text').textContent += ` · fiscal year ${(g.players.find((p) => !p.out)?.years ?? 0) + 1}, round ${g.calendar.round} of ${g.calendar.of}`;
   if (g.win) {
     $('goal').textContent = `Win: last standing, ${money(g.win.valueTarget)} of shareholder value, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
     $('goal').title = winLines(g.win).join('\n');
@@ -461,6 +462,7 @@ function renderTurn() {
     if (mySeat !== null) box.append(el('button', { onclick: () => send({ t: 'again' }) }, 'Play again with this table'));
     return;
   }
+  if (mySeat !== null && g.calendar && !g.players[mySeat]?.out) box.append(planForm(g.players[mySeat]));
   if (!myTurn()) return;
   const me = g.players[mySeat];
   const sq = rules.squares[me.pos];
@@ -536,16 +538,32 @@ function scorecardTable(g) {
   ]);
 }
 
+// A sealed plan for next year, made any time: rivals see only that one is sealed until the
+// shared year end, when everyone's plans take effect together.
+function planForm(me) {
+  const plan = me.plan && typeof me.plan === 'object' ? me.plan : {};
+  const choose = (opts, value, none) => el('select', {}, [el('option', { value: '' }, none), ...Object.entries(opts).map(([id, o]) => el('option', { value: id, ...(value === id ? { selected: '' } : {}) }, o.name))]);
+  const pricing = choose(rules.retail.pricing, plan.pricing, 'Pricing: no change');
+  const production = choose(rules.supply.levels, plan.production, 'Production: no change');
+  const dividend = el('input', { type: 'number', min: '0', step: '1000', placeholder: 'Dividend', value: plan.dividend ? String(plan.dividend) : '' });
+  return el('details', { class: 'plan' }, [
+    el('summary', {}, me.plan ? 'Board plan for next year (sealed)' : 'Board plan for next year'),
+    el('p', { class: 'small' }, `Every company's year ends together after round ${rules.config.roundsPerYear}. Plans are sealed until then and take effect for everyone at once.`),
+    el('div', { class: 'row' }, [pricing, production, dividend,
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'plan', pricing: pricing.value || undefined, production: production.value || undefined, amount: Number(dividend.value) || 0 }) }, 'Seal plan')]),
+  ]);
+}
+
 // One board decision a turn, wherever you landed.
 function boardControls(me) {
   const g = state.game;
   const b = rules.board;
   const wrap = el('div', { class: 'board-decision' }, [el('h3', {}, 'Board decision')]);
-  if (me.boardAction) {
+  if (!me.boardLeft) {
     wrap.append(el('p', { class: 'small' }, `Made this turn: ${b[me.boardAction].name}.`));
     return wrap;
   }
-  wrap.append(el('p', { class: 'small' }, 'Make one of these each turn, wherever you landed.'));
+  wrap.append(el('p', { class: 'small' }, me.boardLeft > 1 ? `Extra board meeting: ${me.boardLeft} decisions left this turn.` : 'Make one of these each turn, wherever you landed.'));
   const stores = g.tiles.filter((t) => t?.owner === mySeat && t.zone === 'retail' && t.building).length;
   const row = el('div', { class: 'row' });
   row.append(el('button', { class: 'secondary', disabled: !stores || me.marketing, title: b.marketing.text, onclick: () => actNow({ a: 'board', option: 'marketing' }) },
@@ -710,11 +728,11 @@ function renderTile() {
   } else {
     $('tile-title').textContent = CORNER_NAMES[sq.kind][1];
     box.push(el('p', {}, {
-      fye: 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
+      fye: state.game?.calendar ? `Board room. Landing here calls an extra board meeting: two board decisions that turn. Every company's fiscal year ends together after round ${rules.config.roundsPerYear}.` : 'Passing or landing here closes your fiscal year: core revenue, PP&E operations, depreciation, interest, tax, spouse costs, then statements.',
       bank: `Land here to borrow up to ${money(rules.config.loanLimit)} at ${Math.round(rules.config.loanInterest * 100)}% a year, charged on the most you owe during the year.`,
       cpe: 'Landing here means a turn out for Continuing Professional Education.',
       review: `An audit. Misstatements in your books are fined. Auditors find one fraud on record ${(rules.config.auditFraudChance * 100).toFixed(1)}% of the time, and the chance grows with the square of your frauds: four is ${(rules.config.auditFraudChance * 1600).toFixed(1)}%. Being caught is an immediate loss. One fraud ages off the record every ${rules.config.fraudExpiryYears} fiscal years.`,
-      terminal: `The island's airport. Passing or landing here completes a lap of the island and closes your fiscal year. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
+      terminal: `The island's airport. Passing or landing here completes a lap of the island${state.game?.calendar ? '' : ' and closes your fiscal year'}. That turn you can fly home to any airport for ${money(rules.config.islandFare)}. Your own airline flies you free.`,
       haven: 'An Offshore Haven. Land here to draw a Fraud card.',
       customs: 'Customs. Landing here means an audit, just like an Interim Review.',
       exchange: `The Exchange. Land here and personal assets cost ${money(rules.config.personalAssetPrice / 2)} that turn.`,

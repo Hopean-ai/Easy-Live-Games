@@ -84,7 +84,7 @@ test('whole games finish with balanced books, from 2 to 6 players', () => {
 });
 
 test('players post their own entries and file their own statements', () => {
-  const g = createGame(['A', 'B'], 21);
+  const g = createGame(['A', 'B'], 21, { calendar: false });
   const p = g.players[0];
   // The starting capital is the first document to record.
   assert.equal(p.docs.length, 1);
@@ -204,7 +204,7 @@ test('buying land takes a zoning card and posts a journal entry', () => {
 });
 
 test('a fiscal year end pays your salary, depreciates, taxes and closes the books', () => {
-  const g = createGame(['A', 'B'], 3);
+  const g = createGame(['A', 'B'], 3, { calendar: false });
   const p = g.players[0];
   Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'residential', building: { rarity: 'rare', cost: 1000, dep: 0 } });
   p.pos = BOARD_SIZE - 2; // any roll passes FYE
@@ -386,7 +386,7 @@ test('factories make what the stores need each turn, and logistics ship it to th
 });
 
 test('loans add a liability and charge interest at year end', () => {
-  const g = createGame(['A', 'B'], 4);
+  const g = createGame(['A', 'B'], 4, { calendar: false });
   const p = g.players[0];
   g.phase = 'act';
   assert.match(act(g, 0, { a: 'borrow', amount: 500 }), /Bank/);
@@ -496,7 +496,7 @@ test('each Banking building shows its owner one more private PP&E option', () =>
 test('frauds can also be found when passing FYE', () => {
   let caught = 0;
   for (let seed = 1; seed <= 200; seed++) {
-    const g = createGame(['A', 'B', 'C'], seed, { easyBooks: true });
+    const g = createGame(['A', 'B', 'C'], seed, { easyBooks: true, calendar: false });
     const p = g.players[0];
     p.frauds = 8;
     p.pos = BOARD_SIZE - 2;
@@ -733,7 +733,7 @@ test('your own transport ships to other sides free, even while you are away', ()
 });
 
 test('statements not filed by the next year end are filed blank', () => {
-  const g = createGame(['A', 'B'], 22);
+  const g = createGame(['A', 'B'], 22, { calendar: false });
   const p = g.players[0];
   for (let year = 1; year <= 2; year++) {
     Object.assign(g, { turn: 0, phase: 'roll' });
@@ -747,7 +747,7 @@ test('statements not filed by the next year end are filed blank', () => {
 
 test('auto statements are built from the entries players post', () => {
   for (const mistake of [false, true]) {
-    const g = createGame(['A', 'B'], 23, { autoStatements: true });
+    const g = createGame(['A', 'B'], 23, { autoStatements: true, calendar: false });
     const p = g.players[0];
     Object.assign(g, { turn: 0, phase: 'roll' });
     p.pos = BOARD_SIZE - 2;
@@ -912,7 +912,7 @@ test('a convicted manager is watched more closely when hired back', () => {
 });
 
 test('an absent player\'s books are kept for them when their turn times out', () => {
-  const g = createGame(['A', 'B'], 56);
+  const g = createGame(['A', 'B'], 56, { calendar: false });
   const a = g.players[0];
   Object.assign(g, { turn: 0, phase: 'roll' });
   a.pos = BOARD_SIZE - 2;
@@ -1012,7 +1012,7 @@ test('the Personal Assets square always gives a free card or a discount on one c
 });
 
 test('plain personal assets pay perks', () => {
-  const g = createGame(['A', 'B'], 7);
+  const g = createGame(['A', 'B'], 7, { calendar: false });
   const p = g.players[0];
   // Mountain Cabin: no sitting out at CPE.
   p.assets = ['cabin'];
@@ -1056,7 +1056,7 @@ test('plain personal assets pay perks', () => {
 });
 
 test('frauds age off the record, one every few fiscal years', () => {
-  const g = createGame(['A', 'B'], 61, { easyBooks: true });
+  const g = createGame(['A', 'B'], 61, { easyBooks: true, calendar: false });
   const p = g.players[0];
   p.frauds = 2;
   const yearEnd = () => {
@@ -1073,7 +1073,7 @@ test('frauds age off the record, one every few fiscal years', () => {
 });
 
 test('a bookkeeper records and files everything for a fee, with no clean-books bonus', () => {
-  const g = createGame(['A', 'B'], 62);
+  const g = createGame(['A', 'B'], 62, { calendar: false });
   const p = g.players[0];
   assert.equal(act(g, 0, { a: 'outsource', on: true }), null);
   Object.assign(g, { turn: 0, phase: 'roll' });
@@ -1122,7 +1122,7 @@ test('a whistleblower tip runs a fraud check on a rival and pays a reward on a c
 });
 
 test('a discounted building is booked, depreciated and sold at what was paid', () => {
-  const g = createGame(['A', 'B'], 64, { easyBooks: true });
+  const g = createGame(['A', 'B'], 64, { easyBooks: true, calendar: false });
   const p = g.players[0];
   const pos = posOfSpace(1);
   Object.assign(g.tiles[pos], { owner: 0, zone: 'retail', building: null });
@@ -1263,7 +1263,7 @@ test('shipping to the island needs an airport of your own', () => {
 });
 
 test('a game begun with typed statements switches to statements built from entries', () => {
-  const g = createGame(['A', 'B'], 23);
+  const g = createGame(['A', 'B'], 23, { calendar: false });
   g.autoStatements = false; // as saved before the switch
   const p = g.players[0];
   Object.assign(g, { turn: 0, phase: 'roll' });
@@ -1276,7 +1276,7 @@ test('a game begun with typed statements switches to statements built from entri
 });
 
 test('a transport tile is booked as land and PP&E, and its PP&E depreciates', () => {
-  const g = createGame(['A', 'B'], 15, { easyBooks: true });
+  const g = createGame(['A', 'B'], 15, { easyBooks: true, calendar: false });
   const p = g.players[0];
   const airport = posOfSpace(34);
   const price = SQUARES[airport].price;
@@ -1297,7 +1297,7 @@ test('a transport tile is booked as land and PP&E, and its PP&E depreciates', ()
 });
 
 test('a fiscal year end books one depreciation entry for all buildings', () => {
-  const g = createGame(['A', 'B'], 16);
+  const g = createGame(['A', 'B'], 16, { calendar: false });
   const p = g.players[0];
   for (const n of [1, 2, 3]) Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'industrial', building: { rarity: 'common', cost: 1000, dep: 0 } });
   p.pos = BOARD_SIZE - 2;
@@ -1334,7 +1334,7 @@ test('over whole games, statements built from correct entries match the true boo
 });
 
 test('the CFO starts with a stake, buys new shares with personal cash, and is paid in stock once public', () => {
-  const g = createGame(['A', 'B'], 31, { easyBooks: true });
+  const g = createGame(['A', 'B'], 31, { easyBooks: true, calendar: false });
   const p = g.players[0];
   assert.deepEqual(p.shares, { holders: { 0: CONFIG.cfoShares }, founders: 100 - CONFIG.cfoShares, public: 0 });
   const [cash, personal, capital] = [p.ledger.cash, p.personalCash, p.ledger.capital];
@@ -1422,7 +1422,7 @@ test('the end-of-game recap: a point per fiscal year end, shown only once the ga
 });
 
 test('company cash earns bank interest once, however many banks; each bank adds its own fees', () => {
-  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const g = createGame(['A', 'B'], 3, { easyBooks: true, calendar: false });
   const p = g.players[0];
   for (const n of [1, 3]) Object.assign(g.tiles[posOfSpace(n)], { owner: 0, zone: 'banking', building: { rarity: 'rare', cost: M(1000), dep: 0 } });
   p.pos = BOARD_SIZE - 2; // any roll passes FYE
@@ -1439,7 +1439,7 @@ test('company cash earns bank interest once, however many banks; each bank adds 
 });
 
 test('trade credit: half of store sales are collected later, materials are paid later', () => {
-  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const g = createGame(['A', 'B'], 3, { easyBooks: true, calendar: false });
   const a = g.players[0];
   store(g, 0, 30, 'common', 100);
   const factory = posOfSpace(31);
@@ -1478,7 +1478,7 @@ test('trade credit: half of store sales are collected later, materials are paid 
 });
 
 test('Fictitious Receivables inflate one year, then are written off; a cash shortfall sells real ones to a factor', () => {
-  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const g = createGame(['A', 'B'], 3, { easyBooks: true, calendar: false });
   const a = g.players[0];
   a.hand = ['fictitious'];
   g.phase = 'act';
@@ -1538,7 +1538,7 @@ test('inventory at average cost: freight to your stores is part of it, and widge
 });
 
 test('lower of cost or market: widgets that cost more than they sell for are written down at the year end', () => {
-  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const g = createGame(['A', 'B'], 3, { easyBooks: true, calendar: false });
   const a = g.players[0];
   store(g, 0, 30, 'common', 100, 1000);
   post(a, 'Pricey widgets', { inventory: M(30), cash: -M(30) }); // 1,000 widgets at $3
@@ -1615,7 +1615,7 @@ test('at the year limit, the CFO scorecard picks the winner', () => {
 });
 
 test('property tax: each year end bills a share of every property\'s list price plus its building\'s cost', () => {
-  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const g = createGame(['A', 'B'], 3, { easyBooks: true, calendar: false });
   const p = g.players[0];
   Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'residential', building: { rarity: 'rare', cost: M(1500), dep: 0 } });
   Object.assign(g.tiles[posOfSpace(2)], { owner: 0 });
@@ -1690,7 +1690,7 @@ test('consolidated statements: a parent adds in its subsidiary, less the manager
 });
 
 test('a journal entry can be dated to the year still to file or the year under way', () => {
-  const g = createGame(['A', 'B'], 23);
+  const g = createGame(['A', 'B'], 23, { calendar: false });
   const p = g.players[0];
   Object.assign(g, { turn: 0, phase: 'roll' });
   p.pos = BOARD_SIZE - 2;
@@ -1709,7 +1709,7 @@ test('a journal entry can be dated to the year still to file or the year under w
 });
 
 test('a timed-out player has the missing entries posted for them', () => {
-  const g = createGame(['A', 'B'], 23);
+  const g = createGame(['A', 'B'], 23, { calendar: false });
   const p = g.players[0];
   assert.equal(act(g, 0, { a: 'entry', lines: [['cash', 100], ['revOther', -100]] }), null);
   Object.assign(g, { turn: 0, phase: 'roll' });
@@ -1752,21 +1752,21 @@ test('one board decision a turn: marketing, research, calling the bank or restru
   assert.equal(storeSales(g, store, g.tiles[store]).units, Math.round(before * (1 + BOARD.marketing.boost)));
   assert.match(act(g, 0, { a: 'board', option: 'research' }), /already/, 'one decision a turn');
   // Next turn: research cuts the widget cost for good.
-  a.boardAction = null;
+  a.boardLeft = 1; // a new turn
   const unit = unitCost(g, a);
   assert.equal(act(g, 0, { a: 'board', option: 'research' }), null);
   assert.equal(unitCost(g, a), Math.round((unit - BOARD.research.saving) * 100) / 100);
   assert.equal(a.ledger.expResearch, BOARD.research.cost);
   // Calling the bank lets you borrow wherever you are.
-  a.boardAction = null;
+  a.boardLeft = 1; // a new turn
   assert.equal(act(g, 0, { a: 'board', option: 'financing' }), null);
   assert.equal(act(g, 0, { a: 'borrow', amount: M(100) }), null);
   // Restructuring sells the building, then on a later turn the land, to the bank.
-  a.boardAction = null;
+  a.boardLeft = 1; // a new turn
   assert.equal(act(g, 0, { a: 'board', option: 'restructure', pos: store }), null);
   assert.equal(g.tiles[store].building, null);
   assert.equal(g.tiles[store].owner, 0);
-  a.boardAction = null;
+  a.boardLeft = 1; // a new turn
   assert.equal(act(g, 0, { a: 'board', option: 'restructure', pos: store }), null);
   assert.equal(g.tiles[store].owner, null);
   const s = balanceSheet(a);
@@ -1785,4 +1785,44 @@ test('once a fiscal year, a CFO can plan a move instead of rolling', () => {
   act(g, 1, { a: 'pass' });
   act(g, 1, { a: 'end' });
   assert.match(act(g, 0, { a: 'roll', steps: 2 }), /already planned/);
+});
+
+test('one shared calendar: the year ends for everyone after a set number of rounds', () => {
+  const g = createGame(['A', 'B', 'C'], 75, { easyBooks: true, valueTarget: M(1e6) });
+  assert.equal(viewFor(g, 0).calendar.round, 1);
+  const turn = () => {
+    const w = g.turn;
+    act(g, w, { a: 'roll' });
+    if (g.phase === 'buy') act(g, w, { a: 'pass' });
+    act(g, w, { a: 'end' });
+  };
+  for (let r = 0; r < CONFIG.roundsPerYear - 1; r++) for (let k = 0; k < 3; k++) turn();
+  assert.ok(g.players.every((p) => p.years === 0), 'passing the FYE corner no longer closes a year');
+  assert.equal(viewFor(g, 0).calendar.round, CONFIG.roundsPerYear);
+  // Sealed plans: hidden from rivals, then revealed together at the year end.
+  assert.equal(act(g, 1, { a: 'plan', pricing: 'low', production: 'full', amount: M(100) }), null);
+  assert.equal(viewFor(g, 0).players[1].plan, 'sealed');
+  assert.deepEqual(viewFor(g, 1).players[1].plan, { pricing: 'low', production: 'full', dividend: M(100) });
+  const cash = companyCash(g.players[1]);
+  for (let k = 0; k < 3; k++) turn();
+  assert.ok(g.players.every((p) => p.years === 1), 'every company closes the year together');
+  const b = g.players[1];
+  assert.equal(b.pricing, 'low');
+  assert.equal(b.production, 'full');
+  assert.equal(b.plan, null);
+  assert.ok(b.dividendsPerShare > 0);
+  assert.ok(companyCash(b) < cash);
+  assert.ok(g.log.some((l) => /board plan for the new year/.test(l)));
+});
+
+test('with a shared calendar, the FYE corner calls an extra board meeting', () => {
+  const g = createGame(['A', 'B'], 76, { easyBooks: true, valueTarget: M(1e6) });
+  const [a] = g.players;
+  a.pos = BOARD_SIZE - 3;
+  act(g, 0, { a: 'roll', steps: 3 });
+  assert.equal(a.pos, 0);
+  assert.equal(a.years, 0);
+  assert.equal(act(g, 0, { a: 'board', option: 'financing' }), null);
+  assert.equal(act(g, 0, { a: 'board', option: 'research' }), null, 'a second decision');
+  assert.match(act(g, 0, { a: 'board', option: 'marketing' }), /already/);
 });
