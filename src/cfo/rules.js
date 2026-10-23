@@ -77,6 +77,8 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     widgetCost: ZONES.industrial.variableCost + ZONES.industrial.overhead,
     costing: true, // inventory at average cost, with freight in it (older games keep a fixed cost per widget)
     credit: true, // sales and supplier credit (games begun before it settle everything in cash)
+    calendar: options.calendar !== false, // one shared fiscal year (games begun before it close each year at the FYE corner)
+    round: 0,
     turn: 0,
     phase: 'roll', // roll | buy | act | over
     dice: null,
@@ -430,6 +432,8 @@ function cleanAction(action) {
   if (typeof action.memo === 'string') out.memo = action.memo.slice(0, MEMO_SIZE);
   if (typeof action.accept === 'boolean') out.accept = action.accept;
   if (typeof action.level === 'string' && (Object.hasOwn(SUPPLY.levels, action.level) || Object.hasOwn(RETAIL.pricing, action.level))) out.level = action.level;
+  if (typeof action.pricing === 'string' && Object.hasOwn(RETAIL.pricing, action.pricing)) out.pricing = action.pricing;
+  if (typeof action.production === 'string' && Object.hasOwn(SUPPLY.levels, action.production)) out.production = action.production;
   for (const k of ['income', 'balance']) {
     const src = action[k];
     if (!src || typeof src !== 'object') continue;
@@ -518,6 +522,17 @@ export function act(g, who, raw) {
     afterAction(g);
     return null;
   }
+  // Change 8: a sealed plan for the new year, made any time and revealed at the shared year end.
+  if (action.a === 'plan') {
+    if (!g.calendar) return 'This game has no shared year end.';
+    const plan = {};
+    if (action.pricing) plan.pricing = action.pricing;
+    if (action.production) plan.production = action.production;
+    if (action.amount > 0) plan.dividend = Math.floor(action.amount);
+    p.plan = Object.keys(plan).length ? plan : null;
+    log(g, `${p.name} ${p.plan ? 'seals' : 'withdraws'} a board plan for next year.`);
+    return null;
+  }
   if (action.a === 'production') {
     if (!Object.hasOwn(SUPPLY.levels, action.level ?? '')) return 'Pick a production level.';
     p.production = action.level;
@@ -564,6 +579,7 @@ const ACTIONS = {
     }
     p.atBank = false;
     p.boardAction = null;
+    p.boardLeft = 1;
     p.atTerminal = false;
     p.atExchange = false;
     p.personalOffer = 0;
@@ -587,10 +603,10 @@ const ACTIONS = {
     // Step square by square: widgets are picked up, dropped off and shipped along the way.
     for (let i = 0; i < d[0] + d[1] && !p.out; i++) {
       p.pos = nextPos(p.pos);
-      if (p.pos === 0) fiscalYearEnd(g, p);
+      if (p.pos === 0 && !g.calendar) fiscalYearEnd(g, p);
       if (p.pos === ISLAND_START) {
         // Passing or landing on the island's Terminal completes a lap and offers a flight home.
-        // It also closes the fiscal year, so a company stuck on the island still keeps its books.
+        // In games without the shared calendar it also closes the fiscal year.
         p.islandLaps = (p.islandLaps ?? 0) + 1;
         p.atTerminal = true;
         log(g, `${p.name} completes a lap of the island.`);
@@ -599,7 +615,7 @@ const ACTIONS = {
           p.personalCash += houses * PERSONAL_CARDS.beach.lap;
           log(g, `${p.name} collects ${money(houses * PERSONAL_CARDS.beach.lap)} renting out beach houses.`);
         }
-        fiscalYearEnd(g, p);
+        if (!g.calendar) fiscalYearEnd(g, p);
       }
       if (!p.out) visit(g, p, p.pos, i === d[0] + d[1] - 1);
     }
@@ -894,7 +910,7 @@ const ACTIONS = {
   // Miles (change 3): one board decision a turn, wherever you landed.
   board(g, p, { option, pos } = {}) {
     if (g.phase !== 'act') return 'Roll first.';
-    if (p.boardAction) return 'You have already made this turn\'s board decision.';
+    if ((p.boardLeft ?? (p.boardAction ? 0 : 1)) <= 0) return 'You have already made this turn\'s board decision.';
     const idx = g.turn;
     if (option === 'marketing') {
       if (p.marketing) return 'Your campaign is already running this fiscal year.';
@@ -923,6 +939,7 @@ const ACTIONS = {
       return 'Pick a board decision.';
     }
     p.boardAction = option;
+    p.boardLeft = (p.boardLeft ?? 1) - 1;
     return null;
   },
 
@@ -1354,6 +1371,15 @@ function putBuilding(g, p, pos, rarity, price) {
 
 function nextTurn(g) {
   if (g.phase === 'over') return;
+  if (g.calendar) {
+    // A round ends when play passes the last seat still playing.
+    const last = g.players.reduce((m, p, i) => (p.out ? m : i), -1);
+    if (g.turn >= last) {
+      g.round = (g.round ?? 0) + 1;
+      if (g.round % CONFIG.roundsPerYear === 0) sharedYearEnd(g);
+      if (g.phase === 'over') return;
+    }
+  }
   for (let i = 1; i <= g.players.length; i++) {
     const n = (g.turn + i) % g.players.length;
     const p = g.players[n];
@@ -1455,7 +1481,10 @@ function land(g, p) {
   }
   switch (sq.kind) {
     case 'fye':
-      return; // the fiscal year already closed on the way in
+      if (!g.calendar) return; // the fiscal year already closed on the way in
+      // Change 8: with a shared calendar, the corner calls an extra board meeting instead.
+      p.boardLeft = (p.boardLeft ?? 1) + 1;
+      return log(g, `${p.name} calls an extra board meeting: two board decisions this turn.`);
     case 'cpe':
       if (p.assets.includes('cabin')) return log(g, `${p.name} studies at their mountain cabin and carries on.`);
       p.skip = true;
@@ -1708,6 +1737,39 @@ function restart(g, q, parent, capital) {
 }
 
 // ---- Fiscal year end ----
+
+// Miles (change 8): the year ends for every company at once, in seat order. Then everyone's sealed
+// plans for the new year take effect together and are revealed.
+function sharedYearEnd(g) {
+  log(g, `Fiscal year ${g.round / CONFIG.roundsPerYear} ends for every company.`);
+  for (const p of g.players) if (!p.out) fiscalYearEnd(g, p);
+  afterAction(g);
+  if (g.phase === 'over') return;
+  for (const p of g.players) {
+    const plan = p.plan;
+    p.plan = null;
+    if (!plan || p.out) continue;
+    const parts = [];
+    if (plan.pricing) {
+      p.pricing = plan.pricing;
+      parts.push(RETAIL.pricing[plan.pricing].name.toLowerCase());
+    }
+    if (plan.production) {
+      p.production = plan.production;
+      parts.push(`production ${SUPPLY.levels[plan.production].name.toLowerCase()}`);
+    }
+    const dividend = Math.min(plan.dividend ?? 0, Math.floor(Math.max(0, companyCash(p))));
+    if (dividend > 0) {
+      payDividend(g, p, dividend);
+      parts.push(`a ${money(dividend)} dividend`);
+    }
+    if (parts.length) log(g, `${p.name}'s board plan for the new year: ${parts.join(', ')}.`);
+  }
+}
+
+export function yearProgress(g) {
+  return g.calendar ? { round: (g.round ?? 0) % CONFIG.roundsPerYear + 1, of: CONFIG.roundsPerYear } : null;
+}
 
 function fiscalYearEnd(g, p) {
   // Miles: statements are worked on through the following year, even on other players' turns.
@@ -2487,6 +2549,7 @@ export function viewFor(g, who) {
     companyValues: g.players.map((p, i) => (open(i) ? companyValue(p, g) : null)),
     shareholderValues: g.players.map((p, i) => (open(i) || p.isPublic ? shareholderValue(p, g) : null)),
     scorecard: g.phase === 'over' && g.win?.maxYears ? scorecard(g) : null,
+    calendar: yearProgress(g),
     offers: g.offers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
@@ -2519,6 +2582,8 @@ export function viewFor(g, who) {
       research: p.research ?? 0,
       unitCost: unitCost(g, p),
       planned: Boolean(p.planned),
+      boardLeft: p.boardLeft ?? (p.boardAction ? 0 : 1),
+      plan: i === who ? p.plan ?? null : p.plan ? 'sealed' : null,
       tradePrice: open(i) || p.isPublic ? tradePrice(p, g) : null,
       acquisitionPrice: acquisitionPrice(p, g),
       consolidated: open(i) ? consolidated(g, p) : null,
