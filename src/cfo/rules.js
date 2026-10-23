@@ -7,7 +7,7 @@
 // assets sit outside the company, as they would for a real owner.
 import {
   CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
-  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf,
+  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE,
 } from './data.js';
 
 export const ACCOUNTS = {
@@ -46,12 +46,14 @@ export const ACCOUNTS = {
   expProfessional: 'Professional fees',
   expBadDebt: 'Bad debts and factoring fees',
   expLegal: 'Legal costs and fines',
+  expMarketing: 'Advertising and marketing',
+  expResearch: 'Research and development',
   expOther: 'Other expenses',
   expInterest: 'Interest expense',
   expTax: 'Income tax expense',
 };
 // Miles: expenses split by what they are for, as a real income statement shows them.
-const EXPENSE_DETAIL = ['expIdle', 'expInvLoss', 'expTravel', 'expCommission', 'expPropTax', 'expProfessional', 'expBadDebt', 'expLegal'];
+const EXPENSE_DETAIL = ['expIdle', 'expInvLoss', 'expTravel', 'expCommission', 'expPropTax', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch'];
 const TEMPORARY = ['revSales', 'cogs', 'revInterest', 'revFreight', 'revDividends', 'expFreight', 'revRent', 'revOps', 'revOther', 'gain', 'expRent', 'expSalary', 'expDep', 'expOther', 'expInterest', 'expTax', 'draws',
   ...EXPENSE_DETAIL];
 const LOG_SIZE = 40;
@@ -208,7 +210,7 @@ export function incomeStatement(p) {
   const expenses = {
     cogs: l.cogs, expIdle: l.expIdle ?? 0, expInvLoss: l.expInvLoss ?? 0, expFreight: l.expFreight, expRent: l.expRent, expSalary: l.expSalary ?? 0, expDep: l.expDep,
     expPropTax: l.expPropTax ?? 0, expTravel: l.expTravel ?? 0, expCommission: l.expCommission ?? 0, expProfessional: l.expProfessional ?? 0,
-    expBadDebt: l.expBadDebt ?? 0, expLegal: l.expLegal ?? 0, expInterest: l.expInterest, expOther: l.expOther,
+    expBadDebt: l.expBadDebt ?? 0, expLegal: l.expLegal ?? 0, expMarketing: l.expMarketing ?? 0, expResearch: l.expResearch ?? 0, expInterest: l.expInterest, expOther: l.expOther,
   };
   const totalRevenue = sum(Object.values(revenue));
   const totalExpenses = sum(Object.values(expenses));
@@ -414,14 +416,14 @@ export function current(g) {
 
 // Actions come straight from browsers, so keep only the fields actions use, with the right types.
 // Names are looked up as own keys, so 'constructor' or '__proto__' can't reach object internals.
-const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer', 'entry', 'year'];
+const INT_FIELDS = ['card', 'row', 'zone', 'pos', 'target', 'to', 'count', 'doc', 'offer', 'entry', 'year', 'steps'];
 const MAX_AMOUNT = 1e9;
 function cleanAction(action) {
   if (!action || typeof action !== 'object' || typeof action.a !== 'string') return null;
   const out = { a: action.a };
   for (const f of INT_FIELDS) if (Number.isInteger(action[f]) && Math.abs(action[f]) <= MAX_AMOUNT) out[f] = action[f];
   if (Number.isFinite(action.amount) && Math.abs(action.amount) <= MAX_AMOUNT) out.amount = action.amount;
-  if (typeof action.option === 'string' && Object.hasOwn(RETAIL.sales, action.option)) out.option = action.option;
+  if (typeof action.option === 'string' && (Object.hasOwn(RETAIL.sales, action.option) || Object.hasOwn(BOARD, action.option))) out.option = action.option;
   if (typeof action.rarity === 'string' && Object.hasOwn(RARITIES, action.rarity)) out.rarity = action.rarity;
   if (Array.isArray(action.lines)) out.lines = action.lines;
   if (typeof action.on === 'boolean') out.on = action.on;
@@ -553,19 +555,30 @@ export function timeout(g) {
 }
 
 const ACTIONS = {
-  roll(g, p) {
+  // Change 3b: `steps` plans the move instead of rolling, once per fiscal year.
+  roll(g, p, { steps } = {}) {
     if (g.phase !== 'roll') return 'You have already rolled.';
+    if (steps !== undefined) {
+      if (!(steps >= PLANNED_MOVE.min && steps <= PLANNED_MOVE.max)) return `Plan a move of ${PLANNED_MOVE.min} to ${PLANNED_MOVE.max} squares.`;
+      if (p.planned) return 'You have already planned a move this fiscal year.';
+    }
     p.atBank = false;
+    p.boardAction = null;
     p.atTerminal = false;
     p.atExchange = false;
     p.personalOffer = 0;
     p.atCustoms = false;
     p.flew = false;
     p.sale = null;
-    const d = [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
+    const d = steps !== undefined ? [steps, 0] : [1 + Math.floor(rand(g) * 6), 1 + Math.floor(rand(g) * 6)];
     g.dice = d;
-    log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
-    if (d[0] === d[1] && p.assets.includes('horses') && !p.raced) {
+    if (steps !== undefined) {
+      p.planned = true;
+      log(g, `${p.name} plans a move of ${steps}.`);
+    } else {
+      log(g, `${p.name} rolls ${d[0]} + ${d[1]}.`);
+    }
+    if (steps === undefined && d[0] === d[1] && p.assets.includes('horses') && !p.raced) {
       p.raced = true;
       const prize = p.assets.filter((x) => x === 'horses').length * PERSONAL_CARDS.horses.prize;
       p.personalCash += prize;
@@ -856,9 +869,9 @@ const ACTIONS = {
     return null;
   },
 
-  // Only on a turn that ended at the Bank.
+  // Only on a turn that ended at the Bank, or after calling the bank (a board decision).
   borrow(g, p, { amount } = {}) {
-    if (g.phase !== 'act' || !p.atBank) return 'You can only borrow at the Bank.';
+    if (g.phase !== 'act' || !p.atBank) return 'You can only borrow at the Bank, or after calling it.';
     amount = Math.floor(Number(amount));
     const room = CONFIG.loanLimit + p.ledger.loan; // loan is a credit balance
     if (!(amount > 0)) return 'Enter an amount.';
@@ -875,6 +888,41 @@ const ACTIONS = {
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
     post(p, 'Loan repayment', { loan: amount, cash: -amount });
     log(g, `${p.name} repays ${money(amount)} of their loan.`);
+    return null;
+  },
+
+  // Miles (change 3): one board decision a turn, wherever you landed.
+  board(g, p, { option, pos } = {}) {
+    if (g.phase !== 'act') return 'Roll first.';
+    if (p.boardAction) return 'You have already made this turn\'s board decision.';
+    const idx = g.turn;
+    if (option === 'marketing') {
+      if (p.marketing) return 'Your campaign is already running this fiscal year.';
+      const stores = g.tiles.filter((t) => t?.owner === idx && t.zone === 'retail' && t.building).length;
+      if (!stores) return 'You have no stores to advertise.';
+      const cost = stores * BOARD.marketing.perStore;
+      if (companyCash(p) < cost) return `A campaign for ${stores} store${stores > 1 ? 's' : ''} costs ${money(cost)}.`;
+      post(p, `Marketing campaign for ${stores} store${stores > 1 ? 's' : ''}`, { expMarketing: cost, cash: -cost });
+      p.marketing = true;
+      log(g, `${p.name} runs a marketing campaign: their stores sell ${Math.round(BOARD.marketing.boost * 100)}% more this fiscal year.`);
+    } else if (option === 'research') {
+      if ((p.research ?? 0) >= BOARD.research.levels) return 'Your factories are already as efficient as research can make them.';
+      if (companyCash(p) < BOARD.research.cost) return `Research costs ${money(BOARD.research.cost)}.`;
+      post(p, 'Process improvement research', { expResearch: BOARD.research.cost, cash: -BOARD.research.cost });
+      p.research = (p.research ?? 0) + 1;
+      log(g, `${p.name} invests in research: widgets now cost ${money(unitCost(g, p))} to make.`);
+    } else if (option === 'financing') {
+      p.atBank = true;
+      log(g, `${p.name} calls the Bank.`);
+    } else if (option === 'restructure') {
+      const t = g.tiles[pos];
+      if (!t || t.owner !== idx || SQUARES[pos].landmark) return 'Pick a building or lot you own.';
+      if (t.building && SQUARES[pos].kind === 'land') sellBuilding(g, p, t, pos, 'Restructuring');
+      else sellLand(g, p, t, pos, 'Restructuring');
+    } else {
+      return 'Pick a board decision.';
+    }
+    p.boardAction = option;
     return null;
   },
 
@@ -998,7 +1046,8 @@ export function storeSales(g, pos, t) {
     if (i === pos || r?.zone !== 'retail' || !r.building || r.owner === null || r.owner === t.owner || sideOf(i) !== sideOf(pos) || g.players[r.owner].out) return;
     share += RETAIL.competition * Math.sign(PRICE_RANK[g.players[r.owner].pricing ?? 'normal'] - PRICE_RANK[level]);
   });
-  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share)), price: round(base.price * dial.price) };
+  const boost = g.players[t.owner]?.marketing ? 1 + BOARD.marketing.boost : 1;
+  return { units: Math.round(base.units * dial.volume * Math.max(0.5, share) * boost), price: round(base.price * dial.price) };
 }
 
 // A company's stores: how many widgets they sell in a normal turn, and their prices.
@@ -1156,11 +1205,17 @@ export function widgetsHeld(g, p) {
   return p.carried + g.tiles.reduce((n, t) => n + (t?.owner === idx ? t.stock : 0), 0);
 }
 
+// What a company's factories pay per widget: research cuts it (change 3), with average costing only.
+export function unitCost(g, p) {
+  return g.costing ? round(widgetCost(g) - (p.research ?? 0) * BOARD.research.saving) : widgetCost(g);
+}
+
 function makeWidgets(g, p, pos, want, why = 'Widgets made') {
-  const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p) / widgetCost(g))));
+  const unit = unitCost(g, p);
+  const n = Math.min(Math.round(want), Math.max(0, Math.floor(companyCash(p) / unit)));
   if (n <= 0) return 0;
-  const cost = widgetValue(g, n);
-  const label = `${why} at ${SQUARES[pos].name} (${n.toLocaleString('en-US')} at ${money(widgetCost(g))})`;
+  const cost = round(n * unit);
+  const label = `${why} at ${SQUARES[pos].name} (${n.toLocaleString('en-US')} at ${money(unit)})`;
   // With trade credit the materials are bought on account; the factory's own overhead is paid now.
   const materials = g.credit ? Math.min(Math.floor(cost), Math.round(n * ZONES.industrial.variableCost)) : 0; // whole dollars, as bills are paid
   if (materials) buyOnCredit(p, `${label}: materials on credit`, materials);
@@ -1503,24 +1558,24 @@ function liquidate(g, p, need) {
   }
 }
 
-function sellBuilding(g, p, t, pos) {
+function sellBuilding(g, p, t, pos, why = 'Cash shortfall') {
   const b = t.building;
   const proceeds = Math.round(b.cost * CONFIG.liquidation);
   const basis = b.basis ?? b.cost;
   const book = basis - b.dep;
-  post(p, `Cash shortfall: the bank bought the ${RARITIES[b.rarity]?.name ?? ''} PP&E on ${SQUARES[pos].name} (cost ${money(basis)}, accumulated depreciation ${money(b.dep)}) for ${Math.round(CONFIG.liquidation * 100)}% of its cost`, { cash: proceeds, accDep: b.dep, ppe: -basis, gain: book - proceeds });
+  post(p, `${why}: the bank bought the ${RARITIES[b.rarity]?.name ?? ''} PP&E on ${SQUARES[pos].name} (cost ${money(basis)}, accumulated depreciation ${money(b.dep)}) for ${Math.round(CONFIG.liquidation * 100)}% of its cost`, { cash: proceeds, accDep: b.dep, ppe: -basis, gain: book - proceeds });
   t.building = null;
   p.carried += t.stock;
   t.stock = 0;
   log(g, `${p.name} sells the building on ${SQUARES[pos].name} for ${money(proceeds)}.`);
 }
 
-function sellLand(g, p, t, pos) {
-  if (t.building) sellBuilding(g, p, t, pos);
+function sellLand(g, p, t, pos, why = 'Cash shortfall') {
+  if (t.building) sellBuilding(g, p, t, pos, why);
   const sq = SQUARES[pos];
   const proceeds = Math.round(sq.price * CONFIG.liquidation);
   const basis = t.landBasis ?? sq.price;
-  post(p, `Cash shortfall: the bank bought the land at ${sq.name} (cost ${money(basis)}) for ${Math.round(CONFIG.liquidation * 100)}% of its list price`, { cash: proceeds, land: -basis, gain: basis - proceeds });
+  post(p, `${why}: the bank bought the land at ${sq.name} (cost ${money(basis)}) for ${Math.round(CONFIG.liquidation * 100)}% of its list price`, { cash: proceeds, land: -basis, gain: basis - proceeds });
   delete t.landBasis;
   returnZoning(g, t);
   t.owner = null;
@@ -1766,6 +1821,8 @@ function fiscalYearEnd(g, p) {
   // Fictitious receivables from an earlier year can't be collected, so the year end writes them off.
   writeOff(p, 1, 'Bad debts written off', true);
   p.terms = null; // card terms last for the rest of the fiscal year
+  p.marketing = false; // and so does a marketing campaign
+  p.planned = false; // a planned move can be used again next year
 
   p.years += 1;
   const statement = incomeStatement(p);
@@ -2151,7 +2208,7 @@ function fraudCheck(g, p, chance, who) {
 // ---- Players' own books ----
 // The statement lines a player fills in. Amounts are as they'd be written: accumulated
 // depreciation, the loan and equity as positive numbers, net income signed.
-export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expInterest', 'expOther', 'expTax', 'netIncome'];
+export const INCOME_FIELDS = ['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOther', 'gain', 'cogs', 'expIdle', 'expInvLoss', 'expFreight', 'expRent', 'expSalary', 'expDep', 'expPropTax', 'expTravel', 'expCommission', 'expProfessional', 'expBadDebt', 'expLegal', 'expMarketing', 'expResearch', 'expInterest', 'expOther', 'expTax', 'netIncome'];
 export const BALANCE_FIELDS = ['cash', 'receivable', 'inventory', 'land', 'ppe', 'accDep', 'investments', 'goodwill', 'totalAssets', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained', 'totalLiabilitiesAndEquity'];
 const CREDIT_NORMAL = new Set(['revSales', 'revRent', 'revInterest', 'revFreight', 'revDividends', 'revOps', 'revOther', 'gain', 'accDep', 'payable', 'loan', 'affiliateLoan', 'capital', 'retained']);
 const TOLERANCE = 1;
@@ -2457,6 +2514,11 @@ export function viewFor(g, who) {
       sharePrice: open(i) || p.isPublic ? sharePrice(p, g) : null,
       priceToBook: open(i) || p.isPublic ? round(priceToBook(p, g)) : null,
       dividendsPerShare: p.dividendsPerShare ?? 0,
+      boardAction: p.boardAction ?? null,
+      marketing: Boolean(p.marketing),
+      research: p.research ?? 0,
+      unitCost: unitCost(g, p),
+      planned: Boolean(p.planned),
       tradePrice: open(i) || p.isPublic ? tradePrice(p, g) : null,
       acquisitionPrice: acquisitionPrice(p, g),
       consolidated: open(i) ? consolidated(g, p) : null,

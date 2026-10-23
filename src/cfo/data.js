@@ -285,6 +285,17 @@ export const CREDIT = {
   badDebt: 0.1, // Customer Default: share of receivables written off
 };
 
+// Miles (design principles, change 3): every turn holds one board decision, wherever you land.
+// After moving, a CFO may take one of these. PLACEHOLDER amounts.
+export const BOARD = {
+  marketing: { name: 'Marketing campaign', perStore: M(250), boost: 0.3, text: 'Advertise: every store you own sells this much more for the rest of the fiscal year.' },
+  research: { name: 'Process improvement', cost: M(1000), saving: 0.05, levels: 3, text: 'Research and development that cuts what each widget costs to make, for good (up to three times).' },
+  financing: { name: 'Call the bank', text: 'Arrange a loan by phone: borrow or repay as if you were at the Bank this turn.' },
+  restructure: { name: 'Restructure', text: 'Sell one building or lot to the bank for half its cost, to raise cash or leave a market.' },
+};
+// Change 3b: once per fiscal year, a CFO can plan a move of 1 to 6 squares instead of rolling.
+export const PLANNED_MOVE = { min: 1, max: 6 };
+
 export const SUPPLY = {
   levels: {
     idle: { name: 'Idle', cover: 2, make: false },

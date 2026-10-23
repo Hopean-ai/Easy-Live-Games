@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
+import { createGame, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -1733,4 +1733,56 @@ test('a game saved with one entry per document moves those entries into the jour
   assert.deepEqual(p.entries[0].lines, p.docs[0].lines);
   assert.equal(p.docs[0].archived, true);
   assert.equal(p.docs[0].recorded, undefined);
+});
+
+test('one board decision a turn: marketing, research, calling the bank or restructuring', () => {
+  const g = createGame(['A', 'B'], 73, { easyBooks: true, valueTarget: M(1e6) });
+  const [a] = g.players;
+  const store = posOfSpace(1);
+  Object.assign(g.tiles[store], { owner: 0, zone: 'retail', building: { rarity: 'common', cost: M(100), dep: 0 }, stock: 0 });
+  post(a, 'Store', { land: SQUARES[store].price, ppe: M(100), cash: -SQUARES[store].price - M(100) });
+  g.phase = 'act';
+  assert.match(act(g, 0, { a: 'borrow', amount: M(100) }), /Bank/);
+  // Marketing: a cost now, more sales for the rest of the year.
+  const before = storeSales(g, store, g.tiles[store]).units;
+  const cash = companyCash(a);
+  assert.equal(act(g, 0, { a: 'board', option: 'marketing' }), null);
+  assert.equal(companyCash(a), cash - BOARD.marketing.perStore);
+  assert.equal(a.ledger.expMarketing, BOARD.marketing.perStore);
+  assert.equal(storeSales(g, store, g.tiles[store]).units, Math.round(before * (1 + BOARD.marketing.boost)));
+  assert.match(act(g, 0, { a: 'board', option: 'research' }), /already/, 'one decision a turn');
+  // Next turn: research cuts the widget cost for good.
+  a.boardAction = null;
+  const unit = unitCost(g, a);
+  assert.equal(act(g, 0, { a: 'board', option: 'research' }), null);
+  assert.equal(unitCost(g, a), Math.round((unit - BOARD.research.saving) * 100) / 100);
+  assert.equal(a.ledger.expResearch, BOARD.research.cost);
+  // Calling the bank lets you borrow wherever you are.
+  a.boardAction = null;
+  assert.equal(act(g, 0, { a: 'board', option: 'financing' }), null);
+  assert.equal(act(g, 0, { a: 'borrow', amount: M(100) }), null);
+  // Restructuring sells the building, then on a later turn the land, to the bank.
+  a.boardAction = null;
+  assert.equal(act(g, 0, { a: 'board', option: 'restructure', pos: store }), null);
+  assert.equal(g.tiles[store].building, null);
+  assert.equal(g.tiles[store].owner, 0);
+  a.boardAction = null;
+  assert.equal(act(g, 0, { a: 'board', option: 'restructure', pos: store }), null);
+  assert.equal(g.tiles[store].owner, null);
+  const s = balanceSheet(a);
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('once a fiscal year, a CFO can plan a move instead of rolling', () => {
+  const g = createGame(['A', 'B'], 74, { easyBooks: true, valueTarget: M(1e6) });
+  const [a] = g.players;
+  assert.match(act(g, 0, { a: 'roll', steps: PLANNED_MOVE.max + 1 }), /Plan a move/);
+  assert.equal(act(g, 0, { a: 'roll', steps: 3 }), null);
+  assert.equal(a.pos, 3);
+  act(g, 0, { a: 'pass' });
+  act(g, 0, { a: 'end' });
+  act(g, 1, { a: 'roll' });
+  act(g, 1, { a: 'pass' });
+  act(g, 1, { a: 'end' });
+  assert.match(act(g, 0, { a: 'roll', steps: 2 }), /already planned/);
 });

@@ -464,7 +464,16 @@ function renderTurn() {
   if (!myTurn()) return;
   const me = g.players[mySeat];
   const sq = rules.squares[me.pos];
-  if (g.phase === 'roll') box.append(el('button', { onclick: () => actNow({ a: 'roll' }) }, 'Roll the dice'));
+  if (g.phase === 'roll') {
+    box.append(el('button', { onclick: () => actNow({ a: 'roll' }) }, 'Roll the dice'));
+    // Once a fiscal year, plan the move instead of rolling.
+    if (!me.planned) {
+      const pm = rules.plannedMove;
+      const row = el('div', { class: 'row' }, [el('span', { class: 'small' }, 'Or plan your move (once a fiscal year):')]);
+      for (let n = pm.min; n <= pm.max; n++) row.append(el('button', { class: 'secondary', onclick: () => actNow({ a: 'roll', steps: n }) }, String(n)));
+      box.append(row);
+    }
+  }
   if (g.phase === 'buy') {
     const lm = sq.landmark && rules.landmarks[sq.landmark];
     const price = sq.price + (lm ? lm.building : 0);
@@ -486,6 +495,7 @@ function renderTurn() {
     row.append(el('button', { class: 'secondary', disabled: me.personalCash < assetPrice, onclick: () => actNow({ a: 'personal' }) },
       `Buy a personal asset (${money(assetPrice)})`));
     box.append(row);
+    box.append(boardControls(me));
     box.append(...flightControls(me));
     if (me.atCustoms && me.frauds) {
       box.append(el('button', { class: 'secondary', disabled: me.cash < rules.config.settlement, onclick: () => actNow({ a: 'settle' }) },
@@ -524,6 +534,33 @@ function scorecardTable(g) {
     el('tr', {}, [el('th', {}, 'CFO scorecard'), ...measures.map((m) => el('th', {}, `${m.name} (x${m.weight})`)), el('th', {}, 'Points')]),
     ...g.scorecard.map((r) => el('tr', {}, [el('td', {}, g.players[r.seat].name), ...measures.map((m) => el('td', {}, show(m, r.scores[m.id]))), el('td', {}, String(r.points))])),
   ]);
+}
+
+// One board decision a turn, wherever you landed.
+function boardControls(me) {
+  const g = state.game;
+  const b = rules.board;
+  const wrap = el('div', { class: 'board-decision' }, [el('h3', {}, 'Board decision')]);
+  if (me.boardAction) {
+    wrap.append(el('p', { class: 'small' }, `Made this turn: ${b[me.boardAction].name}.`));
+    return wrap;
+  }
+  wrap.append(el('p', { class: 'small' }, 'Make one of these each turn, wherever you landed.'));
+  const stores = g.tiles.filter((t) => t?.owner === mySeat && t.zone === 'retail' && t.building).length;
+  const row = el('div', { class: 'row' });
+  row.append(el('button', { class: 'secondary', disabled: !stores || me.marketing, title: b.marketing.text, onclick: () => actNow({ a: 'board', option: 'marketing' }) },
+    me.marketing ? 'Campaign running' : `${b.marketing.name} (${money(stores * b.marketing.perStore)})`));
+  row.append(el('button', { class: 'secondary', disabled: me.research >= b.research.levels, title: b.research.text, onclick: () => actNow({ a: 'board', option: 'research' }) },
+    `${b.research.name} (${money(b.research.cost)}; widgets ${money(me.unitCost)} each now)`));
+  if (!me.atBank) row.append(el('button', { class: 'secondary', title: b.financing.text, onclick: () => actNow({ a: 'board', option: 'financing' }) }, b.financing.name));
+  wrap.append(row);
+  const owned = g.tiles.map((t, pos) => ({ t, pos })).filter(({ t, pos }) => t?.owner === mySeat && !rules.squares[pos].landmark);
+  if (owned.length) {
+    const pick = el('select', {}, owned.map(({ t, pos }) => el('option', { value: String(pos) }, `${rules.squares[pos].name}${t.building && rules.squares[pos].kind === 'land' ? ' (building only)' : ''}`)));
+    wrap.append(el('div', { class: 'row' }, [pick, el('button', { class: 'secondary', title: b.restructure.text,
+      onclick: () => confirm('Sell it to the bank for half its cost?') && actNow({ a: 'board', option: 'restructure', pos: Number(pick.value) }) }, b.restructure.name)]));
+  }
+  return wrap;
 }
 
 // Flights: to the island from an airport someone owns, or home from the island's Terminal.
