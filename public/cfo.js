@@ -829,6 +829,46 @@ function renderOffers() {
       el('button', { onclick: () => actNow({ a: 'respond', offer: o.id, accept: true }) }, 'Accept'),
       el('button', { class: 'secondary', onclick: () => actNow({ a: 'respond', offer: o.id, accept: false }) }, 'Decline'));
   }));
+  if (mySeat === null || g.players[mySeat]?.out || g.phase === 'over') return;
+  // The lot at auction: sealed bids from any company until the end of the next turn.
+  if (g.auction) {
+    const sq = rules.squares[g.auction.pos];
+    const amount = el('input', { type: 'number', min: String(g.auction.min), step: '1000', placeholder: `From ${money(g.auction.min)}`, inputMode: 'numeric' });
+    const zone = sq.kind === 'land' && g.zoningRow.length
+      ? el('select', {}, g.zoningRow.map((z, i) => el('option', { value: String(i) }, rules.zones[z].name))) : null;
+    $('offers').append(el('div', { class: 'row' }, [
+      el('span', {}, `${sq.name} is at auction (${g.auction.bidders.length} sealed bid${g.auction.bidders.length === 1 ? '' : 's'}${g.auction.myBid ? `, yours ${money(g.auction.myBid)}` : ''}).`),
+      amount, ...(zone ? [zone] : []),
+      el('button', { class: 'secondary', onclick: () => actNow({ a: 'bid', amount: Number(amount.value), zone: zone ? Number(zone.value) : undefined }) }, g.auction.myBid ? 'Change bid' : 'Bid'),
+    ]));
+  }
+  // Supply contracts: offers to sign, and the ones running.
+  for (const o of g.contractOffers ?? []) {
+    if (o.to !== mySeat && o.from !== mySeat) continue;
+    const text = `${g.players[o.seller].name} supplies ${g.players[o.buyer].name} ${o.units.toLocaleString('en-US')} widgets a turn at $${o.price.toFixed(2)} for ${o.years} year${o.years > 1 ? 's' : ''}.`;
+    $('offers').append(o.to === mySeat
+      ? el('div', { class: 'row' }, [el('span', {}, `Contract offered: ${text}`), el('button', { onclick: () => actNow({ a: 'sign', offer: o.id, accept: true }) }, 'Sign'), el('button', { class: 'secondary', onclick: () => actNow({ a: 'sign', offer: o.id, accept: false }) }, 'Decline')])
+      : el('p', { class: 'small' }, `You offered a contract: ${text}`));
+  }
+  for (const k of g.contracts ?? []) {
+    if (k.seller !== mySeat && k.buyer !== mySeat) continue;
+    $('offers').append(el('div', { class: 'row' }, [
+      el('span', { class: 'small' }, `Contract: ${g.players[k.seller].name} supplies ${g.players[k.buyer].name} ${k.units.toLocaleString('en-US')} widgets a turn at $${k.price.toFixed(2)} until fiscal year ${k.until}.`),
+      el('button', { class: 'secondary', onclick: () => confirm(`Break it? You pay ${money(k.units * k.price * rules.config.contracts.breakTurns)} to the other side.`) && actNow({ a: 'breach', offer: k.id }) }, 'Break'),
+    ]));
+  }
+  // Propose a contract to another company.
+  if (g.markets && g.players.some((q, i) => i !== mySeat && !q.out)) {
+    const who = el('select', {}, g.players.map((q, i) => (i === mySeat || q.out ? null : el('option', { value: String(i) }, q.name))).filter(Boolean));
+    const role = el('select', {}, [el('option', { value: 'sell' }, 'I supply them'), el('option', { value: 'buy' }, 'They supply me')]);
+    const units = el('input', { type: 'number', min: '1', step: '1000', placeholder: 'Widgets a turn' });
+    const price = el('input', { type: 'number', min: '0.01', step: '0.05', placeholder: 'Price each' });
+    const years = el('input', { type: 'number', min: '1', max: String(rules.config.contracts.maxYears), value: '2' });
+    $('offers').append(el('details', {}, [el('summary', {}, 'Offer a supply contract'),
+      el('p', { class: 'small' }, `The supplier's factories deliver to the buyer's store at the end of each of the supplier's turns. A short delivery costs ${Math.round(rules.config.contracts.shortfallPenalty * 100)}% of the missing widgets' price; breaking a contract costs ${rules.config.contracts.breakTurns} turns' worth.`),
+      el('div', { class: 'row' }, [who, role, units, price, years,
+        el('button', { class: 'secondary', onclick: () => actNow({ a: 'contract', target: Number(who.value), sell: role.value === 'sell', count: Number(units.value), amount: Number(price.value), years: Number(years.value) }) }, 'Offer')])]));
+  }
 }
 
 // Mirrors salvageValue() in src/cfo/rules.js.
