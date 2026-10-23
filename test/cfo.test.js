@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
+import { createGame, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -508,7 +508,7 @@ test('frauds can also be found when passing FYE', () => {
 });
 
 test('going public raises cash, prices the company above its books, and doubles scrutiny', () => {
-  const g = createGame(['A', 'B'], 31, { easyBooks: true });
+  const g = createGame(['A', 'B'], 31, { easyBooks: true, eras: false });
   const [a, b] = g.players;
   g.phase = 'act';
   assert.match(act(g, 0, { a: 'ipo' }), /fiscal years/);
@@ -575,7 +575,7 @@ test('a knocked-out player can be hired to run a subsidiary', () => {
 
 test('every Fraud and Market Forces card can be played or drawn and keeps the books balanced', () => {
   for (const id of [...Object.keys(FRAUD_CARDS), ...Object.keys(MARKET_CARDS)]) {
-    const g = createGame(['A', 'B', 'C'], 41, { easyBooks: true });
+    const g = createGame(['A', 'B', 'C'], 41, { easyBooks: true, eras: false });
     const [a, b] = g.players;
     // Set the table up so every card has something to act on.
     a.years = CONFIG.ipoYears;
@@ -649,7 +649,7 @@ test('win conditions: shareholder value, a year limit, and second place for the 
 });
 
 test('the island: fly in for a fare, loop it, buy a landmark, and fly home from the Terminal', () => {
-  const g = createGame(['A', 'B'], 8, { valueTarget: M(1e6) });
+  const g = createGame(['A', 'B'], 8, { valueTarget: M(1e6), eras: false });
   const [a, b] = g.players;
   const airport = posOfSpace(34);
   post(a, 'Test capital', { cash: M(20000), capital: -M(20000) });
@@ -789,7 +789,7 @@ test('auto statements are built from the entries players post', () => {
 });
 
 test('buying a rival company takes it out of the game; public companies cost more', () => {
-  const g = createGame(['A', 'B', 'C'], 24, { easyBooks: true, valueTarget: M(1e6) });
+  const g = createGame(['A', 'B', 'C'], 24, { easyBooks: true, valueTarget: M(1e6), eras: false });
   const [a, b, c] = g.players;
   post(a, 'Test capital', { cash: M(20000), capital: -M(20000) });
   const lot = posOfSpace(1);
@@ -855,7 +855,7 @@ test('a fire sale for fees sells only the widgets it needs, and never ones alrea
 });
 
 test('shares trade at the market price to the cent, so even cheap shares can be sold', () => {
-  const g = createGame(['A', 'B'], 53, { easyBooks: true });
+  const g = createGame(['A', 'B'], 53, { easyBooks: true, eras: false });
   const [a, b] = g.players;
   a.years = CONFIG.ipoYears;
   g.phase = 'act';
@@ -942,7 +942,7 @@ test('with manual books, rivals see only filed figures and market prices', () =>
 });
 
 test('buying a company you hold shares in pays only the other holders', () => {
-  const g = createGame(['A', 'B'], 58, { easyBooks: true });
+  const g = createGame(['A', 'B'], 58, { easyBooks: true, eras: false });
   const [a, b] = g.players;
   b.shares.holders[0] = 20;
   b.shares.holders[1] = 80;
@@ -1091,7 +1091,7 @@ test('a bookkeeper records and files everything for a fee, with no clean-books b
 });
 
 test('going public needs a clean filing', () => {
-  const g = createGame(['A', 'B'], 63);
+  const g = createGame(['A', 'B'], 63, { eras: false });
   const p = g.players[0];
   Object.assign(g, { turn: 0, phase: 'act' });
   p.years = CONFIG.ipoYears;
@@ -1825,4 +1825,45 @@ test('with a shared calendar, the FYE corner calls an extra board meeting', () =
   assert.equal(act(g, 0, { a: 'board', option: 'financing' }), null);
   assert.equal(act(g, 0, { a: 'board', option: 'research' }), null, 'a second decision');
   assert.match(act(g, 0, { a: 'board', option: 'marketing' }), /already/);
+});
+
+test('eras: the economy opens up through startup, growth and maturity', () => {
+  const g = createGame(['A', 'B'], 77, { easyBooks: true, valueTarget: M(1e6) });
+  const [a, b] = g.players;
+  const lot = posOfSpace(1);
+  Object.assign(g.tiles[lot], { owner: 0, zone: 'retail', building: null });
+  post(a, 'Lot and capital', { land: SQUARES[lot].price, cash: M(30000) - SQUARES[lot].price, capital: -M(30000) });
+  g.phase = 'act';
+  assert.equal(eraOf(g).id, 'startup');
+  g.ppeRow[0] = 'epic';
+  assert.match(act(g, 0, { a: 'build', pos: lot, card: 0 }), /Growth era/);
+  a.years = CONFIG.ipoYears;
+  assert.match(act(g, 0, { a: 'ipo' }), /IPOs open/);
+  assert.match(act(g, 0, { a: 'acquire', target: 1 }), /Buyouts open/);
+  const before = storeSales(g, lot, { ...g.tiles[lot], owner: 0, building: { rarity: 'common' } }).units;
+  g.round = CONFIG.roundsPerYear * (ERAS[1].from - 1);
+  assert.equal(eraOf(g).id, 'growth');
+  assert.equal(act(g, 0, { a: 'build', pos: lot, card: 0 }), null);
+  g.round = CONFIG.roundsPerYear * (ERAS[2].from - 1);
+  assert.equal(eraOf(g).id, 'maturity');
+  g.tiles[lot].stock = 0;
+  assert.equal(storeSales(g, lot, { ...g.tiles[lot], building: { rarity: 'common' } }).units, Math.round(before * ERAS[2].saturation));
+  void b;
+});
+
+test('the economic outlook forecasts the events that hit every company, one each year end', () => {
+  const g = createGame(['A', 'B'], 78, { easyBooks: true, valueTarget: M(1e6) });
+  assert.equal(g.outlook.length, OUTLOOK.size);
+  assert.deepEqual(viewFor(g, 1).outlook, g.outlook);
+  g.outlook = ['boom', 'recession'];
+  const cash = g.players.map(companyCash);
+  g.round = CONFIG.roundsPerYear - 1;
+  g.turn = 1;
+  g.phase = 'act';
+  act(g, 1, { a: 'end' });
+  assert.equal(g.players[0].years, 1);
+  assert.equal(g.outlook[0], 'recession', 'the boom arrived and the outlook moved on');
+  assert.equal(g.outlook.length, OUTLOOK.size);
+  assert.ok(g.log.some((l) => /The economy: Boom/.test(l)));
+  assert.ok(g.players.every((p, i) => companyCash(p) !== cash[i]));
 });

@@ -446,7 +446,8 @@ function renderTurn() {
   $('claude-back').hidden = !state.seats[mySeat]?.admin || g.phase === 'over'
     || !state.seats.some((s, i) => s.guest && /^Claude \d+$/.test(s.name) && !s.connected && !g.players[i]?.out);
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
-  if (g.calendar && g.phase !== 'over') $('turn-text').textContent += ` · fiscal year ${(g.players.find((p) => !p.out)?.years ?? 0) + 1}, round ${g.calendar.round} of ${g.calendar.of}`;
+  if (g.calendar && g.phase !== 'over') $('turn-text').textContent += ` · ${g.era ? `${g.era.name}, ` : ''}fiscal year ${g.era?.year ?? (g.players.find((p) => !p.out)?.years ?? 0) + 1}, round ${g.calendar.round} of ${g.calendar.of}`;
+  if (g.era) $('turn-text').title = g.era.text;
   if (g.win) {
     $('goal').textContent = `Win: last standing, ${money(g.win.valueTarget)} of shareholder value, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
     $('goal').title = winLines(g.win).join('\n');
@@ -461,6 +462,10 @@ function renderTurn() {
     box.append(el('button', { class: 'secondary', onclick: () => $('recap').scrollIntoView({ behavior: 'smooth' }) }, 'See the game recap'));
     if (mySeat !== null) box.append(el('button', { onclick: () => send({ t: 'again' }) }, 'Play again with this table'));
     return;
+  }
+  if (g.outlook?.length) {
+    box.append(el('p', { class: 'small outlook' }, `Economic outlook: ${g.outlook.map((id, i) => `${i ? 'then ' : 'at this year end, '}${rules.market[id].name}`).join('; ')}.`, ));
+    box.lastChild.title = g.outlook.map((id) => `${rules.market[id].name}: ${rules.market[id].text}`).join('\n');
   }
   if (mySeat !== null && g.calendar && !g.players[mySeat]?.out) box.append(planForm(g.players[mySeat]));
   if (!myTurn()) return;

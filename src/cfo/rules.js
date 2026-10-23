@@ -7,7 +7,7 @@
 // assets sit outside the company, as they would for a real owner.
 import {
   CONFIG, M, BOARD_SIZE, SQUARES, ISLAND_START, LANDMARKS, onIsland, nextPos, SETS, MODES, ZONES, RARITIES, TRANSPORT_RENT, RETAIL, SUPPLY, CREDIT,
-  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE,
+  FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, deckOf, BOARD, PLANNED_MOVE, ERAS, OUTLOOK,
 } from './data.js';
 
 export const ACCOUNTS = {
@@ -78,6 +78,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
     costing: true, // inventory at average cost, with freight in it (older games keep a fixed cost per widget)
     credit: true, // sales and supplier credit (games begun before it settle everything in cash)
     calendar: options.calendar !== false, // one shared fiscal year (games begun before it close each year at the FYE corner)
+    eras: options.calendar !== false && options.eras !== false, // eras and the economic outlook run on the shared calendar
     round: 0,
     turn: 0,
     phase: 'roll', // roll | buy | act | over
@@ -104,6 +105,10 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
   g.ppeDeck = shuffle(g, Object.entries(RARITIES).flatMap(([id, r]) => Array(r.count).fill(id)));
   refill(g.zoningRow, g.zoningDeck);
   refill(g.ppeRow, g.ppeDeck, CONFIG.ppeRowSize);
+  if (g.eras) {
+    g.outlook = [];
+    while (g.outlook.length < OUTLOOK.size) g.outlook.push(outlookEvent(g));
+  }
 
   // Player i is seat i; the room decides the seating order.
   for (const name of names) {
@@ -663,6 +668,7 @@ const ACTIONS = {
     if (SQUARES[airport]?.kind !== 'transport' || SQUARES[airport].mode !== 'air') return 'Pick an airport.';
     const owner = g.tiles[airport].owner;
     if (!home && owner === null) return 'Nobody runs flights from this airport yet.';
+    if (!home && !eraOf(g).island) return `Flights to the island start in the ${ERAS.find((e) => e.island).name}.`;
     if (owner !== null && owner !== g.turn) {
       if (companyCash(p) < CONFIG.islandFare) return `The fare is ${money(CONFIG.islandFare)}.`;
       const fare = charge(g, p, CONFIG.islandFare, 'expTravel', `Airfare on ${g.players[owner].name}'s ${SQUARES[airport].name}`);
@@ -705,6 +711,8 @@ const ACTIONS = {
     const fromRow = card < g.ppeRow.length;
     const rarity = fromRow ? g.ppeRow[card] : extras[card - g.ppeRow.length];
     if (!Number.isInteger(card) || card < 0 || !rarity) return 'Pick a PP&E card.';
+    const locked = eraAllows(g, rarity);
+    if (locked) return locked;
     const price = RARITIES[rarity].price;
     const old = g.tiles[pos].building;
     if (upgrade && price <= old.cost) return `An upgrade must cost more than the ${money(old.cost)} PP&E there now.`;
@@ -771,6 +779,7 @@ const ACTIONS = {
     if (g.phase === 'buy') return 'Buy or pass first.';
     if (p.isPublic) return 'Your company is already public.';
     if (p.parent !== null) return 'A subsidiary cannot go public.';
+    if (!eraOf(g).ipo) return `IPOs open in the ${ERAS.find((e) => e.ipo).name}.`;
     if (p.years < CONFIG.ipoYears) return `You need ${CONFIG.ipoYears} fiscal years of history to go public.`;
     if (balanceSheet(p).totalEquity <= 0) return 'Investors will not buy into a company with no equity.';
     // Miles: realism. As with the SEC, investors want clean statements before a listing.
@@ -824,6 +833,7 @@ const ACTIONS = {
     const q = g.players[target];
     if (p.parent !== null) return 'A subsidiary cannot buy other companies.';
     if (!q || q === p || q.out || q.parent !== null) return 'Pick a rival independent company.';
+    if (!eraOf(g).buyouts) return `Buyouts open in the ${ERAS.find((e) => e.buyouts).name}.`;
     const price = acquisitionPrice(q, g);
     if (companyCash(p) < price) return `Buying ${q.name}'s company costs ${money(price)}.`;
     acquireCompany(g, p, q, price);
@@ -1063,7 +1073,7 @@ export function storeSales(g, pos, t) {
     if (i === pos || r?.zone !== 'retail' || !r.building || r.owner === null || r.owner === t.owner || sideOf(i) !== sideOf(pos) || g.players[r.owner].out) return;
     share += RETAIL.competition * Math.sign(PRICE_RANK[g.players[r.owner].pricing ?? 'normal'] - PRICE_RANK[level]);
   });
-  const boost = g.players[t.owner]?.marketing ? 1 + BOARD.marketing.boost : 1;
+  const boost = (g.players[t.owner]?.marketing ? 1 + BOARD.marketing.boost : 1) * eraOf(g).saturation;
   return { units: Math.round(base.units * dial.volume * Math.max(0.5, share) * boost), price: round(base.price * dial.price) };
 }
 
@@ -1742,9 +1752,21 @@ function restart(g, q, parent, capital) {
 // plans for the new year take effect together and are revealed.
 function sharedYearEnd(g) {
   log(g, `Fiscal year ${g.round / CONFIG.roundsPerYear} ends for every company.`);
+  const era = eraOf(g);
   for (const p of g.players) if (!p.out) fiscalYearEnd(g, p);
   afterAction(g);
   if (g.phase === 'over') return;
+  // The forecast event arrives, and the outlook looks one more year ahead.
+  if (g.outlook?.length) {
+    const id = g.outlook.shift();
+    log(g, `The economy: ${MARKET_CARDS[id].name}. ${MARKET_CARDS[id].text}`);
+    MARKET_NOW[id](g, g.players.find((q) => !q.out));
+    g.outlook.push(outlookEvent(g));
+    afterAction(g);
+    if (g.phase === 'over') return;
+  }
+  const next = eraOf(g);
+  if (next !== era) log(g, `The ${next.name} begins. ${next.text}`);
   for (const p of g.players) {
     const plan = p.plan;
     p.plan = null;
@@ -1765,6 +1787,31 @@ function sharedYearEnd(g) {
     }
     if (parts.length) log(g, `${p.name}'s board plan for the new year: ${parts.join(', ')}.`);
   }
+}
+
+// The economy's era (change 4). Games without eras stay in an era that limits nothing.
+const OPEN_ERA = { id: 'open', name: '', maxRarity: 'legendary', ipo: true, buyouts: true, island: true, loanInterest: CONFIG.loanInterest, saturation: 1 };
+export function calendarYear(g) {
+  return Math.floor((g.round ?? 0) / CONFIG.roundsPerYear) + 1;
+}
+export function eraOf(g) {
+  if (!g.eras) return OPEN_ERA;
+  const year = calendarYear(g);
+  return ERAS.reduce((e, x) => (year >= x.from ? x : e), ERAS[0]);
+}
+const RANK = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+function eraAllows(g, rarity) {
+  const era = eraOf(g);
+  if (!RANK.includes(rarity) || RANK.indexOf(rarity) <= RANK.indexOf(era.maxRarity)) return null;
+  const next = ERAS.find((e) => RANK.indexOf(e.maxRarity) >= RANK.indexOf(rarity));
+  return `${RARITIES[rarity].name} PP&E can't be built until the ${next.name}.`;
+}
+
+// Change 4b: a random event that hits every company, weighted by its Market Forces card count.
+function outlookEvent(g) {
+  const total = OUTLOOK.events.reduce((n, id) => n + MARKET_CARDS[id].count, 0);
+  let r = rand(g) * total;
+  return OUTLOOK.events.find((id) => (r -= MARKET_CARDS[id].count) < 0) ?? OUTLOOK.events[0];
 }
 
 export function yearProgress(g) {
@@ -1829,7 +1876,8 @@ function fiscalYearEnd(g, p) {
   // the year end still pays for the time it was out.
   const owed = Math.max(p.peakLoan ?? 0, -p.ledger.loan);
   p.peakLoan = -p.ledger.loan;
-  if (owed > 0) charge(g, p, owed * CONFIG.loanInterest, 'expInterest', `Loan interest (${Math.round(CONFIG.loanInterest * 100)}% of the most owed this year, ${money(owed)})`);
+  const rate = eraOf(g).loanInterest;
+  if (owed > 0) charge(g, p, owed * rate, 'expInterest', `Loan interest (${Math.round(rate * 100)}% of the most owed this year, ${money(owed)})`);
   if (p.out) return;
   // Miles: a bookkeeper is paid by the document, for every one it posts at this year end.
   const covered = p.outsourced ? p.docs.filter((d) => !d.filed && d.year <= p.years + 1).length : 0;
@@ -2150,6 +2198,7 @@ const PLAYS = {
     if (err) return err;
     const rarity = g.ppeRow[row];
     if (!rarity) return 'Pick an available PP&E card.';
+    if (eraAllows(g, rarity)) return eraAllows(g, rarity);
     const price = Math.round(RARITIES[rarity].price / 2);
     if (companyCash(p) < price) return 'Your company cannot afford it.';
     g.ppeRow.splice(row, 1);
@@ -2231,6 +2280,8 @@ const PLAYS = {
     if (err) return err;
     const i = g.ppeDeck.indexOf(rarity);
     if (i < 0) return 'That card is not in the PP&E deck.';
+    const locked = eraAllows(g, rarity);
+    if (locked) return locked;
     const price = Math.round(RARITIES[rarity].price * 0.9);
     if (companyCash(p) < price) return 'Your company cannot afford it.';
     g.ppeDeck.splice(i, 1);
@@ -2550,6 +2601,8 @@ export function viewFor(g, who) {
     shareholderValues: g.players.map((p, i) => (open(i) || p.isPublic ? shareholderValue(p, g) : null)),
     scorecard: g.phase === 'over' && g.win?.maxYears ? scorecard(g) : null,
     calendar: yearProgress(g),
+    era: g.eras ? { ...eraOf(g), year: calendarYear(g) } : null,
+    outlook: g.outlook ?? null,
     offers: g.offers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
