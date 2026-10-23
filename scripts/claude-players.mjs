@@ -14,6 +14,9 @@ import { readFile } from 'node:fs/promises';
 import { nextMove, stepKey } from '../src/cfo/bot.js';
 
 const LOBBY_WAIT_MS = 60 * 60 * 1000; // leave a lobby nobody starts within an hour
+// Miles: log off once every other player has quit. A short grace lets someone reload or reconnect.
+const ALONE_MS = Number(process.env.ALONE_MS ?? 5 * 60 * 1000);
+const isClaude = (s) => s.guest && /^Claude \d+$/.test(s.name);
 const THINK_MS = Number(process.env.THINK_MS ?? 700); // a short pause before each move, so people can follow along
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -92,11 +95,13 @@ function session(url, name, joinedAt) {
     let busy = false;
     let tried = { key: '', set: new Set() };
     let lastLog = 0;
+    let aloneTimer = null;
     const ping = setInterval(() => ws.readyState === 1 && ws.send('ping'), 30_000);
     const finish = (r) => {
       if (finished) return;
       finished = true;
       clearInterval(ping);
+      clearTimeout(aloneTimer);
       try {
         ws.close();
       } catch {}
@@ -132,6 +137,14 @@ function session(url, name, joinedAt) {
         }
         if (m.status === 'waiting' && Date.now() - joinedAt > LOBBY_WAIT_MS) return finish({ done: 'left: nobody started the game within an hour' });
         if (m.game?.players[seat]?.out) return finish({ done: 'is out of the game' });
+        // Nobody but Claude players left connected (or still in the game): wait out the grace, then go.
+        const alone = m.seats.every((s, i) => isClaude(s) || !s.connected || m.game?.players[i]?.out);
+        if (!alone) {
+          clearTimeout(aloneTimer);
+          aloneTimer = null;
+        } else if (!aloneTimer) {
+          aloneTimer = setTimeout(() => finish({ done: 'logged off: every other player has left' }), ALONE_MS);
+        }
         if (m.game && m.game.log.length !== lastLog) {
           lastLog = m.game.log.length;
           if (m.game.turn === seat) console.log(`${name}: ${m.game.log.at(-1)}`);
