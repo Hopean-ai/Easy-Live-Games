@@ -370,6 +370,19 @@ export const PROFILES = {
 };
 export const PROFILE_CHOICES = 2;
 
+// Design change 11: a core game plus optional modules the host picks. All are on by default, as
+// the game has been played; a table learning the game can turn them off. Cards listed with a
+// module leave the Market Forces deck and the outlook without it.
+export const MODULES = {
+  island: { name: 'The island', text: 'Fly to the island from airports, lap it, and visit the Exchange.' },
+  perks: { name: 'Executive perks', text: 'Buy and draw perk cards, and win with a perk portfolio.', cards: ['headhunter', 'alienation'] },
+  credit: { name: 'Trade credit', text: 'Customers pay later and suppliers bill later; receivables and payables on the books.', cards: ['factoring', 'creditDept', 'supplierTerms', 'default', 'crunch'] },
+  subsidiaries: { name: 'Subsidiaries and buyouts', text: 'Buy rival companies, and hire knocked-out players to run subsidiaries.' },
+  markets: { name: 'Auctions and contracts', text: 'Lots that nobody buys go to auction, and companies sign supply contracts.' },
+  hedging: { name: 'Insurance and hedges', text: 'Buy cover against a Recession, a rate hike or a supply chain disruption.' },
+  profiles: { name: 'Company profiles', text: 'Each company starts with its own strength.' },
+};
+
 export const OUTLOOK = { size: 2, events: ['recession', 'boom', 'rates', 'housing', 'shortage', 'rezoning', 'holiday', 'spoilage', 'default', 'crunch', 'shipping', 'activist'] };
 
 export const SUPPLY = {

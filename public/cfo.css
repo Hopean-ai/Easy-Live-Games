@@ -178,6 +178,8 @@ details.check summary { cursor: pointer; }
 .inline3 { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
 .inline3 input, .inline3 button { padding: 6px 10px; }
 .win-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.module-list { display: grid; gap: 6px; margin-bottom: 8px; }
+.module-list .check { display: block; }
 label.field { display: grid; gap: 4px; color: var(--muted); font-size: 0.9rem; }
 label.field select, label.field input { padding: 8px 10px; }
 

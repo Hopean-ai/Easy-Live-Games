@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT, HEDGES, HEDGE_RATES, PROFILES } from '../src/cfo/data.js';
-import { createGame, hedgeQuote, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, BOARD, PLANNED_MOVE, ERAS, OUTLOOK, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT, HEDGES, HEDGE_RATES, PROFILES, MODULES } from '../src/cfo/data.js';
+import { createGame, moduleOptions, hedgeQuote, creditLimit, auctionMin, eraOf, unitCost, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -2024,6 +2024,50 @@ test('company profiles: two dealt, one picked before the first roll, each with i
   assert.equal(viewFor(g, 0).players[2].profile, 'startup');
   const bs = balanceSheet(c);
   assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('modules: the core game leaves out each optional module, and still plays through', () => {
+  assert.deepEqual(moduleOptions(), Object.fromEntries(Object.keys(MODULES).map((id) => [id, true])), 'everything is on by default');
+  const off = Object.fromEntries(Object.keys(MODULES).map((id) => [id, false]));
+  const g = createGame(['A', 'B', 'C'], 83, { easyBooks: true, modules: off });
+  const a = g.players[0];
+  assert.equal(g.credit, false);
+  assert.equal(g.markets, false);
+  assert.equal(a.profileChoices, undefined);
+  const gone = Object.values(MODULES).flatMap((m) => m.cards ?? []);
+  assert.ok(![...g.marketDiscard, ...g.outlook].some((id) => gone.includes(id)), 'module cards leave the deck and the outlook');
+  Object.assign(g, { turn: 0, phase: 'act' });
+  a.personalCash = M(5000);
+  assert.match(act(g, 0, { a: 'personal' }), /without executive perks/);
+  assert.match(act(g, 0, { a: 'hedge', option: 'recession' }), /without insurance/);
+  assert.match(act(g, 0, { a: 'acquire', target: 1 }), /without buyouts/);
+  const airport = SQUARES.findIndex((s) => s.kind === 'transport' && s.mode === 'air');
+  Object.assign(g.tiles[airport], { owner: 0 });
+  a.pos = airport;
+  assert.match(act(g, 0, { a: 'fly' }), /without the island/);
+  assert.equal(viewFor(g, 0).modules.island, false);
+  // A whole core game plays out with balanced books.
+  for (let seed = 0; seed < 3; seed++) {
+    const h = createGame(['A', 'B', 'C', 'D'], 300 + seed, { easyBooks: true, modules: off });
+    for (let steps = 0; h.phase !== 'over' && steps < 6000; steps++) {
+      const w = h.turn;
+      if (h.phase === 'roll') act(h, w, { a: 'roll' });
+      if (h.phase === 'buy') act(h, w, { a: companyCash(h.players[w]) > M(2000) ? 'buy' : 'pass', zone: 0 });
+      if (h.phase === 'buy') act(h, w, { a: 'pass' });
+      if (h.phase !== 'over' && h.turn === w) act(h, w, { a: 'end' });
+      for (const q of h.players) {
+        const bs = balanceSheet(q);
+        assert.ok(Math.abs(bs.totalAssets - bs.totalLiabilitiesAndEquity) < 0.01);
+        assert.ok(!(q.receivables ?? []).length && !(q.payables ?? []).length, 'no trade credit');
+      }
+    }
+  }
+  // A perk portfolio wins without a lap when there is no island.
+  const k = createGame(['A', 'B'], 84, { modules: { island: false } });
+  k.players[0].assets.push(...Array(100).fill('deferred'));
+  Object.assign(k, { turn: 0, phase: 'act' });
+  act(k, 0, { a: 'end' });
+  assert.equal(k.phase, 'over');
 });
 
 test('Chapter 11: a company that cannot pay reorganizes instead of failing, once', () => {

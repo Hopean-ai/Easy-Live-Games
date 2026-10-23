@@ -45,6 +45,10 @@
       <label class="field">Year limit (0 = none; then the highest net worth wins)
         <input id="max-years" type="number" min="0" max="50">
       </label>
+      <h2>Modules</h2>
+      <p class="small">The core game is the board, zoning, building, the books, fraud and shares. Each module adds depth; a table learning the game can leave them out.</p>
+      <div id="module-list" class="module-list"></div>
+      <p class="row" id="module-presets"><button id="core-game" class="secondary" type="button">Core game only</button> <button id="full-game" class="secondary" type="button">Everything</button></p>
       <button id="start" hidden>Start the game</button>
       <!-- Admins only: the server checks too. Asks Claude to send players into this room. -->
       <form id="claude-form" class="inline" hidden>

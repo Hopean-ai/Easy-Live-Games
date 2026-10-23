@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, SUPPLY, CREDIT, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE, BOARD, PLANNED_MOVE, HEDGES, HEDGE_RATES, PROFILES } from './data.js';
-import { createGame, act, timeout, viewFor, winOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS, SCORECARD } from './rules.js';
+import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, SUPPLY, CREDIT, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE, BOARD, PLANNED_MOVE, HEDGES, HEDGE_RATES, PROFILES, MODULES } from './data.js';
+import { createGame, act, timeout, viewFor, winOptions, moduleOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS, SCORECARD } from './rules.js';
 import { sanitizeName } from '../names.js';
 import { isAdmin, hostSeat } from '../admin.js';
 
@@ -132,8 +132,9 @@ export class CfoRoom extends DurableObject {
       const o = { ...this.room.options };
       if ('autoStatements' in msg) o.autoStatements = Boolean(msg.autoStatements);
       for (const k of ['valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
+      if (msg.modules && typeof msg.modules === 'object') o.modules = { ...o.modules, ...msg.modules };
       const w = winOptions(o);
-      this.room.options = { autoStatements: Boolean(o.autoStatements), valueTarget: w.valueTarget, maxYears: w.maxYears };
+      this.room.options = { autoStatements: Boolean(o.autoStatements), valueTarget: w.valueTarget, maxYears: w.maxYears, modules: moduleOptions(o.modules) };
     } else if (msg?.t === 'act') {
       if (this.room.status !== 'playing') return;
       // If a rule ever throws, put the game back as it was rather than saving half an action.
@@ -279,7 +280,7 @@ export class CfoRoom extends DurableObject {
 const RULES = {
   config: CONFIG, size: BOARD_SIZE, retail: RETAIL, supply: SUPPLY, credit: CREDIT, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
-  incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS, scorecard: SCORECARD, board: BOARD, plannedMove: PLANNED_MOVE, hedges: HEDGES, hedgeRates: HEDGE_RATES, profiles: PROFILES,
+  incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS, scorecard: SCORECARD, board: BOARD, plannedMove: PLANNED_MOVE, hedges: HEDGES, hedgeRates: HEDGE_RATES, profiles: PROFILES, modules: MODULES,
   islandStart: ISLAND_START, islandSize: ISLAND_SIZE, landmarks: LANDMARKS, moneyScale: MONEY_SCALE,
 };
 
@@ -292,5 +293,5 @@ function send(ws, msg) {
 }
 
 function defaultOptions() {
-  return { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears };
+  return { autoStatements: false, valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears, modules: moduleOptions() };
 }

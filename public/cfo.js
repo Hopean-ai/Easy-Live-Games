@@ -177,6 +177,9 @@ $('copy').addEventListener('click', async () => {
 $('start').addEventListener('click', () => send({ t: 'start' }));
 $('value-target').addEventListener('change', (e) => send({ t: 'option', valueTarget: Number(e.target.value) }));
 $('max-years').addEventListener('change', (e) => send({ t: 'option', maxYears: Number(e.target.value) }));
+const allModules = (on) => Object.fromEntries(Object.keys(rules?.modules ?? {}).map((id) => [id, on]));
+$('core-game').addEventListener('click', () => send({ t: 'option', modules: allModules(false) }));
+$('full-game').addEventListener('click', () => send({ t: 'option', modules: allModules(true) }));
 // Admins can ask Claude to send players into the room; the Worker calls the Claude routine.
 async function callClaude(count) {
   $('claude-text').textContent = 'Calling Claude…';
@@ -333,7 +336,7 @@ function winLines(o) {
   return [
     'Last company standing: drive every other independent company out of business.',
     `Shareholder value: the first company whose original 100 shares are worth ${money(o.valueTarget ?? cfg.valueTarget)}, counting the share price plus every dividend paid per share.`,
-    `Executive perks: the first player holding ${money(cfg.portfolioGoal)} of perks who has made a lap of the island.`,
+    ...(o.modules?.perks === false ? [] : [`Executive perks: the first player holding ${money(cfg.portfolioGoal)} of perks${o.modules?.island === false ? '' : ' who has made a lap of the island'}.`]),
     ...(o.maxYears ? [`After ${o.maxYears} fiscal years, the best CFO scorecard: points for shareholder value, personal net worth, return on equity and clean filings.`] : []),
   ];
 }
@@ -344,7 +347,12 @@ function renderWinOptions() {
   // Don't overwrite a number the host is in the middle of typing.
   if (document.activeElement !== $('value-target')) $('value-target').value = o.valueTarget ?? rules?.config.valueTarget ?? '';
   if (document.activeElement !== $('max-years')) $('max-years').value = o.maxYears ?? 0;
-  for (const id of ['value-target', 'max-years']) $(id).disabled = mySeat !== (state.host ?? 0) || !state.seats[mySeat]?.admin; // admins only
+  const locked = mySeat !== (state.host ?? 0) || !state.seats[mySeat]?.admin; // admins only
+  for (const id of ['value-target', 'max-years', 'core-game', 'full-game']) $(id).disabled = locked;
+  // Change 11: optional modules, picked by the host.
+  $('module-list').replaceChildren(...Object.entries(rules?.modules ?? {}).map(([id, m]) => el('label', { class: 'check', title: m.text },
+    el('input', { type: 'checkbox', checked: o.modules?.[id] !== false, disabled: locked, onchange: (e) => send({ t: 'option', modules: { [id]: e.target.checked } }) }),
+    ` ${m.name}: `, el('span', { class: 'small' }, m.text))));
 }
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
@@ -449,7 +457,7 @@ function renderTurn() {
   if (g.calendar && g.phase !== 'over') $('turn-text').textContent += ` · ${g.era ? `${g.era.name}, ` : ''}fiscal year ${g.era?.year ?? (g.players.find((p) => !p.out)?.years ?? 0) + 1}, round ${g.calendar.round} of ${g.calendar.of}`;
   if (g.era) $('turn-text').title = g.era.text;
   if (g.win) {
-    $('goal').textContent = `Win: last standing, ${money(g.win.valueTarget)} of shareholder value, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
+    $('goal').textContent = `Win: last standing, ${money(g.win.valueTarget)} of shareholder value${g.modules?.perks === false ? '' : `, or ${money(rules.config.portfolioGoal)} of perks${g.modules?.island === false ? '' : ' after an island lap'}`}${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
     $('goal').title = winLines(g.win).join('\n');
   }
   const box = $('actions');
