@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, consolidated, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -55,6 +55,7 @@ function playOut(seed, players = 4, options = {}) {
       if (p.ledger.cash > M(3000)) act(g, w, { a: 'pay', amount: M(1000) });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
       keepBooks(g, w);
+      if (g.phase === 'over') break; // any action can carry a company past the value target
       if (p.fyePending) assert.equal(act(g, w, { a: 'statements', ...p.fyePending.truth }), null);
       if (g.phase === 'over') break; // a clean-books bonus can win the game
       assert.equal(act(g, w, { a: 'end' }), null);
@@ -623,7 +624,7 @@ test('every Fraud and Market Forces card can be played or drawn and keeps the bo
   }
 });
 
-test('win conditions: company value, a year limit, and second place for the largest subsidiary', () => {
+test('win conditions: shareholder value, a year limit, and second place for the largest subsidiary', () => {
   const g = createGame(['A', 'B', 'C'], 51, { easyBooks: true, valueTarget: M(5000) });
   const [a] = g.players;
   g.phase = 'act';
@@ -631,7 +632,7 @@ test('win conditions: company value, a year limit, and second place for the larg
   act(g, 0, { a: 'end' });
   assert.equal(g.phase, 'over');
   assert.equal(g.winner, 0);
-  assert.match(g.endReason, /company worth \$500,000/);
+  assert.match(g.endReason, /\$500,000 of shareholder value/);
 
   const h = createGame(['A', 'B', 'C'], 52, { easyBooks: true });
   assert.deepEqual(h.win, { valueTarget: CONFIG.valueTarget, maxYears: CONFIG.maxYears });
@@ -1548,6 +1549,69 @@ test('lower of cost or market: widgets that cost more than they sell for are wri
   const held = g.tiles[posOfSpace(30)].stock;
   assert.ok(a.journal.some((e) => e.text.startsWith('Inventory written down to market')));
   assert.ok(Math.abs(a.ledger.inventory - held * RETAIL.prices.common) < 0.02);
+});
+
+test('companies are priced on earnings, and dividends count toward shareholder value', () => {
+  const g = createGame(['A', 'B'], 70, { easyBooks: true, valueTarget: M(1e6) });
+  const [a] = g.players;
+  post(a, 'Land', { land: M(2000), cash: -M(2000) });
+  assert.equal(priceToBook(a), 1, 'priced at its books before its first year end');
+  assert.equal(companyValue(a), balanceSheet(a).totalEquity);
+  // The business (equity beyond cash) earning 20%, twice what investors require, is worth twice its books.
+  a.earnings = [M(2000) * 0.2];
+  assert.equal(priceToBook(a), 2);
+  const cash = companyCash(a);
+  assert.equal(companyValue(a), cash + M(4000));
+  // Idle cash is worth its face value and no more.
+  post(a, 'Idle cash', { cash: M(1000), capital: -M(1000) });
+  assert.equal(companyValue(a), cash + M(1000) + M(4000));
+  // A dividend moves value from the share price to the dividends, so shareholder value holds.
+  g.phase = 'act';
+  const before = shareholderValue(a);
+  assert.equal(act(g, 0, { a: 'dividend', amount: M(1000) }), null);
+  assert.ok(Math.abs(shareholderValue(a) - before) < 1, 'value paid out still counts');
+  // The market's limits.
+  a.earnings = [-M(1000)];
+  assert.equal(priceToBook(a), CONFIG.priceToBook[0]);
+  a.earnings = [M(1e6)];
+  assert.equal(priceToBook(a), CONFIG.priceToBook[1]);
+});
+
+test('an Activist Investor makes companies pay out idle cash as a dividend', () => {
+  const g = createGame(['A', 'B'], 71, { easyBooks: true, valueTarget: M(1e6) });
+  const [a, b] = g.players;
+  post(b, 'Land', { land: M(2900), cash: -M(2900) }); // B's cash is under 40% of its assets
+  const cash = companyCash(a);
+  const bCash = companyCash(b);
+  while (a.pos !== posOfSpace(8)) {
+    Object.assign(g, { turn: 0, phase: 'roll' });
+    a.pos = posOfSpace(8) - 2;
+    g.marketDeck = ['activist'];
+    act(g, 0, { a: 'roll' });
+  }
+  // A company all in cash pays out half of what's above 40% of its assets.
+  assert.equal(companyCash(a), cash - Math.floor(cash * (1 - CONFIG.activistCash) * CONFIG.activistPayout));
+  assert.equal(companyCash(b), bCash);
+  assert.ok(a.dividendsPerShare > 0);
+});
+
+test('at the year limit, the CFO scorecard picks the winner', () => {
+  const g = createGame(['A', 'B', 'C'], 72, { easyBooks: true, valueTarget: M(1e6), maxYears: 1 });
+  const [a, b] = g.players;
+  a.personalCash = M(100000);
+  b.roeYears = [{ income: M(100), equity: M(1000) }];
+  const card = scorecard(g);
+  assert.ok(card.every((r) => !('clean' in r.scores)), 'clean filings count only with real books');
+  const top = card.find((r) => r.seat === 0);
+  assert.equal(top.scores.worth, netWorth(g, a));
+  assert.equal(card.find((r) => r.seat === 1).scores.roe, 0.1);
+  for (const p of g.players) p.years = 1;
+  g.phase = 'act';
+  act(g, 0, { a: 'end' });
+  assert.equal(g.phase, 'over');
+  assert.equal(g.winner, card[0].seat);
+  assert.match(g.endReason, /CFO scorecard/);
+  assert.deepEqual(viewFor(g, 0).scorecard.map((r) => r.seat), card.map((r) => r.seat));
 });
 
 test('property tax: each year end bills a share of every property\'s list price plus its building\'s cost', () => {

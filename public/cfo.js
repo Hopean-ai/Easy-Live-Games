@@ -332,9 +332,9 @@ function winLines(o) {
   const cfg = rules.config;
   return [
     'Last company standing: drive every other independent company out of business.',
-    `Company value: the first company worth ${money(o.valueTarget ?? cfg.valueTarget)}.`,
+    `Shareholder value: the first company whose original 100 shares are worth ${money(o.valueTarget ?? cfg.valueTarget)}, counting the share price plus every dividend paid per share.`,
     `Personal portfolio: the first player with ${money(cfg.portfolioGoal)} of personal assets who has made a lap of the island.`,
-    ...(o.maxYears ? [`After ${o.maxYears} fiscal years, the highest net worth.`] : []),
+    ...(o.maxYears ? [`After ${o.maxYears} fiscal years, the best CFO scorecard: points for shareholder value, personal net worth, return on equity and clean filings.`] : []),
   ];
 }
 
@@ -447,7 +447,7 @@ function renderTurn() {
     || !state.seats.some((s, i) => s.guest && /^Claude \d+$/.test(s.name) && !s.connected && !g.players[i]?.out);
   $('resign').hidden = mySeat === null || g.phase === 'over' || g.players[mySeat]?.out;
   if (g.win) {
-    $('goal').textContent = `Win: last standing, company worth ${money(g.win.valueTarget)}, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
+    $('goal').textContent = `Win: last standing, ${money(g.win.valueTarget)} of shareholder value, or ${money(rules.config.portfolioGoal)} portfolio after an island lap${g.win.maxYears ? `; ${g.win.maxYears} years max` : ''}`;
     $('goal').title = winLines(g.win).join('\n');
   }
   const box = $('actions');
@@ -455,7 +455,8 @@ function renderTurn() {
   if (g.phase === 'over') {
     const order = g.players.map((p, i) => ({ p, i })).sort((a, b) => (a.i === g.winner ? -1 : b.i === g.winner ? 1 : b.p.netWorth - a.p.netWorth));
     box.append(el('h2', {}, 'Final standings'), el('ol', { class: 'standings' }, order.map(({ p, i }) =>
-      el('li', {}, `${p.name}${i === g.winner ? ' (winner)' : ''}${p.out ? ', out' : ''}: net worth ${money(p.netWorth)}, portfolio ${money(p.portfolio)}, ${p.years} fiscal year${p.years === 1 ? '' : 's'}`))));
+      el('li', {}, `${p.name}${i === g.winner ? ' (winner)' : ''}${p.out ? ', out' : ''}: shareholder value ${money(g.shareholderValues?.[i] ?? 0)}, net worth ${money(p.netWorth)}, portfolio ${money(p.portfolio)}, ${p.years} fiscal year${p.years === 1 ? '' : 's'}`))));
+    if (g.scorecard) box.append(scorecardTable(g));
     box.append(el('button', { class: 'secondary', onclick: () => $('recap').scrollIntoView({ behavior: 'smooth' }) }, 'See the game recap'));
     if (mySeat !== null) box.append(el('button', { onclick: () => send({ t: 'again' }) }, 'Play again with this table'));
     return;
@@ -513,6 +514,16 @@ function renderTurn() {
     if (loan > 0) box.append(amountForm('Repay loan', `You owe ${money(loan)}.`, (amount) => actNow({ a: 'repay', amount })));
     box.append(el('p', { class: 'small' }, 'To build, tap one of your zoned squares on the board.'));
   }
+}
+
+// The CFO scorecard that decides a game at its year limit: points per measure, best first.
+function scorecardTable(g) {
+  const measures = rules.scorecard.filter((m) => g.scorecard.some((r) => m.id in r.scores));
+  const show = (m, v) => (m.id === 'roe' ? `${(v * 100).toFixed(1)}%` : m.id === 'clean' ? String(v) : money(v));
+  return el('table', { class: 'scorecard' }, [
+    el('tr', {}, [el('th', {}, 'CFO scorecard'), ...measures.map((m) => el('th', {}, `${m.name} (x${m.weight})`)), el('th', {}, 'Points')]),
+    ...g.scorecard.map((r) => el('tr', {}, [el('td', {}, g.players[r.seat].name), ...measures.map((m) => el('td', {}, show(m, r.scores[m.id]))), el('td', {}, String(r.points))])),
+  ]);
 }
 
 // Flights: to the island from an airport someone owns, or home from the island's Terminal.
@@ -1351,6 +1362,6 @@ function renderMarket() {
     return row;
   }).filter(Boolean);
   rows.push(el('p', { class: 'small' }, `You can buy a rival independent company outright for ${Math.round((rules.config.acquirePremium - 1) * 100)}% over its market value, taking its CFO out of the game. Every shareholder, founders included, is paid for their shares. Public companies are valued higher, so they cost more.`));
-  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market values a public company at ${rules.config.publicPremium}× its equity, which counts toward net worth, but auditors look ${rules.config.publicScrutiny}× as hard: frauds are likelier to be caught and misstatements are fined more. Dividends are shared among all shareholders.`));
+  rows.push(el('p', { class: 'small' }, `Companies with ${rules.config.ipoYears} fiscal years behind them can go public. The market prices every company on its earnings: its equity times its return on equity over the ${Math.round(rules.config.requiredReturn * 100)}% investors require (between ${rules.config.priceToBook[0]}× and ${rules.config.priceToBook[1]}×), so idle cash adds little and cash put to work adds more. A public company is worth ${rules.config.publicPremium}× a private one. That value counts toward net worth, but auditors look ${rules.config.publicScrutiny}× as hard: frauds are likelier to be caught and misstatements are fined more. Dividends are shared among all shareholders.`));
   $('market').replaceChildren(...rows);
 }

@@ -29,7 +29,10 @@ export const CONFIG = {
     { chance: 1 / 2, discount: 0.25 }, // Miles: no "nothing" result; its 1 in 4 went to the smallest discount
   ],
   portfolioGoal: M(35000), // spreadsheet had $100k (~93 draws); lowered so a player who pays themselves can reach it in a full game
-  valueTarget: M(45000), // PLACEHOLDER: company value that wins (bot playtests: the best company reaches it around year 14-16)
+  // Miles (design principles, change 1): the value win counts total shareholder return, the share
+  // price plus every dividend paid per share, for the company's original 100 shares. Paying out
+  // dividends doesn't set a company back in the race; paying the CFO bonuses does.
+  valueTarget: M(75000), // PLACEHOLDER: shareholder value that wins (bot tournament: reached around year 12-13, hoarding no better than paying dividends)
   maxYears: 16, // room setting: end once every company has closed this many years (0 = no limit). Playtests ran past 100 years without one.
   // Miles: fraud is a big deal. Getting caught is an immediate loss, and every fraud committed
   // adds to the chance, but fraud should break even at about 3-4 frauds. A check's chance is this
@@ -42,7 +45,16 @@ export const CONFIG = {
   cleanBooksBonus: M(200), // PLACEHOLDER: for filing a fiscal year with no misstatements
   ipoYears: 3, // PLACEHOLDER: fiscal years a company needs before it can go public
   ipoShares: 25, // PLACEHOLDER: new shares sold at an IPO (every company starts with 100)
-  publicPremium: 1.2, // PLACEHOLDER: the market values a public company at this x its book equity (1.5 made going public the best move in every playtest)
+  publicPremium: 1.2, // PLACEHOLDER: the market values a public company at this x what a private one is worth (1.5 made going public the best move in every playtest)
+  // Miles (change 2): the market prices companies on earnings. Cash counts at face value; the rest
+  // of the equity (the business) at its return over the return investors require (the textbook
+  // justified price-to-book), so idle cash adds no more than itself and cash put to work at a good
+  // return adds more. Earnings are averaged over recent years.
+  requiredReturn: 0.1, // PLACEHOLDER
+  earningsYears: 2, // PLACEHOLDER
+  priceToBook: [0.5, 3], // PLACEHOLDER: the lowest and highest the market will go
+  activistCash: 0.4, // PLACEHOLDER: Activist Investor card: cash above this share of total assets is excess...
+  activistPayout: 0.5, // ...and this share of the excess must be paid out as a dividend
   publicScrutiny: 2, // PLACEHOLDER: public companies are twice as likely to be caught, and fined twice as much
   acquirePremium: 1.5, // PLACEHOLDER: buying a rival outright costs this x its market value...
   acquireMin: M(10000), // ...and never less than this, so an early or nearly broke company isn't a cheap kill
@@ -333,6 +345,7 @@ export const MARKET_CARDS = {
   supplierTerms: { name: 'Supplier Negotiation', count: 2, keep: true, placeholder: true, text: 'Win longer terms: for the rest of this fiscal year, you pay suppliers 4 turns after a purchase instead of 2.' },
   default: { name: 'Customer Default', count: 2, placeholder: true, text: 'A big customer goes under: every company writes off 10% of what its customers owe it.' },
   crunch: { name: 'Credit Crunch', count: 2, placeholder: true, text: 'Suppliers demand cash: every company pays everything it owes them now.' },
+  activist: { name: 'Activist Investor', count: 2, placeholder: true, text: 'An activist fund targets idle cash: every company holding more than 40% of its assets in cash pays half the excess out as a dividend.' },
   whistle: { name: 'Whistleblower', count: 2, keep: true, placeholder: true, text: `Tip off the regulators about a rival: they face a fraud check at Interim Review odds. If they're convicted, you collect a ${usd(1000)} reward.` },
 };
 

@@ -113,7 +113,7 @@ export function createGame(names, seed = (Math.random() * 2 ** 32) >>> 0, option
       frauds: 0, taxWaived: false, deduction: 0,
       // Shares in the company this player is CFO of: who holds how many. Miles: the CFO starts with
       // a stake (CONFIG.cfoShares of 100) and the founders, who aren't players, hold the rest.
-      shares: { holders: { [g.players.length]: CONFIG.cfoShares }, founders: 100 - CONFIG.cfoShares, public: 0 }, isPublic: false, parent: null,
+      shares: { holders: { [g.players.length]: CONFIG.cfoShares }, founders: START_SHARES - CONFIG.cfoShares, public: 0 }, isPublic: false, parent: null,
       manual: !g.easyBooks, docs: [], docSeq: 0, entries: [], entrySeq: 0, bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])), fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     };
     g.players.push(p);
@@ -244,13 +244,42 @@ export function totalShares(p) {
   return Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + (p.shares.founders ?? 0) + p.shares.public;
 }
 
-// What the market pays for the whole company. Miles: a parent is valued on its consolidated
-// books, so what its subsidiaries earn counts, less the share their managers own.
+// What the market pays for the whole company: its cash at face value, plus the rest of its equity
+// (the business itself) at a price-to-book set by its earnings. Miles: a parent is valued on its
+// consolidated books, so what its subsidiaries earn counts, less the share their managers own.
 export function companyValue(p, g = null) {
+  const { equity, cash } = valueBasis(p, g);
+  const business = equity - cash;
+  const value = business > 0 ? cash + business * priceToBook(p, g) : equity;
+  return round(Math.max(0, value) * (p.isPublic ? CONFIG.publicPremium : 1));
+}
+
+function valueBasis(p, g) {
   const c = g && consolidated(g, p);
   const equity = c ? c.balance.parentEquity : balanceSheet(p).totalEquity;
-  return Math.max(0, equity) * (p.isPublic ? CONFIG.publicPremium : 1);
+  return { equity, cash: Math.max(0, Math.min(c ? c.balance.assets.cash : companyCash(p), equity)) };
 }
+
+// Miles (change 2): the business is priced at its return on equity over the return investors
+// require (the textbook justified price-to-book), within the market's limits. Cash sitting idle
+// is worth its face value and no more, so it only adds value once it's put to work at a good
+// return. A company with no closed year yet is priced at its books.
+export function priceToBook(p, g = null) {
+  const years = (p.earnings ?? []).slice(-CONFIG.earningsYears);
+  const { equity, cash } = valueBasis(p, g);
+  const business = equity - cash;
+  if (!years.length || business <= 0) return 1;
+  const earnings = years.reduce((a, b) => a + b, 0) / years.length;
+  const [lo, hi] = CONFIG.priceToBook;
+  return Math.min(hi, Math.max(lo, earnings / (business * CONFIG.requiredReturn)));
+}
+
+// Miles (change 1): total shareholder return, for the company's original 100 shares: the share
+// price plus every dividend paid per share. Issuing shares at the market price doesn't move it.
+export function shareholderValue(p, g = null) {
+  return round((sharePrice(p, g) + (p.dividendsPerShare ?? 0)) * START_SHARES);
+}
+const START_SHARES = 100;
 
 // New shares are issued at the market price, never below CONFIG.minIssuePrice.
 export function issuePrice(p, g = null) {
@@ -698,28 +727,13 @@ const ACTIONS = {
     return null;
   },
 
-  // Pay a dividend: every shareholder gets their share. A parent company's share goes to its books
-  // as dividend income; people's shares are taxed; the founders' and the public's leave the game.
+  // Pay a dividend to every shareholder (payDividend).
   dividend(g, p, { amount } = {}) {
     if (g.phase === 'buy') return 'Buy or pass first.';
     amount = Math.floor(Number(amount));
     if (!(amount > 0)) return 'Enter an amount.';
     if (amount > companyCash(p)) return 'Your company does not have that much cash.';
-    post(p, 'Dividend paid to shareholders', { draws: amount, cash: -amount });
-    const total = totalShares(p);
-    for (const [h, n] of Object.entries(p.shares.holders)) {
-      const q = g.players[h];
-      const part = Math.floor((amount * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
-      if (!part || q.out) continue;
-      if (Number(h) === p.parent) {
-        post(q, `Dividend from ${p.name}`, { cash: part, revDividends: -part });
-        q.intra = { ...q.intra, dividends: (q.intra?.dividends ?? 0) + part };
-        log(g, `${q.name}'s company receives a ${money(part)} dividend from ${p.name}.`);
-      } else {
-        const tax = personalIncome(q, part);
-        log(g, `${q.name} receives a ${money(part)} dividend from ${p.name}'s company (${money(tax)} personal tax).`);
-      }
-    }
+    payDividend(g, p, amount);
     return null;
   },
 
@@ -732,7 +746,7 @@ const ACTIONS = {
     if (balanceSheet(p).totalEquity <= 0) return 'Investors will not buy into a company with no equity.';
     // Miles: realism. As with the SEC, investors want clean statements before a listing.
     if (p.manual && (p.misstatements || p.lastCheck?.errors)) return 'Investors want clean statements first: your last filing had misstatements.';
-    const price = round((balanceSheet(p).totalEquity * CONFIG.publicPremium) / totalShares(p));
+    const price = round((companyValue(p, g) * CONFIG.publicPremium) / totalShares(p));
     const raised = Math.round(price * CONFIG.ipoShares);
     p.shares.public += CONFIG.ipoShares;
     p.isPublic = true;
@@ -909,6 +923,27 @@ const ACTIONS = {
     return null;
   },
 };
+
+// Every shareholder gets their share. A parent company's share goes to its books as dividend
+// income; people's shares are taxed; the founders' and the public's leave the game.
+function payDividend(g, p, amount, text = 'Dividend paid to shareholders') {
+  post(p, text, { draws: amount, cash: -amount });
+  const total = totalShares(p);
+  p.dividendsPerShare = round((p.dividendsPerShare ?? 0) + amount / total);
+  for (const [h, n] of Object.entries(p.shares.holders)) {
+    const q = g.players[h];
+    const part = Math.floor((amount * n) / total / CONFIG.personalUnit) * CONFIG.personalUnit;
+    if (!part || q.out) continue;
+    if (Number(h) === p.parent) {
+      post(q, `Dividend from ${p.name}`, { cash: part, revDividends: -part });
+      q.intra = { ...q.intra, dividends: (q.intra?.dividends ?? 0) + part };
+      log(g, `${q.name}'s company receives a ${money(part)} dividend from ${p.name}.`);
+    } else {
+      const tax = personalIncome(q, part);
+      log(g, `${q.name} receives a ${money(part)} dividend from ${p.name}'s company (${money(tax)} personal tax).`);
+    }
+  }
+}
 
 // The Exchange on the island sells personal assets at half price; a Personal Assets square can
 // discount one card. The better of the two applies.
@@ -1290,16 +1325,42 @@ function afterAction(g) {
   const independent = alive.filter((p) => p.parent === null);
   if (independent.length === 1) return finish(g, independent[0], 'the last company standing');
   if (!independent.length) return finish(g, alive[0] ?? g.players[0], 'the last company standing');
-  const big = independent.find((p) => companyValue(p, g) >= win.valueTarget);
-  if (big) return finish(g, big, `a company worth ${money(win.valueTarget)}`);
+  const big = independent.find((p) => shareholderValue(p, g) >= win.valueTarget);
+  if (big) return finish(g, big, `${money(win.valueTarget)} of shareholder value`);
   // Miles: the portfolio only wins after a lap of the island.
   const rich = alive.find((p) => portfolio(p) >= CONFIG.portfolioGoal && p.islandLaps > 0);
   if (rich) return finish(g, rich, `a personal asset portfolio of ${money(CONFIG.portfolioGoal)}`);
   if (win.maxYears && alive.every((p) => p.years >= win.maxYears)) {
-    const best = alive.reduce((a, b) => (netWorth(g, b) > netWorth(g, a) ? b : a));
-    return finish(g, best, `the highest net worth after ${win.maxYears} fiscal years`);
+    const card = scorecard(g);
+    return finish(g, g.players[card[0].seat], `the best CFO scorecard after ${win.maxYears} fiscal years`);
   }
   if (current(g).out) nextTurn(g);
+}
+
+// Miles (change 1b): at the year limit, CFOs are ranked as a board would rank them for a bonus.
+// Each measure gives the best player as many points as there are players, the next one fewer, and
+// so on, times its weight. Ties on points go to net worth. Clean filings count only with real books.
+export const SCORECARD = [
+  { id: 'tsr', name: 'Shareholder value', weight: 2, of: (g, p) => shareholderValue(p, g) },
+  { id: 'worth', name: 'Personal net worth', weight: 2, of: (g, p) => netWorth(g, p) },
+  { id: 'roe', name: 'Return on equity', weight: 1, of: (g, p) => returnOnEquity(p) },
+  { id: 'clean', name: 'Clean filings', weight: 1, of: (g, p) => p.cleanYears ?? 0, manual: true },
+];
+
+export function returnOnEquity(p) {
+  const years = p.roeYears ?? [];
+  const equity = years.reduce((a, y) => a + Math.max(0, y.equity), 0);
+  return equity > 0 ? round(years.reduce((a, y) => a + y.income, 0) / equity) : 0;
+}
+
+export function scorecard(g) {
+  const rows = g.players.map((p, seat) => ({ seat, out: p.out, scores: {}, points: 0, worth: netWorth(g, p) })).filter((r) => !r.out);
+  for (const m of SCORECARD) {
+    if (m.manual && g.easyBooks) continue;
+    const vals = rows.map((r) => (r.scores[m.id] = m.of(g, g.players[r.seat])));
+    for (const r of rows) r.points += m.weight * (1 + vals.filter((v) => v < r.scores[m.id]).length);
+  }
+  return rows.sort((a, b) => b.points - a.points || b.worth - a.worth);
 }
 
 // One point on the end-of-game recap charts: where a company and its owner stood.
@@ -1586,7 +1647,7 @@ function restart(g, q, parent, capital) {
     docs: [], entries: [], fyePending: null, lastCheck: null, filed: null, misstatements: 0,
     bookLedger: Object.fromEntries(Object.keys(ACCOUNTS).map((a) => [a, 0])),
     shares: { holders: { [parent]: 100 - CONFIG.managerShares, [me]: CONFIG.managerShares }, founders: 0, public: 0 },
-    isPublic: false, parent,
+    isPublic: false, parent, earnings: [], roeYears: [], dividendsPerShare: 0,
   });
   post(q, `Capital from ${host.name}`, { cash: capital, capital: -capital });
 }
@@ -1709,6 +1770,11 @@ function fiscalYearEnd(g, p) {
   p.years += 1;
   const statement = incomeStatement(p);
   p.report = { year: p.years, income: statement, balance: balanceSheet(p) };
+  // What the market prices the company on (change 2), and its return on equity for the scorecard.
+  const group = consolidated(g, p);
+  (p.earnings ??= []).push(group ? group.income.parentIncome : statement.netIncome);
+  if (p.earnings.length > CONFIG.earningsYears) p.earnings.shift();
+  (p.roeYears ??= []).push({ income: statement.netIncome, equity: balanceSheet(p).totalEquity });
   snapshot(g, p, p.years, statement.netIncome);
   const truth = { income: incomeFields(p) };
   // Close the year: revenues, expenses and distributions roll into retained earnings.
@@ -1840,6 +1906,17 @@ const MARKET_NOW = {
       const owed = billTotal(q.payables ?? []);
       q.payables = [];
       if (owed) payBills(g, q, owed, 'Suppliers paid early (credit crunch)');
+    }
+  },
+  // Miles (change 2b): cash beyond what the business needs belongs to shareholders.
+  activist(g) {
+    for (const q of alive(g)) {
+      const excess = companyCash(q) - balanceSheet(q).totalAssets * CONFIG.activistCash;
+      const amount = Math.floor(Math.max(0, excess) * CONFIG.activistPayout);
+      if (amount > 0) {
+        log(g, `An activist investor makes ${q.name}'s company pay out ${money(amount)} of idle cash.`);
+        payDividend(g, q, amount, 'Special dividend demanded by an activist investor');
+      }
     }
   },
   spoilage(g) {
@@ -2322,6 +2399,7 @@ const BOOKS = {
       corrections,
       entries,
     };
+    if (!errors) p.cleanYears = (p.cleanYears ?? 0) + 1;
     if (!errors && !p.outsourced) post(p, 'Bonus for clean books', { cash: CONFIG.cleanBooksBonus, revOther: -CONFIG.cleanBooksBonus });
     log(g, `${p.name} files statements for fiscal year ${pending.year}.`);
     return null;
@@ -2350,6 +2428,8 @@ export function viewFor(g, who) {
     endReason: g.endReason,
     win: g.win,
     companyValues: g.players.map((p, i) => (open(i) ? companyValue(p, g) : null)),
+    shareholderValues: g.players.map((p, i) => (open(i) || p.isPublic ? shareholderValue(p, g) : null)),
+    scorecard: g.phase === 'over' && g.win?.maxYears ? scorecard(g) : null,
     offers: g.offers ?? [],
     easyBooks: g.easyBooks,
     autoStatements: Boolean(g.autoStatements),
@@ -2375,6 +2455,8 @@ export function viewFor(g, who) {
       isPublic: p.isPublic,
       parent: p.parent,
       sharePrice: open(i) || p.isPublic ? sharePrice(p, g) : null,
+      priceToBook: open(i) || p.isPublic ? round(priceToBook(p, g)) : null,
+      dividendsPerShare: p.dividendsPerShare ?? 0,
       tradePrice: open(i) || p.isPublic ? tradePrice(p, g) : null,
       acquisitionPrice: acquisitionPrice(p, g),
       consolidated: open(i) ? consolidated(g, p) : null,
