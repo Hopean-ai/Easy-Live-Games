@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SQUARES, BOARD_SIZE, ISLAND_START, posOfSpace, CONFIG, M, ZONES, RARITIES, FRAUD_CARDS, MARKET_CARDS, RETAIL, SUPPLY, PERSONAL_CARDS, CREDIT } from '../src/cfo/data.js';
-import { createGame, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
+import { createGame, consolidated, companyCash, shareholderValue, priceToBook, scorecard, creditTerms, averageCost, issuePrice, act, timeout, current, viewFor, acquisitionPrice, companyValue, fraudRisk, balanceSheet, incomeStatement, canBuild, netWorth, bankOptions, retailTerms, sideOf, winOptions, widgetsHeld, post, production, tradePrice, salvageValue, rezoneFee, storeSales } from '../src/cfo/rules.js';
 
 const count = (kind) => SQUARES.filter((s) => s.kind === kind && !s.island).length;
 
@@ -22,6 +22,16 @@ test('the board: 58 spaces, 4 corners, 44 land, 8 transport, 6 decks', () => {
   assert.equal(Object.values(ZONES).reduce((n, z) => n + z.count, 0), lots);
   assert.equal(Object.values(RARITIES).reduce((n, r) => n + r.count, 0), lots, 'one PP&E card per lot too');
 });
+
+// A diligent bookkeeper: posts one correct entry for each document in the inbox, then archives it.
+function keepBooks(g, k) {
+  const p = g.players[k];
+  for (const d of p.docs) {
+    if (d.archived || d.filed) continue;
+    assert.equal(act(g, k, { a: 'entry', year: d.year, memo: d.text, lines: d.lines }), null);
+    assert.equal(act(g, k, { a: 'archive', doc: d.id }), null);
+  }
+}
 
 // Plays a whole game with a simple greedy strategy, checking the books balance after every step.
 function playOut(seed, players = 4, options = {}) {
@@ -44,8 +54,7 @@ function playOut(seed, players = 4, options = {}) {
       if (p.ledger.cash > M(12000)) act(g, w, { a: 'acquire', target: (w + 1) % players });
       if (p.ledger.cash > M(3000)) act(g, w, { a: 'pay', amount: M(1000) });
       while (p.personalCash >= CONFIG.personalAssetPrice && !act(g, w, { a: 'personal' }));
-      // A diligent bookkeeper: records every document correctly and files the true statements.
-      for (const d of p.docs) act(g, w, { a: 'record', doc: d.id, lines: d.lines });
+      keepBooks(g, w);
       if (g.phase === 'over') break; // any action can carry a company past the value target
       if (p.fyePending) assert.equal(act(g, w, { a: 'statements', ...p.fyePending.truth }), null);
       if (g.phase === 'over') break; // a clean-books bonus can win the game
@@ -74,7 +83,7 @@ test('whole games finish with balanced books, from 2 to 6 players', () => {
   }
 });
 
-test('players record their own entries and file their own statements', () => {
+test('players post their own entries and file their own statements', () => {
   const g = createGame(['A', 'B'], 21);
   const p = g.players[0];
   // The starting capital is the first document to record.
@@ -86,10 +95,17 @@ test('players record their own entries and file their own statements', () => {
   assert.equal(view.income, undefined, 'true statements are hidden');
   assert.equal(viewFor(g, 1).players[0].docs, undefined, 'others cannot see your documents');
 
-  assert.equal(act(g, 0, { a: 'record', doc: 99, lines: [['cash', M(3000)]] }), 'Pick a document to record.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['capital', -M(2000)]] }), 'Debits must equal credits.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['nonsense', -M(3000)]] }), 'Pick an account for every line.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['cash', M(3000)], ['revOps', -M(3000)]] }), null);
+  assert.equal(act(g, 0, { a: 'entry', entry: 99, lines: [['cash', M(3000)]] }), 'That entry is no longer in your journal.');
+  assert.equal(act(g, 0, { a: 'entry', lines: [['cash', M(3000)], ['capital', -M(2000)]] }), 'Debits must equal credits.');
+  assert.equal(act(g, 0, { a: 'entry', lines: [['cash', M(3000)], ['nonsense', -M(3000)]] }), 'Pick an account for every line.');
+  assert.equal(act(g, 0, { a: 'entry', year: 5, lines: [['cash', M(3000)], ['capital', -M(3000)]] }), 'Entries can go in fiscal year 1.');
+  assert.equal(act(g, 0, { a: 'entry', memo: 'Capital', lines: [['cash', M(3000)], ['revOps', -M(3000)]] }), null);
+  assert.deepEqual(viewFor(g, 0).players[0].entries, [{ id: 1, year: 1, memo: 'Capital', lines: [['cash', M(3000)], ['revOps', -M(3000)]] }]);
+  // Archiving a document is the player's own bookmark; it doesn't post anything.
+  assert.equal(act(g, 0, { a: 'archive', doc: 1 }), null);
+  assert.equal(viewFor(g, 0).players[0].docs[0].archived, true);
+  assert.equal(act(g, 0, { a: 'archive', doc: 1, on: false }), null);
+  assert.equal(act(g, 0, { a: 'archive', doc: 7 }), 'Pick a document.');
 
   // Pass FYE: statements are due by the next year end, so the turn can go on.
   p.pos = BOARD_SIZE - 2;
@@ -101,16 +117,19 @@ test('players record their own entries and file their own statements', () => {
   assert.equal(truth.balance.capital, CONFIG.startCompanyCash);
   assert.equal(truth.balance.cash, p.ledger.cash);
   // The statements are built from the player's own entries: they review them and submit.
-  // The miscoded capital entry and any unrecorded year-end documents are the misstatements.
-  const unrecorded = p.docs.filter((d) => d.year === 1 && !d.recorded).length;
+  // The review compares every account with the true books: capital and operating revenue are off,
+  // and so is whatever the year-end documents moved, since nothing was posted for them.
   const preview = viewFor(g, 0).players[0].preview;
   assert.equal(preview.income.revOps, undefined);
   assert.equal(viewFor(g, 1).players[0].preview, undefined, 'others cannot see it');
   assert.equal(act(g, 0, { a: 'statements' }), null);
   assert.equal(JSON.stringify(p.filed.balance), JSON.stringify(preview.balance), 'what was previewed is what is filed');
   assert.ok(p.lastCheck.wrongFields.includes('capital'));
-  assert.equal(p.lastCheck.corrections.length, 1 + unrecorded);
-  assert.equal(p.misstatements, 1 + unrecorded);
+  const wrong = p.lastCheck.corrections.map((c) => c.account);
+  assert.ok(wrong.includes('capital') && wrong.includes('revOps'));
+  assert.equal(p.misstatements, Math.ceil(wrong.length / 2), 'two wrong accounts make one misstatement');
+  assert.deepEqual(p.entries, [], 'filed entries leave the journal');
+  assert.ok(p.docs.every((d) => d.year > 1 || (d.filed && !d.lines)), 'filed documents stay in the archive');
   assert.equal(viewFor(g, 1).players[0].filed.balance.capital, preview.balance.capital, 'others see what was filed');
   assert.notEqual(preview.balance.capital, truth.balance.capital);
 
@@ -646,7 +665,7 @@ test('the island: fly in for a fare, loop it, buy a landmark, and fly home from 
   assert.equal(act(g, 0, { a: 'fly' }), null);
   assert.equal(a.pos, ISLAND_START);
   assert.equal(b.ledger.cash, bCash + CONFIG.islandFare);
-  assert.equal(incomeStatement(a).expenses.expFreight, CONFIG.islandFare);
+  assert.equal(incomeStatement(a).expenses.expTravel, CONFIG.islandFare);
   assert.match(act(g, 0, { a: 'fly', to: airport }), /already flown/);
 
   // Landmarks come with their zone and building.
@@ -726,7 +745,7 @@ test('statements not filed by the next year end are filed blank', () => {
   assert.ok(p.misstatements > 0);
 });
 
-test('auto statements are built from the entries players record', () => {
+test('auto statements are built from the entries players post', () => {
   for (const mistake of [false, true]) {
     const g = createGame(['A', 'B'], 23, { autoStatements: true });
     const p = g.players[0];
@@ -734,18 +753,26 @@ test('auto statements are built from the entries players record', () => {
     p.pos = BOARD_SIZE - 2;
     act(g, 0, { a: 'roll' });
     assert.ok(p.fyePending);
-    for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
     if (mistake) {
       // Book the starting capital as revenue instead.
       const first = p.docs[0];
-      act(g, 0, { a: 'record', doc: first.id, lines: [['cash', 3000], ['revOther', -3000]] });
+      first.lines = [['cash', first.lines[0][1]], ['revOther', -first.lines[0][1]]];
+      keepBooks(g, 0);
+      first.lines = [['cash', CONFIG.startCompanyCash], ['capital', -CONFIG.startCompanyCash]];
+    } else {
+      // One entry for the whole year's documents works as well as one for each.
+      const lines = {};
+      for (const d of p.docs) for (const [a, v] of d.lines) lines[a] = (lines[a] ?? 0) + v;
+      assert.equal(act(g, 0, { a: 'entry', year: 1, lines: Object.entries(lines).filter(([, v]) => Math.abs(v) > 0.001) }), null);
+      assert.equal(act(g, 0, { a: 'archive' }), null);
+      assert.ok(p.docs.every((d) => d.archived));
     }
     assert.equal(act(g, 0, { a: 'statements', income: { revOther: 999999 } }), null, 'typed numbers are ignored');
     if (mistake) {
       assert.ok(p.lastCheck.wrongFields.includes('capital'));
       assert.ok(p.lastCheck.wrongFields.includes('revOther'));
-      assert.equal(p.lastCheck.corrections.length, 1);
-      assert.equal(p.lastCheck.errors, 1, 'one wrong entry is one misstatement');
+      assert.deepEqual(p.lastCheck.corrections.map((c) => c.account).sort(), ['capital', 'revOther']);
+      assert.equal(p.lastCheck.errors, 1, 'one slip is one misstatement');
     } else {
       assert.equal(p.lastCheck.errors, 0);
       assert.equal(p.filed.balance.cash, p.lastCheck.truth.balance.cash);
@@ -754,7 +781,7 @@ test('auto statements are built from the entries players record', () => {
     Object.assign(g, { turn: 0, phase: 'roll' });
     p.pos = BOARD_SIZE - 2;
     act(g, 0, { a: 'roll' });
-    for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
+    keepBooks(g, 0);
     assert.equal(act(g, 0, { a: 'statements' }), null);
     assert.equal(p.lastCheck.year, 2);
     assert.equal(p.lastCheck.errors, 0);
@@ -802,7 +829,7 @@ test('crafted actions get a plain error and never touch object internals', () =>
   g.phase = 'act';
   for (const a of ['constructor', '__proto__', 'hasOwnProperty', 'toString']) assert.equal(typeof act(g, 1, { a }), 'string');
   assert.equal(act(g, 0, { a: 'play', card: 'length' }), 'Pick a card from your hand.');
-  assert.equal(act(g, 0, { a: 'record', doc: 1, lines: [['constructor', 5], ['cash', -5]] }), 'Pick an account for every line.');
+  assert.equal(act(g, 0, { a: 'entry', lines: [['constructor', 5], ['cash', -5]] }), 'Pick an account for every line.');
   g.players[0].pos = ISLAND_START;
   g.players[0].atTerminal = true;
   assert.equal(act(g, 0, { a: 'fly', to: '16' }), 'Pick an airport.');
@@ -1054,7 +1081,10 @@ test('a bookkeeper records and files everything for a fee, with no clean-books b
   act(g, 0, { a: 'roll' });
   assert.equal(p.fyePending, null, 'the statements are filed');
   assert.equal(p.misstatements, 0);
-  assert.ok(p.journal.some((e) => e.text === 'Bookkeeping fees'));
+  const fee = p.journal.find((e) => e.text.startsWith('Bookkeeping fees'));
+  const docs = Number(fee.text.match(/\((\d+) document/)[1]);
+  assert.ok(docs > 0);
+  assert.deepEqual(fee.lines.find(([a]) => a === 'expProfessional'), ['expProfessional', docs * CONFIG.bookkeeperFee], 'paid by the document');
   assert.ok(!p.journal.some((e) => e.text === 'Bonus for clean books'));
   assert.equal(act(g, 0, { a: 'outsource', on: false }), null);
   assert.equal(p.outsourced, false);
@@ -1240,7 +1270,7 @@ test('a game begun with typed statements switches to statements built from entri
   p.pos = BOARD_SIZE - 2;
   act(g, 0, { a: 'roll' });
   assert.equal(g.autoStatements, true);
-  for (const d of p.docs) act(g, 0, { a: 'record', doc: d.id, lines: d.lines });
+  keepBooks(g, 0);
   assert.equal(act(g, 0, { a: 'statements' }), null);
   assert.equal(p.lastCheck.errors, 0, 'correct entries make correct statements');
 });
@@ -1284,7 +1314,7 @@ test('over whole games, statements built from correct entries match the true boo
       const i = g.turn;
       for (const [k, q] of g.players.entries()) {
         if (q.out) continue;
-        for (const d of q.docs) if (!d.recorded) act(g, k, { a: 'record', doc: d.id, lines: d.lines });
+        keepBooks(g, k);
         if (!q.fyePending) continue;
         const { preview } = viewFor(g, k).players[k];
         for (const kind of ['income', 'balance']) {
@@ -1582,4 +1612,125 @@ test('at the year limit, the CFO scorecard picks the winner', () => {
   assert.equal(g.winner, card[0].seat);
   assert.match(g.endReason, /CFO scorecard/);
   assert.deepEqual(viewFor(g, 0).scorecard.map((r) => r.seat), card.map((r) => r.seat));
+});
+
+test('property tax: each year end bills a share of every property\'s list price plus its building\'s cost', () => {
+  const g = createGame(['A', 'B'], 3, { easyBooks: true });
+  const p = g.players[0];
+  Object.assign(g.tiles[posOfSpace(1)], { owner: 0, zone: 'residential', building: { rarity: 'rare', cost: M(1500), dep: 0 } });
+  Object.assign(g.tiles[posOfSpace(2)], { owner: 0 });
+  const rail = posOfSpace(5);
+  Object.assign(g.tiles[rail], { owner: 0, landBasis: Math.round(SQUARES[rail].price * CONFIG.transportLand), building: { rarity: 'transport', cost: SQUARES[rail].price - Math.round(SQUARES[rail].price * CONFIG.transportLand), dep: 0 } });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  // A transport tile is assessed once at its price, split between its land and its structures.
+  const assessed = SQUARES[posOfSpace(1)].price + M(1500) + SQUARES[posOfSpace(2)].price + SQUARES[rail].price;
+  assert.equal(p.report.income.expenses.expPropTax, Math.round(assessed * CONFIG.propertyTax));
+  const s = p.report.balance;
+  assert.ok(Math.abs(s.totalAssets - s.totalLiabilitiesAndEquity) < 0.01);
+});
+
+test('consolidated statements: a parent adds in its subsidiary, less the manager\'s share and dealings inside the group', () => {
+  const g = createGame(['A', 'B', 'C'], 32, { easyBooks: true });
+  const [a, , c] = g.players;
+  assert.equal(consolidated(g, a), null, 'no subsidiaries, nothing to consolidate');
+  act(g, 2, { a: 'resign' });
+  g.phase = 'act';
+  assert.equal(act(g, 0, { a: 'hire', target: 2, amount: M(1000) }), null);
+  const balanced = (b) => assert.ok(Math.abs(b.totalAssets - b.totalLiabilitiesAndEquity) < 0.01, 'consolidated balance sheet balances');
+
+  // At the start the subsidiary is just its cash; the investment is gone and the manager owns a quarter.
+  let k = consolidated(g, a);
+  balanced(k.balance);
+  assert.equal(k.balance.assets.investments, 0);
+  assert.equal(k.balance.assets.cash, a.ledger.cash + M(1000));
+  assert.equal(k.balance.equity.nci, M(250));
+  assert.equal(k.balance.parentEquity, balanceSheet(a).totalEquity - M(250));
+  assert.equal(companyValue(a, g), k.balance.parentEquity);
+
+  // The subsidiary pays the parent rent: both sides cancel, and the group's profit is the same.
+  const lot = posOfSpace(1);
+  Object.assign(g.tiles[lot], { owner: 0 });
+  c.pos = lot - 1;
+  g.turn = 2;
+  g.phase = 'roll';
+  g.dice = null;
+  const before = consolidated(g, a).income.netIncome;
+  post(c, 'Rent to A', { expRent: M(50), cash: -M(50) });
+  post(a, 'Rent from C', { revRent: -M(50), cash: M(50) });
+  k = consolidated(g, a);
+  assert.equal(k.income.revenue.revRent, M(50), 'not yet known to be intercompany');
+  c.intra = { expRent: M(50) };
+  a.intra = { revRent: M(50) };
+  k = consolidated(g, a);
+  assert.equal(Math.abs(k.income.revenue.revRent), 0);
+  assert.equal(k.income.expenses.expRent, 0);
+  assert.equal(k.eliminated.expRent, M(50));
+  assert.equal(k.income.netIncome, before);
+  balanced(k.balance);
+
+  // The subsidiary earns: three quarters of it is the parent's, and its value rises with it.
+  const value = companyValue(a, g);
+  const nci = k.income.nciIncome;
+  post(c, 'Sales', { cash: M(400), revSales: -M(400) });
+  k = consolidated(g, a);
+  assert.equal(k.income.nciIncome - nci, M(100));
+  assert.equal(k.balance.parentEquity - (value), M(300));
+  assert.ok(companyValue(a, g) > companyValue(a), 'consolidation counts what subsidiaries build');
+
+  // Its dividend to the parent is not group income.
+  g.phase = 'act';
+  assert.equal(act(g, 2, { a: 'dividend', amount: M(400) }), null);
+  k = consolidated(g, a);
+  assert.equal(Math.abs(k.income.revenue.revDividends), 0);
+  assert.equal(k.eliminated.dividends, M(300));
+  assert.equal(k.balance.parentEquity - value, M(300), 'paying the parent moves cash inside the group');
+  balanced(k.balance);
+  assert.equal(viewFor(g, 0).players[0].consolidated.balance.parentEquity, k.balance.parentEquity);
+});
+
+test('a journal entry can be dated to the year still to file or the year under way', () => {
+  const g = createGame(['A', 'B'], 23);
+  const p = g.players[0];
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  assert.deepEqual(viewFor(g, 0).players[0].openYears, [1, 2]);
+  keepBooks(g, 0);
+  // An entry for the new year doesn't change last year's statements and survives the filing.
+  assert.equal(act(g, 0, { a: 'entry', year: 2, memo: 'Early', lines: [['cash', 5], ['revOther', -5]] }), null);
+  assert.equal(act(g, 0, { a: 'statements' }), null);
+  assert.equal(p.lastCheck.errors, 0);
+  assert.deepEqual(p.entries.map((e) => e.memo), ['Early']);
+  const [early] = p.entries;
+  assert.equal(act(g, 0, { a: 'entry', entry: early.id, year: 1, lines: early.lines }), 'Entries can go in fiscal year 2.');
+  assert.equal(act(g, 0, { a: 'unpost', entry: early.id }), null);
+  assert.deepEqual(p.entries, []);
+});
+
+test('a timed-out player has the missing entries posted for them', () => {
+  const g = createGame(['A', 'B'], 23);
+  const p = g.players[0];
+  assert.equal(act(g, 0, { a: 'entry', lines: [['cash', 100], ['revOther', -100]] }), null);
+  Object.assign(g, { turn: 0, phase: 'roll' });
+  p.pos = BOARD_SIZE - 2;
+  act(g, 0, { a: 'roll' });
+  timeout(g);
+  assert.equal(p.fyePending, null);
+  assert.equal(p.lastCheck.errors, 0, 'the catch-up entry also undoes the stray one');
+  assert.ok(p.docs.filter((d) => d.year === 1).every((d) => d.archived));
+});
+
+test('a game saved with one entry per document moves those entries into the journal', () => {
+  const g = createGame(['A', 'B'], 23);
+  const p = g.players[0];
+  delete p.entries;
+  delete p.entrySeq;
+  p.docs[0].recorded = p.docs[0].lines;
+  delete p.docs[0].archived;
+  viewFor(g, 0);
+  assert.equal(p.entries.length, 1);
+  assert.deepEqual(p.entries[0].lines, p.docs[0].lines);
+  assert.equal(p.docs[0].archived, true);
+  assert.equal(p.docs[0].recorded, undefined);
 });

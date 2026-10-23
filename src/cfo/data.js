@@ -65,12 +65,13 @@ export const CONFIG = {
   // share of your salary is paid in new shares at the market price (a stock award).
   cfoShares: 20, // PLACEHOLDER
   minIssuePrice: M(1), // PLACEHOLDER: new shares are never issued below this, even when equity is gone
-  bookkeeperFee: M(100), // PLACEHOLDER: yearly fee for a bookkeeper who records entries and files statements (no clean-books bonus)
+  bookkeeperFee: M(3), // PLACEHOLDER: per document a bookkeeper posts at the year end (about $10k for a typical year); no clean-books bonus
   seatBonus: M(100), // PLACEHOLDER: extra starting capital for each seat after the first (going first won 59% of 2-player playtests, 52% with this)
   personalUnit: 1, // Miles: personal cash is as granular as company cash (one cent); this used to be $10,000
   salvage: 0.5, // PLACEHOLDER: Miles: destroyed PP&E (upgrading or rezoning) returns this share of its book value
   transportLand: 0.3, // PLACEHOLDER: Miles: a transport tile's price is 30% land, 70% PP&E (track, depots, runways) that depreciates
   rezoneFee: 0.25, // PLACEHOLDER: Miles: rezoning costs this share of the land's price, and the PP&E on it must be rebuilt
+  propertyTax: 0.015, // PLACEHOLDER: Miles: a property tax, this share of each lot's list price plus its building's cost, at each fiscal year end
   loanLimit: M(5000), // Bank corner (Claude's idea for the unlabeled corner): most a company may owe
   loanInterest: 0.1, // charged on the loan balance at each fiscal year end
   rowSize: 3, // face-up zoning cards

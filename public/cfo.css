@@ -158,6 +158,13 @@ label.check { display: flex; align-items: center; gap: 4px; color: var(--fg); }
 .doc .small { grid-column: 1; }
 .doc button { grid-row: 1 / 3; grid-column: 2; align-self: center; padding: 6px 10px; font-size: 0.85rem; }
 .doc.done { opacity: 0.75; }
+.doc .doc-actions { grid-row: 1 / 3; grid-column: 2; align-self: center; display: flex; gap: 8px; }
+.doc .doc-actions button { padding: 4px 6px; }
+.books-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.books-cols h3 { margin: 0; flex: 1; }
+.books-cols .year-head { margin: 6px 0 0; font-weight: 600; }
+.archive summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+.entry-editor input[type=text] { flex: 1; min-width: 160px; padding: 4px 6px; }
 .entry-editor { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--accent); border-radius: 6px; }
 .entry-editor p { margin: 0; }
 .entry { border-collapse: collapse; }
@@ -216,3 +223,5 @@ label.field select, label.field input { padding: 8px 10px; }
 .chart .line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .chart circle { fill: currentColor; }
 .recap-years { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.9rem; }
+.books-cols .row { align-items: center; }
+.books-cols .row > button { flex: 0 0 auto; width: auto; }
