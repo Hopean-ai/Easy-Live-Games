@@ -104,9 +104,40 @@ function Bridge.groupMoves(moves: { any }): { { id: string, title: string, moves
 end
 
 -- What the server forwards from a client: only the message types the website accepts, and only
--- plain fields. The website checks everything again; this just keeps junk off the network.
+-- plain fields, plus the `lines` of a journal entry. The website checks everything again; this
+-- just keeps junk off the network.
 local MESSAGE_TYPES = { start = true, again = true, act = true }
 local MAX_FIELDS = 12
+local MAX_LINES = 12
+
+local function cleanNumber(v: any): boolean
+	return type(v) == "number" and v == v and math.abs(v) <= 1e9
+end
+
+local function cleanLines(lines: any): { { any } }?
+	if type(lines) ~= "table" or #lines == 0 or #lines > MAX_LINES then
+		return nil
+	end
+	local out = {}
+	local n = 0
+	for i, line in lines do
+		n += 1
+		if type(i) ~= "number" or type(line) ~= "table" or #line ~= 2 then
+			return nil
+		end
+		local acct, amount = line[1], line[2]
+		if type(acct) ~= "string" or #acct > 24 or not cleanNumber(amount) then
+			return nil
+		end
+		for k in line do
+			if k ~= 1 and k ~= 2 then
+				return nil
+			end
+		end
+		out[i] = { acct, amount }
+	end
+	return if n == #lines then out else nil
+end
 
 function Bridge.cleanMessage(msg: any): { [string]: any }?
 	if type(msg) ~= "table" or not MESSAGE_TYPES[msg.t] then
@@ -119,12 +150,18 @@ function Bridge.cleanMessage(msg: any): { [string]: any }?
 			return nil
 		end
 		local kind = type(v)
-		if kind == "number" then
-			if v ~= v or math.abs(v) > 1e9 then
+		if k == "lines" then
+			local lines = cleanLines(v)
+			if not lines then
+				return nil
+			end
+			v = lines
+		elseif kind == "number" then
+			if not cleanNumber(v) then
 				return nil
 			end
 		elseif kind == "string" then
-			if #v > 40 then
+			if #v > 80 then
 				return nil
 			end
 		elseif kind ~= "boolean" then
@@ -140,6 +177,93 @@ function Bridge.cleanMessage(msg: any): { [string]: any }?
 		return nil
 	end
 	return out
+end
+
+-- A journal entry being typed: each line has an account and the text typed as its debit and
+-- credit. Returns where the plug goes, as the web page does it: whatever the typed amounts leave
+-- unbalanced, on the other side, on the last line with nothing typed (keeping `prev` while that
+-- line is still free), or on a new line (#lines + 1) when every line has an amount.
+export type DraftLine = { acct: string?, debit: string, credit: string }
+export type Plug = { line: number, side: "debit" | "credit", amount: number }
+
+local function amountOf(text: string): number?
+	local v = tonumber((text:gsub("[$,%s]", "")))
+	return if v ~= nil and v == v and v >= 0 then v else nil
+end
+Bridge.amountOf = amountOf
+
+local function free(line: DraftLine): boolean
+	return line.debit == "" and line.credit == ""
+end
+
+function Bridge.plug(lines: { DraftLine }, prev: number?): Plug?
+	local diff = 0
+	for _, line in lines do
+		diff += (amountOf(line.debit) or 0) - (amountOf(line.credit) or 0)
+	end
+	diff = math.floor(diff * 100 + 0.5) / 100
+	if diff == 0 then
+		return nil
+	end
+	local target = if prev and lines[prev] and free(lines[prev]) then prev else nil
+	if not target then
+		for i = #lines, 1, -1 do
+			if free(lines[i]) then
+				target = i
+				break
+			end
+		end
+	end
+	return { line = target or #lines + 1, side = if diff > 0 then "credit" else "debit", amount = math.abs(diff) }
+end
+
+-- The lines to send for a draft, with the plug filled in: { account, debit minus credit }. Lines
+-- with neither an account nor an amount are left out. Returns nil and a message when a line has
+-- an amount but no account, or the reverse.
+function Bridge.entryLines(lines: { DraftLine }, plug: Plug?): ({ { any } }?, string?)
+	local out = {}
+	for i, line in lines do
+		local v = (amountOf(line.debit) or 0) - (amountOf(line.credit) or 0)
+		if plug and plug.line == i then
+			v += if plug.side == "debit" then plug.amount else -plug.amount
+		end
+		v = math.floor(v * 100 + 0.5) / 100
+		if line.acct or v ~= 0 then
+			if not line.acct then
+				return nil, "Pick an account for every line."
+			end
+			if v == 0 then
+				return nil, "Every line needs a debit or a credit."
+			end
+			table.insert(out, { line.acct, v })
+		end
+	end
+	if plug and plug.line > #lines then
+		return nil, "Add a line for the amount that balances the entry."
+	end
+	if #out == 0 then
+		return nil, "An entry needs at least one line."
+	end
+	return out, nil
+end
+
+-- "Dr Cash $1,000, Cr Land $1,000" for a posted entry's lines.
+function Bridge.entryText(lines: { { any } }, names: { [string]: string }): string
+	local parts = {}
+	for _, line in lines do
+		local v = line[2]
+		table.insert(parts, (if v > 0 then "Dr " else "Cr ") .. (names[line[1]] or line[1]) .. " " .. Bridge.money(math.abs(v)))
+	end
+	return table.concat(parts, ", ")
+end
+
+-- The quick-match line: how many are waiting, and how long until a game starts with them.
+function Bridge.queueText(q: any): string
+	local text = "Finding players: " .. (q.waiting or 1) .. " of " .. (q.max or 6) .. " waiting."
+	if q.startsIn then
+		text ..= " Starting in " .. math.max(0, math.ceil(q.startsIn)) .. " s unless more join."
+	end
+	return text
 end
 
 -- The action to send for a move, with a typed amount or count when the move needs one.

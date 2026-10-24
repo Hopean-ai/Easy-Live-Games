@@ -15,12 +15,14 @@ globalThis.WebSocketRequestResponsePair ??= class { constructor(a, b) { this.a =
 // A Durable Object context with in-memory storage and no sockets.
 export function fakeCtx() {
   const store = new Map();
+  let alarm = null;
   return {
     storage: {
       get: async (k) => structuredClone(store.get(k)),
       put: async (k, v) => void store.set(k, structuredClone(v)),
-      setAlarm: async () => {},
-      deleteAlarm: async () => {},
+      getAlarm: async () => alarm,
+      setAlarm: async (t) => void (alarm = t),
+      deleteAlarm: async () => void (alarm = null),
     },
     setWebSocketAutoResponse() {},
     blockConcurrencyWhile: (fn) => fn(),

@@ -61,4 +61,10 @@ function Api.room(code: string, body: { [string]: any }): (any?, string?)
 	return request("POST", "/api/roblox/cfo/" .. code, body)
 end
 
+-- Quick match, in the same queue as web players. op is "join", "poll" or "leave"; the reply is
+-- { queued = { waiting, max, startsAt? } }, { matched = { room, players } } or { left = true }.
+function Api.match(userId: string, op: string): (any?, string?)
+	return request("POST", "/api/roblox/match/cfo", { op = op, userId = userId })
+end
+
 return Api

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fakeCtx } from './helpers/workers-stub.js';
 import { handleRequest } from '../src/router.js';
-import { masker, STALE_MS } from '../src/cfo/roblox.js';
+import { masker, robloxState, STALE_MS } from '../src/cfo/roblox.js';
 
 const { CfoRoom } = await import('../src/cfo/room.js');
 
@@ -25,6 +25,21 @@ test("web players' names are masked as whole words, longest first", () => {
   assert.equal(mask("Anna pays Ann's rent to Rob. Annabel"), "Web player 2 pays Web player 1's rent to Rob. Annabel");
 });
 
+test("documents and memos that name web players are masked, without changing the game", async () => {
+  const { createGame } = await import('../src/cfo/rules.js');
+  const seats = [{ name: 'Miles' }, { name: 'RobA', roblox: '1' }];
+  const room = { status: 'playing', seats, game: createGame(seats.map((s) => s.name), 7) };
+  const me = room.game.players[1];
+  me.docs.push({ id: 99, text: 'Rent paid to Miles: $1,400 paid', year: 1, archived: false, lines: [['expRent', 1400], ['cash', -1400]] });
+  me.entries.push({ id: 5, year: 1, memo: 'Rent to Miles', lines: [['expRent', 1400], ['cash', -1400]] });
+  const { books } = robloxState(room, 1, 0).game;
+  assert.equal(books.docs.at(-1).text, 'Rent paid to Web player 1: $1,400 paid');
+  assert.equal(books.entries.at(-1).memo, 'Rent to Web player 1');
+  assert.equal(me.docs.at(-1).text, 'Rent paid to Miles: $1,400 paid');
+  assert.equal(me.entries.at(-1).memo, 'Rent to Miles');
+  assert.equal(books.docs.at(-1).lines, undefined, 'the right answer stays on the website');
+});
+
 async function lobby() {
   const room = new CfoRoom(fakeCtx(), {});
   // A web player is seated as a socket would seat them.
@@ -38,7 +53,7 @@ async function lobby() {
   return room;
 }
 
-test('Roblox players join, see masked web names, get a bookkeeper and play from the menu', async () => {
+test('Roblox players join, see masked web names and their books, and play from the menu', async () => {
   const room = await lobby();
   assert.equal(room.room.seats[1].roblox, '111');
   const start = await room.roblox({ op: 'act', userId: '111', msg: { t: 'start' } });
@@ -46,8 +61,7 @@ test('Roblox players join, see masked web names, get a bookkeeper and play from 
   assert.equal(room.room.status, 'waiting');
   assert.equal(room.apply(0, { t: 'start' }).changed, true);
   assert.equal(room.room.status, 'playing');
-  assert.ok(room.room.game.players[1].outsourced && room.room.game.players[2].outsourced);
-  assert.ok(!room.room.game.players[0].outsourced);
+  assert.ok(!room.room.game.players[1].outsourced, 'Roblox players keep their own books, as on the web');
   await room.changed();
 
   const first = await room.roblox({ op: 'poll', userIds: ['111', '222'], since: -1 });
@@ -57,7 +71,17 @@ test('Roblox players join, see masked web names, get a bookkeeper and play from 
   assert.ok(view.game.log.every((l) => !l.includes('Miles')));
   assert.ok(view.game.players[1].hand, 'a player sees their own hand');
   assert.equal(view.game.players[2].hand, undefined, "but not anyone else's");
-  assert.deepEqual(await room.roblox({ op: 'poll', userIds: ['111'], since: first.version }), { version: first.version, same: true });
+  assert.ok(view.game.books.docs.length > 0, 'their source documents are there to record');
+  assert.deepEqual(view.game.books.openYears, [1]);
+  // Record the opening capital as a journal entry, as a Roblox player would.
+  const doc = room.room.game.players[1].docs[0];
+  const entry = await room.roblox({ op: 'act', userId: '111', msg: { t: 'act', a: 'entry', year: 1, memo: 'Capital', lines: room.room.game.players[1].docs[0].lines.map(([acct, v]) => [acct, v]) } });
+  assert.equal(entry.error, null, `entry refused: ${entry.error}`);
+  assert.ok(doc);
+  const after = (await room.roblox({ op: 'poll', userIds: ['111'], since: -1 })).views['111'];
+  assert.equal(after.game.books.entries.length, 1);
+  const latest = (await room.roblox({ op: 'poll', userIds: ['111'], since: -1 })).version;
+  assert.deepEqual(await room.roblox({ op: 'poll', userIds: ['111'], since: latest }), { version: latest, same: true });
 
   // Play the web player's turn, then a Roblox player's, from the menu.
   room.apply(0, { t: 'act', a: 'roll' });

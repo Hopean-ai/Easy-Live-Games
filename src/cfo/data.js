@@ -146,6 +146,24 @@ const ISLAND_SPACES = ['set', 'set', 'set', 'market', 'set', 'set', 'set', 'set'
   'set', 'personal', 'set', 'set', 'set', 'port', 'set', 'set'];
 // Miles: perhaps some special buildings. Landmarks are sold with their building already up, and
 // with a zone of their own. PLACEHOLDER numbers.
+// Where each square sits on the drawn board: [row, column] on a 22 x 11 grid, 1-based. The main
+// board runs clockwise from FYE at the top left; the island is a 7 x 7 ring inside it, Terminal at
+// its top left. The web page and the Roblox game both draw from this.
+export const BOARD_GRID = { cols: 22, rows: 11 };
+export function gridPos(pos) {
+  if (pos >= ISLAND_START) {
+    const k = pos - ISLAND_START;
+    if (k <= 6) return [3, 14 + k];
+    if (k <= 12) return [k - 3, 20];
+    if (k <= 18) return [9, 32 - k];
+    return [27 - k, 14];
+  }
+  if (pos <= 21) return [1, pos + 1];
+  if (pos <= 31) return [pos - 20, 22];
+  if (pos <= 52) return [11, 53 - pos];
+  return [63 - pos, 1];
+}
+
 export const LANDMARKS = {
   resort: { name: 'Grand Resort', zone: 'residential', price: M(1200), building: M(3000) },
   port: { name: 'Free Port', zone: 'retail', price: M(1200), building: M(3000) },
