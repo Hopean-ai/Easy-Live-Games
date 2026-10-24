@@ -474,7 +474,10 @@ local function drawSquare(area: Frame, pos: number, sq: any, cfo: any)
 				end
 			end
 		end
-		ui.selected = if ui.selected == pos then nil else pos
+		-- A second tap closes the square, except on your own lots, where it usually aims for the
+		-- build moves.
+		local mine = tile and tile.owner ~= nil and tile.owner == state.view.seat
+		ui.selected = if ui.selected == pos and not mine then nil else pos
 		render()
 	end)
 end
@@ -1156,6 +1159,17 @@ stateEvent.OnClientEvent:Connect(function(msg)
 		state.error = msg.error
 	end
 	if msg.view then
+		-- Just bought the square you're on: pick it, so its build moves show beside it.
+		local before = state.view and state.view.game
+		local after = msg.view.game
+		local seat = msg.view.seat
+		if before and after and seat ~= nil and before.phase == "buy" and before.turn == seat and after.turn == seat and after.phase == "act" then
+			local me = after.players[seat + 1]
+			local tile = me and after.tiles[me.pos + 1]
+			if tile and tile.owner == seat then
+				ui.selected = me.pos
+			end
+		end
 		state.view = msg.view
 		state.error = nil
 	end
