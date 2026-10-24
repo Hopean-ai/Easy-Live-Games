@@ -1,0 +1,64 @@
+# Tests and builds the Roblox game from roblox/. Web CFO changes run it too, so a change the Roblox
+# screens can't draw fails here. On main, a change to roblox/ (or a manual run) publishes the game
+# to Roblox with the Open Cloud place publishing API. Publishing needs three repository secrets (see roblox/README.md):
+# ROBLOX_API_KEY, ROBLOX_UNIVERSE_ID and ROBLOX_PLACE_ID. Without them the build still runs.
+name: Roblox
+on:
+  pull_request:
+    paths: ['roblox/**', 'src/cfo/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
+  push:
+    branches: [main]
+    paths: ['roblox/**', 'src/cfo/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
+  workflow_dispatch:
+env:
+  ROJO_VERSION: 7.7.1
+  LUNE_VERSION: 0.11.1
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: roblox-tools-rojo-${{ env.ROJO_VERSION }}-lune-${{ env.LUNE_VERSION }}
+      - name: Install Rojo and Lune
+        run: |
+          command -v rojo || cargo install rojo --version "$ROJO_VERSION" --locked
+          command -v lune || cargo install lune --version "$LUNE_VERSION" --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test
+        working-directory: roblox
+        run: |
+          lune run tests/syntax
+          lune run tests/run
+          node ../scripts/roblox-fixture.mjs > tests/fixture.json
+          lune run tests/screens
+      - name: Build the place
+        working-directory: roblox
+        run: rojo build default.project.json -o cfo.rbxl
+      - name: Publish to Roblox
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: roblox
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+          ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+        run: |
+          if [ "${{ github.event_name }}" = push ] && ! git diff --name-only HEAD^ HEAD | grep -q '^roblox/'; then
+            echo "Nothing in roblox/ changed, so there is nothing new to publish."
+            exit 0
+          fi
+          if [ -z "$ROBLOX_API_KEY" ] || [ -z "$ROBLOX_UNIVERSE_ID" ] || [ -z "$ROBLOX_PLACE_ID" ]; then
+            echo "::notice::Roblox secrets are not set, so the place was built but not published."
+            exit 0
+          fi
+          curl --fail-with-body -sS -X POST \
+            "https://apis.roblox.com/universes/v1/$ROBLOX_UNIVERSE_ID/places/$ROBLOX_PLACE_ID/versions?versionType=Published" \
+            -H "x-api-key: $ROBLOX_API_KEY" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @cfo.rbxl

@@ -650,6 +650,17 @@ export function act(g, who, raw) {
   return err ?? null;
 }
 
+// The actions kept in the handler tables below; the few handled at the top of act() are found by
+// test/cfo-moves.test.js reading this file. Used to check every action is offered on Roblox.
+export function tableActions() {
+  return [...Object.keys(ACTIONS), ...Object.keys(BOOKS), ...Object.keys(DEALS)];
+}
+
+// The actions act() allows only on the player's own turn.
+export function turnActions() {
+  return Object.keys(ACTIONS);
+}
+
 // The turn timer ran out: do the least surprising thing for an absent player.
 export function timeout(g) {
   if (g.phase === 'over') return;

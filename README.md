@@ -39,6 +39,10 @@ npm run deploy
 
 Durable Objects with SQLite storage are available on the Workers Free plan, so no paid plan is needed.
 
+## Roblox (CFO)
+
+`roblox/` is a Roblox game that joins the same CFO rooms as the website, so Roblox and browser players can play together. The website runs the game; Roblox only relays and draws what it is sent, so rule changes on the web need no Roblox update. Setup, publishing and what to do when the web game changes: [roblox/README.md](roblox/README.md).
+
 ## Claude players (CFO)
 
 An admin in a CFO lobby can press **Add Claude players**. The Worker (`src/claude.js`) calls a Claude Code routine through its API trigger, passing the room code and seat tokens; the routine runs `scripts/claude-players.mjs`, which joins that room and plays with `src/cfo/bot.js` (a bookkeeper keeps its books). The players log off on their own five minutes after every other player has left. If a run stops mid-game, an admin can press **Reconnect Claude players** and a new run takes the same seats back.

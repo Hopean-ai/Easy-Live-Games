@@ -1,0 +1,23 @@
+{
+  "name": "CFO",
+  "tree": {
+    "$className": "DataModel",
+    "HttpService": {
+      "$properties": { "HttpEnabled": true }
+    },
+    "ReplicatedStorage": {
+      "CfoShared": { "$path": "src/shared" }
+    },
+    "ServerScriptService": {
+      "CfoServer": { "$path": "src/server" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "CfoClient": { "$path": "src/client" }
+      }
+    },
+    "Players": {
+      "$properties": { "CharacterAutoLoads": false }
+    }
+  }
+}

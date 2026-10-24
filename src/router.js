@@ -3,6 +3,7 @@ import { newRoomCode } from './codes.js';
 import { findGame, publicGames, tableSize } from './games.js';
 import { isAdmin } from './admin.js';
 import { callClaudePlayers } from './claude.js';
+import { MAX_ROBLOX_BODY } from './cfo/roblox.js';
 
 export { newRoomCode };
 
@@ -65,6 +66,22 @@ export async function handleRequest(request, env) {
     const body = await readJson(request);
     const { status, ...result } = await callClaudePlayers(env, { origin: url.origin, code: claude[1].toUpperCase(), count: body?.count });
     return Response.json(result, { status });
+  }
+
+  // The Roblox game server, on behalf of its players (src/cfo/roblox.js). It proves itself with
+  // the shared ROBLOX_KEY secret; without one set, cross-play is off.
+  const roblox = path.match(/^\/api\/roblox\/cfo\/([^/]+)$/);
+  if (roblox) {
+    if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
+    if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+    if (!(await sameSecret(request.headers.get('X-Roblox-Key') ?? '', env.ROBLOX_KEY))) return Response.json({ error: 'Bad key.' }, { status: 401 });
+    if (!ROOM_CODE.test(roblox[1])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
+    const body = await readJson(request, MAX_ROBLOX_BODY);
+    if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const code = roblox[1].toUpperCase();
+    const stub = env.CFO_ROOMS.get(env.CFO_ROOMS.idFromName(code));
+    const result = await stub.roblox({ ...body, code });
+    return Response.json(result, { status: result.error && !('version' in result) ? 400 : 200 });
   }
 
   const match = path.match(/^\/api\/match\/([^/]+)\/ws$/);
@@ -142,13 +159,24 @@ function sameOrigin(request, url) {
   }
 }
 
-async function readJson(request) {
+async function readJson(request, max = MAX_BODY_BYTES) {
   const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return null;
+  if (text.length > max) return null;
   try {
     const body = JSON.parse(text);
     return body && typeof body === 'object' ? body : null;
   } catch {
     return null;
   }
+}
+
+// Compares secrets without leaking how much of a guess was right through timing.
+async function sameSecret(given, expected) {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([given, expected].map((x) => crypto.subtle.digest('SHA-256', enc.encode(x))));
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
 }

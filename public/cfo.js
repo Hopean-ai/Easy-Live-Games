@@ -314,7 +314,7 @@ function renderWaiting() {
     ...state.seats.map((s, i) =>
       el('li', { class: s.connected ? '' : 'away' },
         el('span', { class: 'dot', style: { background: COLORS[i] } }),
-        `${s.name}${s.guest ? ' (guest)' : ''}${i === mySeat ? ' (you)' : ''}${i === host ? ' · host' : ''}`)),
+        `${s.name}${s.platform === 'roblox' ? ' (Roblox)' : s.guest ? ' (guest)' : ''}${i === mySeat ? ' (you)' : ''}${i === host ? ' · host' : ''}`)),
   );
   const n = state.seats.length;
   const max = rules?.config.maxPlayers ?? 6;
