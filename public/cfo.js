@@ -264,10 +264,18 @@ function onMessage(msg) {
         buildBoard();
       }
       break;
-    case 'state':
+    case 'state': {
+      // Just bought the square you're on: pick it, so its PP&E buttons are right there.
+      const before = state?.game;
+      const after = msg.game;
+      if (before?.phase === 'buy' && before.turn === mySeat && after?.turn === mySeat && after.phase === 'act') {
+        const pos = after.players[mySeat]?.pos;
+        if (after.tiles[pos]?.owner === mySeat) selected = pos;
+      }
       state = msg;
       render();
       break;
+    }
     case 'error':
       $('error').textContent = msg.text;
       if (editing?.saving) {
@@ -420,7 +428,10 @@ function renderBoard() {
 }
 
 function select(pos) {
-  selected = selected === pos ? null : pos;
+  // Tapping the picked square again closes it, except your own lots, where a second tap is
+  // usually aiming for the build buttons.
+  const mine = state.game.tiles[pos]?.owner === mySeat;
+  selected = selected === pos && !mine ? null : pos;
   render();
 }
 
@@ -506,6 +517,12 @@ function renderTurn() {
     row.append(el('button', { class: 'secondary', disabled: me.personalCash < assetPrice, onclick: () => actNow({ a: 'personal' }) },
       `Buy an executive perk (${money(assetPrice)})`));
     box.append(row);
+    // A shortcut to the lot you're standing on when it's yours and still empty.
+    const here = g.tiles[me.pos];
+    if (here?.owner === mySeat && here.zone && !here.building && !rules.squares[me.pos].landmark && selected !== me.pos) {
+      box.append(el('button', { class: 'secondary', onclick: () => { selected = me.pos; render(); $('tile').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } },
+        `Build PP&E on ${rules.squares[me.pos].name}`));
+    }
     box.append(boardControls(me));
     box.append(...flightControls(me));
     if (me.atCustoms && me.frauds) {
