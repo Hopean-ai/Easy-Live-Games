@@ -40,10 +40,9 @@ On the website (Cloudflare):
 On Roblox ([Creator Hub](https://create.roblox.com/dashboard/creations)):
 
 1. Create an experience. Its URL in the Creator Hub shows the **universe ID** (the experience) and the **start place ID**.
-2. Under the experience's **Secrets**, add a secret named `cfo_bridge_key` with the same key, for the website's domain (for example `easy-live-games.<subdomain>.workers.dev`).
-3. Set `baseUrl` in `src/server/Config.luau` to the website's address and merge that change.
-4. Fill in the experience's maturity questionnaire, then make it public when you want people to find it.
-5. Under **Open Cloud > API Keys**, create a key with the **universe-places** API, **Write**, for this experience. GitHub's runners change IP, so allow `0.0.0.0/0`.
+2. Under the experience's **Secrets**, add a secret named `cfo_bridge_key` with the same key, for the website's domain, `easy-live-games.milestpitts.workers.dev` (the address in `src/server/Config.luau`).
+3. Fill in the experience's maturity questionnaire, then make it public when you want people to find it.
+4. Under **Open Cloud > API Keys**, create a key with the **universe-places** API, **Write**, for this experience. GitHub's runners change IP, so allow `0.0.0.0/0`.
 
 On GitHub (repository **Settings > Secrets and variables > Actions**), add:
 
