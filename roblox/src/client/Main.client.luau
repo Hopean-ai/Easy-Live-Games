@@ -597,11 +597,24 @@ local function renderTurn(col: Frame, view: any)
 			send({ t = "again" })
 		end, { Parent = col, LayoutOrder = nextOrder() })
 	end
-	for _, group in Bridge.groupMoves(cfo.moves or {}) do
+	-- Moves on one square (build, rezone, restructure) show under that square on the board, so
+	-- the list here stays short.
+	local general, onTiles = {}, 0
+	for _, m in cfo.moves or {} do
+		if m.action.pos ~= nil then
+			onTiles += 1
+		else
+			table.insert(general, m)
+		end
+	end
+	for _, group in Bridge.groupMoves(general) do
 		small(group.title:upper(), { Font = Enum.Font.GothamBold, Parent = col, LayoutOrder = nextOrder() })
 		for _, move in group.moves do
 			renderMove(col, move, nextOrder())
 		end
+	end
+	if onTiles > 0 then
+		small("Tap one of your lots on the board to build on it or rezone it.", { Parent = col, LayoutOrder = nextOrder() })
 	end
 	if cfo.forms and #cfo.forms > 0 then
 		small("DEALS AND PLANS", { Font = Enum.Font.GothamBold, Parent = col, LayoutOrder = nextOrder() })
