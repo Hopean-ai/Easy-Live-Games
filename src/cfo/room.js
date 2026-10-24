@@ -3,6 +3,7 @@ import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SET
 import { createGame, act, timeout, viewFor, winOptions, moduleOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS, SCORECARD } from './rules.js';
 import { sanitizeName } from '../names.js';
 import { isAdmin, hostSeat } from '../admin.js';
+import { robloxBoard, robloxState, cleanRobloxRequest, STALE_MS, BRIDGE_VERSION } from './roblox.js';
 
 const MAX_MESSAGE_BYTES = 4096; // a full set of statements with decimals is about 600 bytes
 const CLAUDE_NAME = /^Claude \d+$/; // the names Claude players join under
@@ -41,6 +42,7 @@ export class CfoRoom extends DurableObject {
       this.room.expect = expect;
     }
 
+    this.pruneRoblox();
     const { 0: client, 1: server } = new WebSocketPair();
     const seat = this.claimSeat(token, name, account);
     if (seat !== null) {
@@ -117,18 +119,27 @@ export class CfoRoom extends DurableObject {
     const seat = ws.deserializeAttachment()?.seat;
     if (seat === null || seat === undefined) return;
 
+    const { error, changed } = this.apply(seat, msg);
+    if (error) send(ws, { t: 'error', text: error });
+    if (changed) await this.changed();
+  }
+
+  // One message from a seated player, from a WebSocket or the Roblox game. Returns an error to show
+  // that player, and whether the room changed.
+  apply(seat, msg) {
     if (msg?.t === 'start') {
       // The host (the first admin to join, else the first player) decides when to start.
-      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats)) return;
-      if (this.room.seats.length < CONFIG.minPlayers) return send(ws, { t: 'error', text: `At least ${CONFIG.minPlayers} players are needed.` });
+      this.pruneRoblox();
+      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats)) return {};
+      if (this.room.seats.length < CONFIG.minPlayers) return { error: `At least ${CONFIG.minPlayers} players are needed.` };
       this.start();
     } else if (msg?.t === 'again') {
-      if (this.room.status !== 'over') return;
-      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options, code: this.room.code, listed: this.room.listed };
+      if (this.room.status !== 'over') return {};
+      this.room = { status: 'waiting', seats: this.connectedSeats(), expect: 0, game: null, options: this.room.options, code: this.room.code, listed: this.room.listed, version: this.room.version };
       this.reseat();
     } else if (msg?.t === 'option') {
       // Only an admin host can change the room's options; everyone else plays with the defaults.
-      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats) || !this.room.seats[seat]?.admin) return;
+      if (this.room.status !== 'waiting' || seat !== hostSeat(this.room.seats) || !this.room.seats[seat]?.admin) return {};
       const o = { ...this.room.options };
       if ('autoStatements' in msg) o.autoStatements = Boolean(msg.autoStatements);
       for (const k of ['valueTarget', 'maxYears']) if (k in msg) o[k] = msg[k];
@@ -136,7 +147,7 @@ export class CfoRoom extends DurableObject {
       const w = winOptions(o);
       this.room.options = { autoStatements: Boolean(o.autoStatements), valueTarget: w.valueTarget, maxYears: w.maxYears, modules: moduleOptions(o.modules) };
     } else if (msg?.t === 'act') {
-      if (this.room.status !== 'playing') return;
+      if (this.room.status !== 'playing') return {};
       // If a rule ever throws, put the game back as it was rather than saving half an action.
       const before = structuredClone(this.room.game);
       let err;
@@ -145,14 +156,88 @@ export class CfoRoom extends DurableObject {
       } catch (e) {
         console.error('CFO action failed', msg?.a, e);
         this.room.game = before;
-        return send(ws, { t: 'error', text: 'That move could not be made.' });
+        return { error: 'That move could not be made.' };
       }
-      if (err) return send(ws, { t: 'error', text: String(err) });
+      if (err) return { error: String(err) };
       if (this.room.game.phase === 'over') this.room.status = 'over';
     } else {
-      return;
+      return {};
     }
-    await this.changed();
+    return { changed: true };
+  }
+
+  // Called by the router for the Roblox game server (see src/cfo/roblox.js). Roblox players hold a
+  // seat by their Roblox user id and show as connected while their server keeps polling.
+  async roblox(body) {
+    const req = cleanRobloxRequest(body);
+    if (typeof req === 'string') return { error: req };
+    const r = this.room;
+    r.code ??= body.code; // set by the router from the URL
+    const now = Date.now();
+    let changed = false;
+    const seatOf = (userId) => r.seats.findIndex((s) => s.roblox === userId);
+    const see = (i) => {
+      if (i < 0) return;
+      if (now - (r.seats[i].seen ?? 0) > STALE_MS) changed = true; // they show as back
+      r.seats[i].seen = now;
+    };
+    // The players this request is for are here, whoever else has gone quiet.
+    for (const id of req.userIds ?? [req.userId]) see(seatOf(id));
+    if (this.pruneRoblox(now)) changed = true;
+    let reply = {};
+    if (req.op === 'join') {
+      let seat = seatOf(req.userId);
+      if (seat < 0 && r.status === 'waiting' && r.seats.length < CONFIG.maxPlayers) {
+        r.seats.push({ token: crypto.randomUUID(), name: req.name, guest: true, account: null, admin: false, roblox: req.userId, seen: now });
+        seat = r.seats.length - 1;
+        changed = true;
+        if (r.expect && r.seats.length >= r.expect) this.start();
+      }
+      reply = { seat: seat >= 0 ? seat : null, board: robloxBoard() };
+    } else if (req.op === 'leave') {
+      const seat = seatOf(req.userId);
+      if (seat >= 0 && r.status === 'waiting') {
+        r.seats.splice(seat, 1);
+        this.reseat();
+        changed = true;
+      }
+    } else if (req.op === 'act') {
+      const seat = seatOf(req.userId);
+      if (seat < 0) return { error: 'You are watching this game.' };
+      const res = this.apply(seat, req.msg);
+      if (res.changed) changed = true;
+      reply = { error: res.error ?? null };
+    }
+    if (changed) await this.changed();
+    const version = this.room.version ?? 0;
+    if (req.op === 'poll') {
+      if (req.since === version) return { version, same: true };
+      const host = hostSeat(this.room.seats);
+      const views = Object.fromEntries(req.userIds.map((id) => {
+        const seat = this.room.seats.findIndex((s) => s.roblox === id);
+        return [id, robloxState(this.room, seat >= 0 ? seat : null, host)];
+      }));
+      return { version, bridge: BRIDGE_VERSION, views };
+    }
+    return { ...reply, version, bridge: BRIDGE_VERSION };
+  }
+
+  // In the lobby, a Roblox player whose server stopped polling gives up their seat, as a closed
+  // tab does. Returns whether anyone was removed.
+  pruneRoblox(now = Date.now()) {
+    if (this.room.status !== 'waiting') return false;
+    const before = this.room.seats.length;
+    this.room.seats = this.room.seats.filter((s) => !s.roblox || now - (s.seen ?? 0) <= STALE_MS);
+    if (this.room.seats.length === before) return false;
+    this.reseat();
+    return true;
+  }
+
+  // A seat counts as here while a socket is open on it or, for Roblox players, while polled.
+  isConnected(seat) {
+    const s = this.room.seats[seat];
+    if (s?.roblox) return Date.now() - (s.seen ?? 0) <= STALE_MS;
+    return this.socketsFor(seat).length > 0;
   }
 
   async webSocketClose(ws) {
@@ -185,7 +270,7 @@ export class CfoRoom extends DurableObject {
   }
 
   connectedSeats() {
-    return this.room.seats.filter((_, i) => this.socketsFor(i).length);
+    return this.room.seats.filter((_, i) => this.isConnected(i));
   }
 
   start() {
@@ -193,6 +278,10 @@ export class CfoRoom extends DurableObject {
     // An admin may have set options and then left the lobby; without one, the defaults apply.
     if (!this.room.seats.some((s) => s.admin)) this.room.options = defaultOptions();
     this.room.game = createGame(this.room.seats.map((s) => s.name), undefined, this.room.options ?? {});
+    // Roblox has no bookkeeping screens yet, so Roblox players start with a bookkeeper.
+    this.room.seats.forEach((s, i) => {
+      if (s.roblox) act(this.room.game, i, { a: 'outsource', on: true });
+    });
   }
 
   async alarm() {
@@ -227,6 +316,7 @@ export class CfoRoom extends DurableObject {
   }
 
   async changed() {
+    this.room.version = (this.room.version ?? 0) + 1; // Roblox servers poll for this changing
     await this.schedule();
     await this.listGames();
     await this.ctx.storage.put('room', this.room);
@@ -266,7 +356,7 @@ export class CfoRoom extends DurableObject {
   }
 
   broadcast() {
-    const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, admin: Boolean(s.admin), connected: this.socketsFor(i).length > 0 }));
+    const seats = this.room.seats.map((s, i) => ({ name: s.name, guest: s.guest, admin: Boolean(s.admin), connected: this.isConnected(i), platform: s.roblox ? 'roblox' : 'web' }));
     const base = { t: 'state', status: this.room.status, seats, host: hostSeat(this.room.seats), expect: this.room.expect, options: this.room.options ?? {}, deadline: this.room.deadline ?? null };
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
