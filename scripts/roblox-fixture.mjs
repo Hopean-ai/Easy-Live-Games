@@ -13,6 +13,9 @@ for (let i = 0; i < 12; i++) {
   if (g.phase === 'buy') act(g, s, { a: 'buy', zone: 0 }) && act(g, s, { a: 'buy' });
   act(g, s, { a: 'end' });
 }
+// One journal entry posted by the player whose view is drawn, so the journal has something in it.
+const me = g.players[g.turn];
+act(g, g.turn, { a: 'entry', year: 1, memo: me.docs[0].text, lines: me.docs[0].lines });
 const waiting = { status: 'waiting', seats, game: null };
 console.log(JSON.stringify({
   board: robloxBoard(),

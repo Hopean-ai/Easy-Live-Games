@@ -69,8 +69,59 @@ test("only plain website messages are forwarded", function()
 	eq(Bridge.cleanMessage({ t = "act" }), nil, "no action")
 	eq(Bridge.cleanMessage({ t = "act", a = "x", nested = {} }), nil, "table field")
 	eq(Bridge.cleanMessage({ t = "act", a = "x", amount = 0 / 0 }), nil, "NaN")
-	eq(Bridge.cleanMessage({ t = "act", a = string.rep("x", 41) }), nil, "long string")
+	eq(Bridge.cleanMessage({ t = "act", a = string.rep("x", 81) }), nil, "long string")
+	assert(Bridge.cleanMessage({ t = "act", a = "entry", memo = string.rep("x", 80) }), "an 80-letter memo")
 	eq(Bridge.cleanMessage("act"), nil, "not a table")
+end)
+
+test("journal entry lines are forwarded, and nothing else in tables", function()
+	local m = Bridge.cleanMessage({ t = "act", a = "entry", year = 1, lines = { { "cash", 100 }, { "land", -100 } } })
+	eq(m and #m.lines, 2)
+	eq(m and m.lines[2][1], "land")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = {} }), nil, "no lines")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = { { "cash" } } }), nil, "no amount")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = { { "cash", 1, 2 } } }), nil, "extra value")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = { { "cash", 0 / 0 } } }), nil, "NaN amount")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = { { {}, 1 } } }), nil, "table account")
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = { x = { "cash", 1 } } }), nil, "keyed lines")
+	local many = {}
+	for i = 1, 13 do
+		many[i] = { "cash", i }
+	end
+	eq(Bridge.cleanMessage({ t = "act", a = "entry", lines = many }), nil, "too many lines")
+end)
+
+test("the plug balances an entry on the last free line", function()
+	local lines = { { acct = "land", debit = "1,000", credit = "" }, { acct = nil, debit = "", credit = "" } }
+	local p = Bridge.plug(lines)
+	eq(p and p.line, 2)
+	eq(p and p.side, "credit")
+	eq(p and p.amount, 1000)
+	eq(Bridge.entryLines(lines, p), nil, "the plug line needs an account")
+	lines[2].acct = "cash"
+	local out = Bridge.entryLines(lines, p)
+	eq(out and out[1][2], 1000)
+	eq(out and out[2][2], -1000)
+	eq(out and out[2][1], "cash")
+	-- An extra free line: the plug stays where it was.
+	table.insert(lines, { acct = nil, debit = "", credit = "" })
+	eq(Bridge.plug(lines, 2).line, 2)
+	eq(Bridge.plug(lines).line, 3)
+	-- Every line typed and unbalanced: the plug wants a new line.
+	local full = { { acct = "land", debit = "5", credit = "" }, { acct = "cash", debit = "", credit = "3" } }
+	eq(Bridge.plug(full).line, 3)
+	eq(Bridge.plug(full).amount, 2)
+	local _, err = Bridge.entryLines(full, Bridge.plug(full))
+	assert(err, "an unbalanced entry with no free line")
+	full[2].credit = "5"
+	eq(Bridge.plug(full), nil, "balanced")
+	eq(#Bridge.entryLines(full, nil), 2)
+	eq(Bridge.entryText({ { "land", 5 }, { "cash", -5 } }, { land = "Land", cash = "Cash" }), "Dr Land $5, Cr Cash $5")
+end)
+
+test("queue text", function()
+	eq(Bridge.queueText({ waiting = 1, max = 6 }), "Finding players: 1 of 6 waiting.")
+	eq(Bridge.queueText({ waiting = 2, max = 6, startsIn = 9.2 }), "Finding players: 2 of 6 waiting. Starting in 10 s unless more join.")
 end)
 
 test("typed amounts and counts", function()

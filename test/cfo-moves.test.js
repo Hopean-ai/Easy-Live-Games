@@ -3,16 +3,34 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createGame, act, viewFor, tableActions } from '../src/cfo/rules.js';
 import { nextMove, stepKey } from '../src/cfo/bot.js';
-import { MOVES, WEB_ONLY, movesFor } from '../src/cfo/moves.js';
+import { MOVES, SCREENS, WEB_ONLY, FORMS, movesFor } from '../src/cfo/moves.js';
 
 // The Roblox game offers only the moves in moves.js. When a new action is added to rules.js, this
-// fails until it is listed in MOVES (Roblox players get it) or WEB_ONLY (they don't, and why).
+// fails until it is listed in MOVES (a menu button), SCREENS (a Roblox screen of its own) or
+// WEB_ONLY (not on Roblox yet, and why).
 test('every action the rules know is offered on Roblox or marked web only', () => {
   const inline = [...readFileSync(new URL('../src/cfo/rules.js', import.meta.url), 'utf8').matchAll(/action\.a === '(\w+)'/g)].map((m) => m[1]);
   const known = new Set([...inline, ...tableActions()]);
-  for (const a of known) assert.ok(MOVES[a] || WEB_ONLY[a], `${a} is in rules.js but not in MOVES or WEB_ONLY in src/cfo/moves.js`);
-  for (const a of [...Object.keys(MOVES), ...Object.keys(WEB_ONLY)]) assert.ok(known.has(a), `${a} is listed in moves.js but rules.js has no such action`);
-  for (const a of Object.keys(MOVES)) assert.ok(!WEB_ONLY[a], `${a} is in both MOVES and WEB_ONLY`);
+  const lists = { MOVES, SCREENS, WEB_ONLY };
+  for (const a of known) assert.ok(MOVES[a] || SCREENS[a] || WEB_ONLY[a], `${a} is in rules.js but not in MOVES, SCREENS or WEB_ONLY in src/cfo/moves.js`);
+  for (const [name, list] of Object.entries(lists)) {
+    for (const a of Object.keys(list)) {
+      assert.ok(known.has(a), `${a} is listed in ${name} but rules.js has no such action`);
+      assert.equal(Object.entries(lists).filter(([, l]) => l[a]).length, 1, `${a} is in more than one list`);
+    }
+  }
+  for (const a of Object.keys(FORMS)) assert.equal(SCREENS[a], 'form', `${a} has a form but is not a form screen`);
+});
+
+// The forms' fields must be ones act() reads: a filled-in form reaches the rule, not "Unknown action".
+test('every Roblox form sends an action the rules read', () => {
+  const g = createGame(['Ann', 'Ben'], 4, { modules: { markets: true } });
+  for (const [a, form] of Object.entries(FORMS)) {
+    const sample = { a };
+    for (const f of form.fields) sample[f.key] = { tile: 1, seat: 1, money: 100, count: 1, toggle: true, choice: f.options?.[0]?.id }[f.kind];
+    const err = act(structuredClone(g), 0, sample);
+    assert.notEqual(err, 'Unknown action.', `${a}: ${err}`);
+  }
 });
 
 // Plays a seeded game with the bot, calling `check` every `every` steps.
@@ -59,7 +77,7 @@ test('the move menu matches one built with a fresh copy, and every move on it is
 test("the bot's moves are all on the menu, so a Roblox player can make them too", () => {
   let checked = 0;
   playBot(5, 1500, Infinity, () => {}, (g, s, v, m, n) => {
-    if (n % 11 || WEB_ONLY[m.a] || act(structuredClone(g), s, m) !== null) return;
+    if (n % 11 || !MOVES[m.a] || act(structuredClone(g), s, m) !== null) return;
     // A move whose extra fields change nothing is offered without them (see movesFor).
     const offered = movesFor(g, s, v).some(({ action: o }) => o.a === m.a && Object.keys(o).every((k) => o[k] === m[k]));
     assert.ok(offered, `the bot made ${JSON.stringify(m)} but the menu had no such move`);

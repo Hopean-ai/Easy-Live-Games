@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, SUPPLY, CREDIT, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE, BOARD, PLANNED_MOVE, HEDGES, HEDGE_RATES, PROFILES, MODULES } from './data.js';
+import { CONFIG, MONEY_SCALE, ISLAND_START, ISLAND_SIZE, LANDMARKS, SQUARES, SETS, MODES, ZONES, RETAIL, SUPPLY, CREDIT, WIDGET_TIERS, RARITIES, FRAUD_CARDS, MARKET_CARDS, PERSONAL_CARDS, BOARD_SIZE, gridPos, BOARD, PLANNED_MOVE, HEDGES, HEDGE_RATES, PROFILES, MODULES } from './data.js';
 import { createGame, act, timeout, viewFor, winOptions, moduleOptions, ACCOUNTS, INCOME_FIELDS, BALANCE_FIELDS, SCORECARD } from './rules.js';
 import { sanitizeName } from '../names.js';
 import { isAdmin, hostSeat } from '../admin.js';
@@ -187,6 +187,8 @@ export class CfoRoom extends DurableObject {
     let reply = {};
     if (req.op === 'join') {
       let seat = seatOf(req.userId);
+      // Quick match says how many players it sent here, as for players arriving by WebSocket.
+      if (r.status === 'waiting' && !r.seats.length && req.expect >= CONFIG.minPlayers && req.expect <= CONFIG.maxPlayers) r.expect = req.expect;
       if (seat < 0 && r.status === 'waiting' && r.seats.length < CONFIG.maxPlayers) {
         r.seats.push({ token: crypto.randomUUID(), name: req.name, guest: true, account: null, admin: false, roblox: req.userId, seen: now });
         seat = r.seats.length - 1;
@@ -278,10 +280,6 @@ export class CfoRoom extends DurableObject {
     // An admin may have set options and then left the lobby; without one, the defaults apply.
     if (!this.room.seats.some((s) => s.admin)) this.room.options = defaultOptions();
     this.room.game = createGame(this.room.seats.map((s) => s.name), undefined, this.room.options ?? {});
-    // Roblox has no bookkeeping screens yet, so Roblox players start with a bookkeeper.
-    this.room.seats.forEach((s, i) => {
-      if (s.roblox) act(this.room.game, i, { a: 'outsource', on: true });
-    });
   }
 
   async alarm() {
@@ -371,6 +369,7 @@ const RULES = {
   config: CONFIG, size: BOARD_SIZE, retail: RETAIL, supply: SUPPLY, credit: CREDIT, widgetTiers: WIDGET_TIERS, squares: SQUARES, sets: SETS, modes: MODES, zones: ZONES, rarities: RARITIES,
   fraud: FRAUD_CARDS, market: MARKET_CARDS, personal: PERSONAL_CARDS, accounts: ACCOUNTS,
   incomeFields: INCOME_FIELDS, balanceFields: BALANCE_FIELDS, scorecard: SCORECARD, board: BOARD, plannedMove: PLANNED_MOVE, hedges: HEDGES, hedgeRates: HEDGE_RATES, profiles: PROFILES, modules: MODULES,
+  grid: SQUARES.map((_, pos) => gridPos(pos)),
   islandStart: ISLAND_START, islandSize: ISLAND_SIZE, landmarks: LANDMARKS, moneyScale: MONEY_SCALE,
 };
 

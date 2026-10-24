@@ -71,10 +71,22 @@ export async function handleRequest(request, env) {
   // The Roblox game server, on behalf of its players (src/cfo/roblox.js). It proves itself with
   // the shared ROBLOX_KEY secret; without one set, cross-play is off.
   const roblox = path.match(/^\/api\/roblox\/cfo\/([^/]+)$/);
-  if (roblox) {
+  const robloxMatch = path === '/api/roblox/match/cfo';
+  if (roblox || robloxMatch) {
     if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     if (!(await sameSecret(request.headers.get('X-Roblox-Key') ?? '', env.ROBLOX_KEY))) return Response.json({ error: 'Bad key.' }, { status: 401 });
+  }
+  // Quick match for a Roblox player, in the same queue as web players (see Matchmaker.httpQueue).
+  if (robloxMatch) {
+    const body = await readJson(request);
+    if (!body || !/^\d{1,20}$/.test(String(body.userId ?? '')) || !['join', 'poll', 'leave'].includes(body.op)) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const game = findGame('cfo');
+    const { min, max } = tableSize(game);
+    const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(game.id));
+    return Response.json(await stub.httpQueue({ who: `roblox:${body.userId}`, op: body.op, min, max }));
+  }
+  if (roblox) {
     if (!ROOM_CODE.test(roblox[1])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
     const body = await readJson(request, MAX_ROBLOX_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });

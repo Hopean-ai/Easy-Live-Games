@@ -5,8 +5,8 @@
 //
 // Every action act() knows must appear in MOVES or WEB_ONLY; test/cfo-moves.test.js fails when a
 // new action is added to rules.js without saying which, so it can't be missed on Roblox.
-import { SQUARES, ZONES, RARITIES, RETAIL, SUPPLY, BOARD, HEDGES, PROFILES, PLANNED_MOVE, FRAUD_CARDS, MARKET_CARDS, MONEY_SCALE } from './data.js';
-import { act, turnActions } from './rules.js';
+import { SQUARES, ZONES, RARITIES, RETAIL, SUPPLY, BOARD, HEDGES, PROFILES, PLANNED_MOVE, FRAUD_CARDS, MARKET_CARDS, MONEY_SCALE, CONFIG } from './data.js';
+import { act, turnActions, ACCOUNTS, INCOME_FIELDS } from './rules.js';
 
 // Where a parameter's values come from. Each returns the values to try for one seat.
 const DOMAINS = {
@@ -79,17 +79,59 @@ export const MOVES = {
   resign: { group: 'game', variants: [{}], label: () => 'Resign', confirm: true },
 };
 
-// Actions Roblox players don't get yet, and why. Roblox players have a bookkeeper (see room.js),
-// so the bookkeeping actions are never needed there.
-export const WEB_ONLY = {
-  outsource: 'Roblox players always have a bookkeeper',
-  entry: 'bookkeeping',
-  unpost: 'bookkeeping',
-  archive: 'bookkeeping',
-  statements: 'bookkeeping',
-  offer: 'needs a property deal form',
-  contract: 'needs a supply contract form',
-  plan: 'needs a sealed plan form',
+// Actions the Roblox game makes from screens of its own rather than menu buttons: the books, and
+// the forms in FORMS below.
+export const SCREENS = {
+  outsource: 'books',
+  entry: 'books',
+  unpost: 'books',
+  archive: 'books',
+  statements: 'books',
+  offer: 'form',
+  contract: 'form',
+  plan: 'form',
+};
+
+// Actions Roblox players don't get yet, and why. Empty for now; a new web action can go here until
+// the Roblox game has a way to make it.
+export const WEB_ONLY = {};
+
+// Forms with several fields, drawn by the Roblox game from these descriptions. Field kinds: tile
+// (a square, picked on the board), seat (another player), money, count, toggle, and choice (one of
+// `options`). Only `fields` with a value are sent, so optional ones can be left blank.
+export const FORMS = {
+  offer: {
+    title: 'Property deal',
+    help: 'Offer to sell one of your squares to another player, or to buy one of theirs. They can accept or decline.',
+    submit: 'Make the offer',
+    fields: [
+      { key: 'pos', kind: 'tile', label: 'Square' },
+      { key: 'target', kind: 'seat', label: 'Other player' },
+      { key: 'amount', kind: 'money', label: 'Price' },
+    ],
+  },
+  contract: {
+    title: 'Supply contract',
+    help: 'Offer to supply widgets to another company each turn, or to buy them from it, at a fixed price.',
+    submit: 'Offer the contract',
+    fields: [
+      { key: 'target', kind: 'seat', label: 'Other company' },
+      { key: 'sell', kind: 'toggle', label: 'I supply the widgets' },
+      { key: 'count', kind: 'count', label: 'Widgets a turn' },
+      { key: 'amount', kind: 'money', label: 'Price per widget' },
+      { key: 'years', kind: 'count', label: 'Years' },
+    ],
+  },
+  plan: {
+    title: 'Board plan for next year',
+    help: 'Sealed until the shared year end, then carried out: store prices, production, and a dividend.',
+    submit: 'Seal the plan',
+    fields: [
+      { key: 'pricing', kind: 'choice', label: 'Store prices', options: Object.entries(RETAIL.pricing).map(([id, x]) => ({ id, name: x.name })) },
+      { key: 'production', kind: 'choice', label: 'Production', options: Object.entries(SUPPLY.levels).map(([id, x]) => ({ id, name: x.name })) },
+      { key: 'amount', kind: 'money', label: 'Dividend' },
+    ],
+  },
 };
 
 // The moves open to `seat`, each { id, label, group, action, input?, sign?, confirm? }. `view` is
@@ -133,6 +175,7 @@ export function movesFor(game, seat, view, { fresh = false } = {}) {
 // What a Roblox client needs to draw the game: much smaller than viewFor, and without anything the
 // seat can't act on. Names are left as they are; the Roblox server masks web players' names.
 export function slimView(game, seat, view) {
+  const me = view.players[seat];
   return {
     turn: view.turn,
     phase: view.phase,
@@ -140,22 +183,66 @@ export function slimView(game, seat, view) {
     winner: view.winner,
     endReason: view.endReason ?? null,
     year: view.calendar?.year ?? null,
-    log: view.log.slice(-15),
-    tiles: view.tiles.map((t) => (t ? { owner: t.owner, zone: t.zone ?? null, building: t.building ?? null } : null)),
+    era: view.era?.name ?? null,
+    log: view.log.slice(-30),
+    tiles: view.tiles.map((t) => (t ? { owner: t.owner, zone: t.zone ?? null, rarity: t.building?.rarity ?? null, rent: t.rent ?? null } : null)),
+    zoningRow: view.zoningRow ?? [],
+    ppeRow: view.ppeRow ?? [],
+    zoningLeft: view.zoningLeft,
+    ppeLeft: view.ppeLeft,
+    easyBooks: Boolean(view.easyBooks),
     players: view.players.map((p, i) => ({
       name: p.name,
       pos: p.pos,
       out: Boolean(p.out),
+      skip: Boolean(p.skip),
+      years: p.years,
       cash: p.cash,
       personalCash: p.personalCash,
+      portfolio: p.portfolio,
       netWorth: p.netWorth,
       value: view.companyValues[i],
       isPublic: Boolean(p.isPublic),
+      sharePrice: p.sharePrice,
+      myShares: seat >= 0 ? p.shares?.holders?.[seat] ?? 0 : 0,
+      totalShares: p.shares ? Object.values(p.shares.holders).reduce((a, b) => a + b, 0) + (p.shares.founders ?? 0) + p.shares.public : null,
+      profile: p.profile ? PROFILES[p.profile]?.name ?? p.profile : null,
       hand: i === seat ? (p.hand ?? []).map((id) => cardName(id)) : undefined,
       frauds: i === seat ? p.frauds : undefined,
     })),
+    books: me && !view.easyBooks && me.docs ? books(me) : null,
+    offers: (view.offers ?? []).map((o) => ({ id: o.id, from: o.from, to: o.to, pos: o.pos, amount: o.amount })),
+    forms: seat >= 0 && me && !me.out && view.phase !== 'over'
+      ? ['offer', ...(view.modules?.markets ? ['contract'] : []), ...(view.calendar ? ['plan'] : [])]
+      : [],
     moves: seat >= 0 ? movesFor(game, seat, view) : [],
   };
+}
+
+// A player's own books, for the Roblox journal screens.
+function books(me) {
+  return {
+    outsourced: Boolean(me.outsourced),
+    docs: me.docs,
+    entries: me.entries ?? [],
+    openYears: me.openYears ?? [],
+    fyeDue: me.fyeDue ?? null,
+    preview: me.preview ?? null,
+    check: me.lastCheck ? checkText(me) : null,
+  };
+}
+
+// The last review of the player's statements, in words, as the web page shows it.
+function checkText(me) {
+  const c = me.lastCheck;
+  if (!c.errors) return { errors: 0, head: `Fiscal year ${c.year}: clean books. You earned the ${money(CONFIG.cleanBooksBonus)} bonus.`, lines: [] };
+  const filed = me.filed ?? { income: {}, balance: {} };
+  const label = (f) => ({ netIncome: 'Net income (loss)', totalAssets: 'Total assets', totalLiabilitiesAndEquity: 'Total liabilities and equity', accDep: 'Less accumulated depreciation' }[f] ?? ACCOUNTS[f] ?? f);
+  const lines = (c.wrongFields ?? []).map((f) => {
+    const kind = INCOME_FIELDS.includes(f) ? 'income' : 'balance';
+    return `${label(f)}: you filed ${money(filed[kind]?.[f] ?? 0)}, correct ${money(c.truth?.[kind]?.[f] ?? 0)}`;
+  });
+  return { errors: c.errors, head: `Fiscal year ${c.year}: ${c.errors} misstatement${c.errors > 1 ? 's' : ''}, to be fined at your next Interim Review.`, lines };
 }
 
 // Tries moves on a copy of the game. A refused move leaves the game as it was (act() checks before

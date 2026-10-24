@@ -46,7 +46,12 @@ end
 local playerGui = roblox.Instance.new("Folder")
 local sent: { { any } } = {}
 local onState: ((any) -> ())? = nil
+local focused: any = nil
 local services = {
+	UserInputService = {
+		GetFocusedTextBox = function() return focused end,
+		TextBoxFocusReleased = { Connect = function() end },
+	},
 	Players = { LocalPlayer = { WaitForChild = function() return wrap(playerGui) end } },
 	ReplicatedStorage = {
 		WaitForChild = function(_, name)
@@ -88,29 +93,45 @@ local function has(fragment: string): boolean
 	end
 	return false
 end
-local function press(fragment: string)
+local function press(fragment: string, exact: boolean?)
 	for _, d in playerGui:GetDescendants() do
-		if d:IsA("TextButton") and d.Text:find(fragment, 1, true) then
+		if d:IsA("TextButton") and (if exact then d.Text == fragment else d.Text:find(fragment, 1, true)) then
 			clicks[d]()
 			return
 		end
 	end
 	error("no button with " .. fragment)
 end
+local function pressNamed(name: string)
+	for _, d in playerGui:GetDescendants() do
+		if d.Name == name then
+			clicks[d]()
+			return
+		end
+	end
+	error("nothing named " .. name)
+end
 
 luau.load(fs.readFile("src/client/Main.client.luau"), { debugName = "Main.client", environment = env })()
 assert(has("New room"), "the lobby shows")
 press("New room")
 assert(sent[1][1] == "new", "New room asks the server")
-
+press("Quick match")
+assert(sent[#sent][1] == "quick", "Quick match asks the server")
 assert(onState, "the client listens for state")
+onState({ queue = { waiting = 2, max = 6, startsIn = 12 } })
+assert(has("Finding players: 2 of 6"), "the queue shows")
+press("Cancel")
+assert(sent[#sent][1] == "cancel" and has("Quick match"), "cancelling goes back to the lobby")
+
 onState({ code = "ABCD", board = fixture.board })
 onState({ view = fixture.waiting })
 assert(has("Room ABCD"), "the waiting room shows its code")
 assert(has("Waiting for the host"), "a guest waits for the host")
 
 onState({ view = fixture.playing })
-local moves = fixture.playing.game.moves
+local game = fixture.playing.game
+local moves = game.moves
 assert(#moves > 0, "the fixture has moves")
 for _, m in moves do
 	assert(has(m.label), "the move " .. m.label .. " has a button")
@@ -135,8 +156,69 @@ for _, d in playerGui:GetDescendants() do
 		squares += 1
 	end
 end
-assert(squares >= fixture.board.size, "the board is drawn")
+assert(squares >= #fixture.board.squares, "the board is drawn")
 
+-- Picking an owned square shows it, with a deal offer that knows the square.
+local owned
+for pos, t in game.tiles do
+	if t and t.owner ~= nil then
+		owned = pos - 1
+		break
+	end
+end
+assert(owned, "the fixture has an owned square")
+pressNamed("Square" .. owned)
+local sq = fixture.board.squares[owned + 1]
+assert(has("Owned by"), "the square picked is described")
+press("Offer to")
+assert(has(fixture.board.forms.offer.title), "the deal form opens")
+press(fixture.board.forms.offer.submit)
+local offer = sent[#sent][2]
+assert(offer.a == "offer" and offer.pos == owned, "the offer names the square")
+
+-- The board plan, from its form description.
+press(fixture.board.forms.plan.title)
+press(fixture.board.forms.plan.fields[1].options[1].name, true)
+press(fixture.board.forms.plan.submit)
+local plan = sent[#sent][2]
+assert(plan.a == "plan" and plan.pricing == fixture.board.forms.plan.fields[1].options[1].id, "the plan form sends its choice")
+
+-- The books: documents, the journal, and an entry edited and saved.
+press("Books")
+local books = game.books
+assert(has("Documents (" .. #books.docs .. " in the inbox"), "the inbox shows")
+assert(has(books.docs[#books.docs].text), "the newest document shows")
+local entry = books.entries[1]
+assert(has(entry.memo), "the journal shows the posted entry")
+press("Edit", true)
+assert(has("Change this entry"), "the editor opens")
+press("Save entry")
+local saved = sent[#sent][2]
+assert(saved.a == "entry" and saved.entry == entry.id and #saved.lines == #entry.lines, "saving sends the entry's lines")
+for i, l in entry.lines do
+	assert(saved.lines[i][1] == l[1] and saved.lines[i][2] == l[2], "line " .. i .. " is unchanged")
+end
+assert(Bridge.cleanMessage(saved), "the server forwards the entry")
+
+-- A new entry: the account picker fills the line; an entry with no amounts isn't sent.
+local before = #sent
+press("Write entry")
+assert(has("New journal entry") and has("For: "), "writing an entry for a document opens the editor")
+press("Account…")
+assert(has("Pick an account"), "the account picker opens")
+press(fixture.board.accounts[1].name, true)
+assert(not has("Pick an account"), "picking an account closes the picker")
+press("Post entry")
+assert(#sent == before, "an entry with no amounts is not sent")
+assert(has("Every line needs a debit or a credit."), "and says why")
+
+-- Typing waits for redraws: nothing is redrawn while a box has the cursor.
+focused = {}
+onState({ view = fixture.watching })
+assert(has("Post entry"), "no redraw while typing")
+focused = nil
+
+press("Turn")
 onState({ view = fixture.watching })
 assert(not has("End turn"), "watchers get no moves")
 print("screens ok: " .. #moves .. " moves drawn")

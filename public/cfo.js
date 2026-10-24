@@ -357,19 +357,9 @@ function renderWinOptions() {
 
 // The board is a 22 x 11 loop, laid out like the spreadsheet: FYE top-left, Bank top-right,
 // CPE bottom-right and Interim Review bottom-left.
+// [row, column] on the board grid, from gridPos in src/cfo/data.js.
 function gridPos(pos) {
-  // The island is a 7 x 7 ring inside the board, Terminal at its top-left.
-  if (pos >= rules.islandStart) {
-    const k = pos - rules.islandStart;
-    if (k <= 6) return [3, 14 + k];
-    if (k <= 12) return [k - 3, 20];
-    if (k <= 18) return [9, 32 - k];
-    return [27 - k, 14];
-  }
-  if (pos <= 21) return [1, pos + 1];
-  if (pos <= 31) return [pos - 20, 22];
-  if (pos <= 52) return [11, 53 - pos];
-  return [63 - pos, 1];
+  return rules.grid[pos];
 }
 
 const CORNER_NAMES = {

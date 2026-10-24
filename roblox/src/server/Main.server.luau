@@ -21,6 +21,7 @@ remotes.Parent = ReplicatedStorage
 type Room = { players: { [Player]: boolean }, version: number, polling: boolean }
 local rooms: { [string]: Room } = {}
 local roomOf: { [Player]: string } = {}
+local queued: { [Player]: boolean } = {} -- players waiting in quick match
 local lastRequest: { [Player]: number } = {}
 
 local function userIds(room: Room): { string }
@@ -93,11 +94,11 @@ local function leave(player: Player)
 	task.spawn(Api.room, code, { op = "leave", userId = tostring(player.UserId) })
 end
 
-local function join(player: Player, code: string)
+local function join(player: Player, code: string, expect: number?)
 	if roomOf[player] ~= code then
 		leave(player)
 	end
-	local res, err = Api.room(code, { op = "join", userId = tostring(player.UserId), name = player.DisplayName })
+	local res, err = Api.room(code, { op = "join", userId = tostring(player.UserId), name = player.DisplayName, expect = expect })
 	if not res then
 		return { error = err }
 	end
@@ -115,19 +116,72 @@ local function join(player: Player, code: string)
 	return { ok = true, seat = res.seat }
 end
 
+-- Quick match: asks the website's queue every couple of seconds for as long as the player waits,
+-- telling them how it stands, and joins the room it hands out. The place lapses on the website if
+-- the asking stops, so a server that goes away leaves nobody stuck in the queue.
+local function stopQueue(player: Player)
+	if queued[player] then
+		queued[player] = nil
+		task.spawn(Api.match, tostring(player.UserId), "leave")
+	end
+end
+
+local function quickMatch(player: Player)
+	if queued[player] then
+		return { ok = true }
+	end
+	leave(player)
+	queued[player] = true
+	task.spawn(function()
+		local op = "join"
+		while queued[player] do
+			local res, err = Api.match(tostring(player.UserId), op)
+			op = "poll"
+			if not queued[player] then
+				break
+			end
+			if not res then
+				queued[player] = nil
+				stateEvent:FireClient(player, { queue = false, error = err })
+				break
+			end
+			if res.matched then
+				queued[player] = nil
+				local joined = join(player, res.matched.room, res.matched.players)
+				if joined.error then
+					stateEvent:FireClient(player, { queue = false, error = joined.error })
+				end
+				break
+			end
+			local q = res.queued or {}
+			local startsIn = if q.startsAt then (q.startsAt - DateTime.now().UnixTimestampMillis) / 1000 else nil
+			stateEvent:FireClient(player, { queue = { waiting = q.waiting, max = q.max, startsIn = startsIn } })
+			task.wait(Bridge.POLL_SECONDS)
+		end
+	end)
+	return { ok = true }
+end
+
 requestFn.OnServerInvoke = function(player: Player, kind: any, arg: any)
 	local now = os.clock()
 	if now - (lastRequest[player] or 0) < 0.25 then
 		return { error = "Slow down a little." }
 	end
 	lastRequest[player] = now
-	if kind == "new" then
+	if kind == "quick" then
+		return quickMatch(player)
+	elseif kind == "cancel" then
+		stopQueue(player)
+		return { ok = true }
+	elseif kind == "new" then
+		stopQueue(player)
 		local code, err = Api.newRoom()
 		if not code then
 			return { error = err }
 		end
 		return join(player, code)
 	elseif kind == "join" then
+		stopQueue(player)
 		if type(arg) ~= "string" or not arg:match("^%w%w%w%w+$") or #arg > 12 then
 			return { error = "Room codes are 4 to 12 letters and numbers." }
 		end
@@ -152,12 +206,14 @@ requestFn.OnServerInvoke = function(player: Player, kind: any, arg: any)
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	stopQueue(player)
 	leave(player)
 	lastRequest[player] = nil
 end)
 
 game:BindToClose(function()
 	for _, player in Players:GetPlayers() do
+		stopQueue(player)
 		leave(player)
 	end
 	task.wait(1) -- lets the leave requests go out
