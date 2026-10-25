@@ -1,9 +1,8 @@
 import { readCookie, sessionCookie, SESSION_COOKIE } from './auth.js';
 import { newRoomCode } from './codes.js';
-import { findGame, publicGames, tableSize } from './games.js';
+import { findGame, publicGames, robloxGames, tableSize } from './games.js';
 import { isAdmin } from './admin.js';
 import { callClaudePlayers } from './claude.js';
-import { MAX_ROBLOX_BODY } from './cfo/roblox.js';
 import { sanitizeName } from './names.js';
 
 export { newRoomCode };
@@ -90,21 +89,31 @@ export async function handleRequest(request, env) {
     return Response.json(result, { status });
   }
 
-  // The Roblox game server, on behalf of its players (src/cfo/roblox.js). It proves itself with
-  // the shared ROBLOX_KEY secret; without one set, cross-play is off.
-  const roblox = path.match(/^\/api\/roblox\/cfo\/([^/]+)$/);
-  const robloxMatch = path === '/api/roblox/match/cfo';
+  // The Roblox hub's game server, on behalf of its players (roblox/README.md). It proves itself
+  // with the shared ROBLOX_KEY secret; without one set, cross-play is off. Every game flagged
+  // `roblox` in games.js is reachable the same way: its rooms at /api/roblox/<game>/<room>, its
+  // quick match at /api/roblox/match/<game>.
+  const robloxList = path === '/api/roblox/games';
   const robloxLink = path === '/api/roblox/link';
-  if (roblox || robloxMatch || robloxLink) {
+  const robloxMatch = path.match(/^\/api\/roblox\/match\/([^/]+)$/);
+  const roblox = !robloxList && !robloxLink && !robloxMatch && path.match(/^\/api\/roblox\/([^/]+)\/([^/]+)$/);
+  if (robloxList || robloxLink || robloxMatch || roblox) {
     if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     if (!(await sameSecret(request.headers.get('X-Roblox-Key') ?? '', env.ROBLOX_KEY))) return Response.json({ error: 'Bad key.' }, { status: 401 });
   }
+  // The hub's game picker.
+  if (robloxList) return Response.json({ games: robloxGames() });
+  const robloxGame = (id) => {
+    const game = findGame(id);
+    return game?.roblox ? game : null;
+  };
   // Quick match for a Roblox player, in the same queue as web players (see Matchmaker.httpQueue).
   if (robloxMatch) {
+    const game = robloxGame(robloxMatch[1]);
+    if (!game) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
     const body = await readJson(request);
     if (!body || !/^\d{1,20}$/.test(String(body.userId ?? '')) || !['join', 'poll', 'leave'].includes(body.op)) return Response.json({ error: 'Bad request.' }, { status: 400 });
-    const game = findGame('cfo');
     const { min, max } = tableSize(game);
     const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(game.id));
     return Response.json(await stub.httpQueue({ who: `roblox:${body.userId}`, op: body.op, min, max }));
@@ -131,16 +140,19 @@ export async function handleRequest(request, env) {
     return Response.json({ linked: Boolean(account), admin: isAdmin(env, account), games });
   }
   if (roblox) {
-    if (!ROOM_CODE.test(roblox[1])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
+    const game = robloxGame(roblox[1]);
+    if (!game) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
+    if (!ROOM_CODE.test(roblox[2])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
     const body = await readJson(request, MAX_ROBLOX_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
-    const code = roblox[1].toUpperCase();
+    const code = roblox[2].toUpperCase();
     // A linked Roblox player takes their seat as their account: the router looks it up, so the
     // Roblox server can't name one.
     const account = body.op === 'join' && /^\d{1,20}$/.test(String(body.userId ?? ''))
       ? await accountsStub(env).robloxAccount(String(body.userId))
       : null;
-    const stub = env.CFO_ROOMS.get(env.CFO_ROOMS.idFromName(code));
+    const rooms = env[game.rooms];
+    const stub = rooms.get(rooms.idFromName(code));
     const result = await stub.roblox({ ...body, code, account });
     return Response.json(result, { status: result.error && !('version' in result) ? 400 : 200 });
   }
@@ -219,6 +231,9 @@ function sameOrigin(request, url) {
     return false;
   }
 }
+
+// The most a Roblox game server may send in one room request (a move with a journal entry fits).
+const MAX_ROBLOX_BODY = 4096;
 
 async function readJson(request, max = MAX_BODY_BYTES) {
   const text = await request.text();

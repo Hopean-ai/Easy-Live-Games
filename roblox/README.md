@@ -1,15 +1,46 @@
-# CFO on Roblox
+# The Roblox hub
 
-A Roblox game where people play CFO in the same rooms as players on the website. The website stays in charge of every game: the Roblox game server only relays. It joins its players to a room, forwards their moves, and asks the website for changes every two seconds.
+One Roblox place where people play the website's games in the same rooms as players in a browser. It opens on a game picker, with the player's account link and a Rejoin button for each of their games in progress; picking a game opens its lobby (quick match, a new room, or a room code), its waiting room, and then that game's own screens. Every website game except Pong is on Roblox; today that is CFO.
+
+The website stays in charge of every game: the Roblox game server only relays. It joins its players to a room, forwards their moves, and asks the website for changes every two seconds.
 
 ```
 Roblox player ⇄ Roblox client (src/client) ⇄ Roblox game server (src/server)
                                                   │ HTTPS, X-Roblox-Key
                                                   ▼
-                       website: POST /api/roblox/cfo/<room>  →  CfoRoom (src/cfo/room.js)
+       website: POST /api/roblox/<game>/<room>  →  that game's room (CfoRoom in src/cfo/room.js)
 ```
 
-## Why web changes don't need Roblox changes
+The hub's routes on the website (`src/router.js`), all `POST` with the key:
+
+| Route | What it does |
+| --- | --- |
+| `/api/roblox/games` | The picker's list: every game flagged `roblox` in `src/games.js`, with its name, blurb and table size. |
+| `/api/roblox/<game>/<room>` | A room: ops `join`, `leave`, `act`, `poll`, answered by the room's `roblox(body)` method. |
+| `/api/roblox/match/<game>` | Quick match, in the same queue as web players. |
+| `/api/roblox/link` | The account link, shared by every game. |
+
+## The code
+
+- `src/shared/Hub.luau`: what every game has in common (poll interval, the update check, room codes, the picker and Rejoin lists, the queue line).
+- `src/shared/games/<Name>.luau`: one per game: its website `ID`, the bridge version it understands (`SUPPORTED`) and `cleanMessage`, which the server uses to check a move before forwarding it.
+- `src/server`: the relay, written once for every game; rooms are kept per game and room code.
+- `src/client/Main.client.luau`: the picker, the account link, each game's lobby and waiting room.
+- `src/client/Ui.luau`: the colours and the small screen builders every game draws with.
+- `src/client/games/<Name>.luau`: one per game: its screens once the game is on. It returns a function that is handed the hub (state, the server calls, the Ui) and gives back `render(view)`, `reset()` and optionally `onView(before, after)`.
+
+The hub finds games by these folders, so nothing else lists them.
+
+## Adding a game
+
+1. On the website, give the game's room a `roblox(body)` method answering `join`, `leave`, `act` and `poll` the way `CfoRoom` does (`src/cfo/roblox.js`): `join` replies `{ seat, board, version, bridge }`, `poll` replies `{ version, bridge, views }` (or `{ same: true }`) with one view per Roblox user id, and a view carries `seat`, `status`, `host` and `seats` (`name`, `platform`) for the shared waiting room, plus whatever the game's screens draw. It should mask web players' names as CFO does (`masker`).
+2. In `src/games.js`, set the game's `roblox` to its module name (say `'Bottles'`), and add its bridge version to `BRIDGES` in `test/roblox-games.test.js`.
+3. Add `src/shared/games/Bottles.luau` (with `ID`, `SUPPORTED` and `cleanMessage`) and `src/client/games/Bottles.luau` (its screens). `npm test` fails until both exist and the version matches.
+4. Add a screen test for it next to `tests/screens.luau`.
+
+The game's card then shows in the hub's picker, its rooms show in the Rejoin list, and the website's game list marks it "Also on Roblox". A game that needs its own 3D world could later get its own place, reached by teleport from the hub; nothing needs it yet.
+
+## CFO: why web changes don't need Roblox changes
 
 The Roblox code knows nothing about the rules. Everything it shows comes from the website:
 
@@ -25,15 +56,15 @@ What you might need to do when the web game changes:
 | --- | --- |
 | A rule, a price, a card, a square | Nothing. |
 | A new action in `act()` (rules.js) | `npm test` fails until it is added to `MOVES` in `src/cfo/moves.js` (say which parameters it takes and give it a label), to `FORMS` and `SCREENS` if it needs several fields at once, or to `WEB_ONLY` with a reason. No Roblox publish needed for a move or a form. |
-| A new field kind in a form, or a new bookkeeping action | Needs Roblox screen code (`src/client`) and a publish. |
+| A new field kind in a form, or a new bookkeeping action | Needs Roblox screen code (`src/client/games/Cfo.luau`) and a publish. |
 | A renamed field the Roblox screens use (players, tiles, log, moves) | The **Roblox** workflow's screen test fails on the web PR. Fix `slimView` or the screens. |
-| Something that would break a Roblox build already published | Bump `BRIDGE_VERSION` in `src/cfo/roblox.js` and `Bridge.SUPPORTED` in `src/shared/Bridge.luau` together (a test checks they match). Players on the old build see an "update needed" notice until the new build publishes. |
+| Something that would break a Roblox build already published | Bump `BRIDGE_VERSION` in `src/cfo/roblox.js` and `SUPPORTED` in `src/shared/games/Cfo.luau` together (a test checks they match). Players on the old build see an "update needed" notice until the new build publishes. |
 
 Every web action is on Roblox now; `WEB_ONLY` is empty.
 
-**Quick match.** Roblox players join the same quick-match queue as web players. The Roblox server asks `POST /api/roblox/match/cfo` every two seconds while a player waits (a place lapses after 10 seconds without asking), and on a match joins the room it was given, saying how many players to expect, so the game starts once everyone is in.
+**Quick match.** Roblox players join the same quick-match queue as web players. The Roblox server asks `POST /api/roblox/match/<game>` every two seconds while a player waits (a place lapses after 10 seconds without asking), and on a match joins the room it was given, saying how many players to expect, so the game starts once everyone is in.
 
-**Linked accounts.** A player signed in on the website can link their Roblox account: the home page hands out a six-letter code (good for 10 minutes) and they type it into the **Link code** box in the Roblox lobby. The Roblox server sends it to `POST /api/roblox/link` (ops `status`, `redeem`, `unlink`), and the `Accounts` object (`src/accounts.js`) keeps the link, so it holds on every Roblox server and nothing is stored on Roblox. After that, when the Roblox server joins the player to a room, the router looks up their account and the room seats them as it: their admin role and host rights apply, the game shows in their list of games on both sides (the Roblox lobby has a Rejoin button for each), and they can move their seat between Roblox and the browser mid-game, the newer one taking over. The Roblox side is only told whether a player is linked, never the account name, and a seat that moved to Roblox shows the player's Roblox name there. Five wrong codes lock that Roblox player out for 15 minutes. Either side can unlink. The link belongs to the account, not to CFO: `status` lists the account's rooms in every game (each with its `game` id), so another Roblox game can use the same link and pick out its own rooms.
+**Linked accounts.** A player signed in on the website can link their Roblox account: the home page hands out a six-letter code (good for 10 minutes) and they type it into the **Link code** box on the hub's picker. The Roblox server sends it to `POST /api/roblox/link` (ops `status`, `redeem`, `unlink`), and the `Accounts` object (`src/accounts.js`) keeps the link, so it holds on every Roblox server and nothing is stored on Roblox. After that, when the Roblox server joins the player to a room, the router looks up their account and the room seats them as it: their admin role and host rights apply, the game shows in their list of games on both sides (the hub's picker has a Rejoin button for each), and they can move their seat between Roblox and the browser mid-game, the newer one taking over. The Roblox side is only told whether a player is linked, never the account name, and a seat that moved to Roblox shows the player's Roblox name there. Five wrong codes lock that Roblox player out for 15 minutes. Either side can unlink. The link belongs to the account, not to one game: `status` lists the account's rooms in every game (each with its `game` id), and the picker's Rejoin list shows those of the games this build has.
 
 Web players' names are shown in Roblox as "Web player 1", "Web player 2" and so on, in seat lists, the log and move labels. Roblox requires text shown in a game to come from Roblox users or go through its filter, and these names come from outside. The Roblox game also never points players to the website.
 
@@ -46,7 +77,7 @@ On the website (Cloudflare):
 
 On Roblox ([Creator Hub](https://create.roblox.com/dashboard/creations)):
 
-1. Create an experience. Its URL in the Creator Hub shows the **universe ID** (the experience) and the **start place ID**.
+1. Create an experience (ours started as "CFO"; its name and description are set by hand in the Creator Hub, since publishing only replaces the place). Its URL in the Creator Hub shows the **universe ID** (the experience) and the **start place ID**.
 2. Under the experience's **Secrets**, add a secret named `cfo_bridge_key` with the same key, for the website's domain, `easy-live-games.milestpitts.workers.dev` (the address in `src/server/Config.luau`).
 3. Fill in the experience's maturity questionnaire, then make it public when you want people to find it.
 4. Under **Open Cloud > API Keys**, create a key with the **universe-places** API, **Write**, for this experience. GitHub's runners change IP, so allow `0.0.0.0/0`.
@@ -69,10 +100,10 @@ lune run tests/syntax        # every file compiles
 lune run tests/run           # the shared helpers
 node ../scripts/roblox-fixture.mjs > tests/fixture.json
 lune run tests/screens       # draws the screens from what the website sends today
-rojo build -o cfo.rbxl       # the place file the workflow publishes
+rojo build -o hub.rbxl       # the place file the workflow publishes
 ```
 
-To try it in Roblox Studio, run `rojo serve` and connect with the Rojo plugin, or open the built `cfo.rbxl`. Studio needs the `cfo_bridge_key` secret too (**Game Settings > Security**), and a website to talk to: either the deployed one, or `npx wrangler dev --var ROBLOX_KEY:local-key` exposed through a tunnel, since Roblox can't reach localhost.
+To try it in Roblox Studio, run `rojo serve` and connect with the Rojo plugin, or open the built `hub.rbxl`. Studio needs the `cfo_bridge_key` secret too (**Game Settings > Security**), and a website to talk to: either the deployed one, or `npx wrangler dev --var ROBLOX_KEY:local-key` exposed through a tunnel, since Roblox can't reach localhost.
 
 `scripts/smoke-roblox.mjs` plays a few turns against a local `wrangler dev` the way the Roblox server does, without Roblox.
 

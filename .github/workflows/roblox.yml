@@ -40,7 +40,7 @@ jobs:
           lune run tests/screens
       - name: Build the place
         working-directory: roblox
-        run: rojo build default.project.json -o cfo.rbxl
+        run: rojo build default.project.json -o hub.rbxl
       - name: Publish to Roblox
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         working-directory: roblox
@@ -61,4 +61,4 @@ jobs:
             "https://apis.roblox.com/universes/v1/$ROBLOX_UNIVERSE_ID/places/$ROBLOX_PLACE_ID/versions?versionType=Published" \
             -H "x-api-key: $ROBLOX_API_KEY" \
             -H "Content-Type: application/octet-stream" \
-            --data-binary @cfo.rbxl
+            --data-binary @hub.rbxl

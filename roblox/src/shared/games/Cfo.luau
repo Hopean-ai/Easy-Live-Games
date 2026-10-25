@@ -1,17 +1,20 @@
 --!strict
--- Pure helpers shared by the Roblox server and client. Nothing here knows the CFO rules: the rules
--- live on the website's server (src/cfo/rules.js), which sends the board, the state and the list
--- of moves each player can make. That way a rule change on the web needs no Roblox update.
+-- CFO's helpers, shared by the hub's server and the CFO screens. Nothing here knows the CFO rules:
+-- the rules live on the website's server (src/cfo/rules.js), which sends the board, the state and
+-- the list of moves each player can make. That way a rule change on the web needs no Roblox update.
 --
+-- Every game in the hub has a module like this one in shared/games, giving its website id, the
+-- bridge version it understands and how to clean a move (see roblox/README.md, "Adding a game").
 -- This module requires nothing, so the Lune tests in roblox/tests can load it outside Roblox.
 
 local Bridge = {}
 
+-- The website's id for the game (src/games.js).
+Bridge.ID = "cfo"
+
 -- The newest website bridge this build understands (BRIDGE_VERSION in src/cfo/roblox.js). A newer
 -- website sends a higher number; players are then told the Roblox game needs an update.
 Bridge.SUPPORTED = 1
-
-Bridge.POLL_SECONDS = 2
 
 -- Where each group of moves is shown, in order.
 Bridge.GROUPS = {
@@ -24,10 +27,6 @@ Bridge.GROUPS = {
 	{ id = "deals", title = "Deals" },
 	{ id = "game", title = "Game" },
 }
-
-function Bridge.updateNeeded(bridgeVersion: number?): boolean
-	return (bridgeVersion or 0) > Bridge.SUPPORTED
-end
 
 -- "$1,234" or "-$56.50": whole dollars unless there are cents.
 function Bridge.money(n: number?): string
@@ -255,15 +254,6 @@ function Bridge.entryText(lines: { { any } }, names: { [string]: string }): stri
 		table.insert(parts, (if v > 0 then "Dr " else "Cr ") .. (names[line[1]] or line[1]) .. " " .. Bridge.money(math.abs(v)))
 	end
 	return table.concat(parts, ", ")
-end
-
--- The quick-match line: how many are waiting, and how long until a game starts with them.
-function Bridge.queueText(q: any): string
-	local text = "Finding players: " .. (q.waiting or 1) .. " of " .. (q.max or 6) .. " waiting."
-	if q.startsIn then
-		text ..= " Starting in " .. math.max(0, math.ceil(q.startsIn)) .. " s unless more join."
-	end
-	return text
 end
 
 -- The action to send for a move, with a typed amount or count when the move needs one.

@@ -1,6 +1,8 @@
 // Every game the site offers. The game selection page lists these, and matchmaking only queues
 // for ids found here. To add a game: give it a page in public/, a Durable Object for its rooms,
-// and an entry below naming that binding.
+// and an entry below naming that binding. To also offer it in the Roblox hub (roblox/README.md),
+// give its room a `roblox(body)` method and its entry `roblox`: the name of its Luau modules in
+// roblox/src/shared/games and roblox/src/client/games (test/roblox-games.test.js checks both).
 export const GAMES = [
   {
     id: 'pong',
@@ -19,6 +21,7 @@ export const GAMES = [
     maxPlayers: 6,
     page: '/cfo',
     rooms: 'CFO_ROOMS',
+    roblox: 'Cfo',
   },
 ];
 
@@ -34,5 +37,13 @@ export function tableSize(game) {
 
 // What the browser needs to draw the selection page.
 export function publicGames() {
-  return GAMES.map(({ id, name, blurb, players, page }) => ({ id, name, blurb, players, page }));
+  return GAMES.map(({ id, name, blurb, players, page, roblox }) => ({ id, name, blurb, players, page, roblox: Boolean(roblox) }));
+}
+
+// What the Roblox hub lists in its game picker: the games it can relay, in the site's order.
+export function robloxGames() {
+  return GAMES.filter((g) => g.roblox).map((g) => {
+    const { min, max } = tableSize(g);
+    return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), minPlayers: min, maxPlayers: max };
+  });
 }

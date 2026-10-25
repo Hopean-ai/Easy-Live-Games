@@ -4,6 +4,7 @@
 return {
 	-- The website's address, without a trailing slash.
 	baseUrl = "https://easy-live-games.milestpitts.workers.dev",
-	-- The name of the Roblox secret that holds the key.
+	-- The name of the Roblox secret that holds the key. It predates the hub, when CFO was the only
+	-- game; renaming it would mean adding the secret again in the Creator Hub.
 	secretName = "cfo_bridge_key",
 }

@@ -1,19 +1,19 @@
 {
-  "name": "CFO",
+  "name": "Hub",
   "tree": {
     "$className": "DataModel",
     "HttpService": {
       "$properties": { "HttpEnabled": true }
     },
     "ReplicatedStorage": {
-      "CfoShared": { "$path": "src/shared" }
+      "HubShared": { "$path": "src/shared" }
     },
     "ServerScriptService": {
-      "CfoServer": { "$path": "src/server" }
+      "HubServer": { "$path": "src/server" }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "CfoClient": { "$path": "src/client" }
+        "HubClient": { "$path": "src/client" }
       }
     },
     "Players": {
