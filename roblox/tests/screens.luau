@@ -65,7 +65,7 @@ local services = {
 							InvokeServer = function(_, kind, arg)
 								table.insert(sent, { kind, arg })
 								if kind == "link" then
-									return { link = { linked = true, admin = true, games = { { code = "WXYZ", updated = 0 } } } }
+									return { link = { linked = true, admin = true, games = { { game = "bottles", code = "OTHR", updated = 0 }, { game = "cfo", code = "WXYZ", updated = 0 } } } }
 								end
 								return {}
 							end,
@@ -129,6 +129,7 @@ assert(has("Have a link code?"), "an unlinked player can enter a link code")
 press("Link", true)
 assert(sent[#sent][1] == "link", "Link sends the code")
 assert(has("Linked to your account (admin)") and has("Rejoin game WXYZ"), "a linked player sees their games")
+assert(not has("OTHR"), "but not other games' rooms")
 press("Rejoin game WXYZ")
 assert(sent[#sent][1] == "join" and sent[#sent][2] == "WXYZ", "Rejoin joins that room")
 press("Unlink account")
