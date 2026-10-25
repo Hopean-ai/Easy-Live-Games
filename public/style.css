@@ -24,6 +24,7 @@ h1 { margin: 0 0 4px; font-size: 2rem; }
 .error { color: var(--error); min-height: 1.4em; }
 .small { font-size: 0.875rem; color: var(--muted); }
 .badge { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: 0.75rem; font-weight: 600; }
+.code { font-family: ui-monospace, monospace; font-size: 1.1rem; letter-spacing: 0.15em; }
 .hint { color: var(--muted); font-size: 0.8rem; text-align: center; }
 
 #lobby { display: grid; gap: 12px; max-width: 360px; margin: 0 auto; }

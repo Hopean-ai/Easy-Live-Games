@@ -87,7 +87,9 @@ export function cleanRobloxRequest(body) {
   const op = body.op;
   if (op === 'join') {
     if (!USER_ID.test(String(body.userId ?? ''))) return 'Bad user id.';
-    return { op, userId: String(body.userId), name: sanitizeName(body.name), expect: Number.isInteger(body.expect) ? body.expect : 0 };
+    // account is set by the router for a linked Roblox player, never by the Roblox server.
+    const account = typeof body.account === 'string' && body.account ? body.account.toLowerCase() : null;
+    return { op, userId: String(body.userId), name: sanitizeName(body.name), expect: Number.isInteger(body.expect) ? body.expect : 0, account };
   }
   if (op === 'leave' || op === 'act') {
     if (!USER_ID.test(String(body.userId ?? ''))) return 'Bad user id.';
@@ -123,11 +125,17 @@ export function robloxState(room, seat, host) {
   return { seat, status: room.status, host, seats, game };
 }
 
+//
+// A linked player can move a seat between the web and Roblox mid-game, but the game keeps the name
+// it started with. A Roblox seat whose name came from the web shows its Roblox name instead.
 export function masker(seats) {
   const swaps = [];
   let n = 0;
   for (const s of seats) {
-    if (s.roblox) continue;
+    if (s.roblox) {
+      if (s.robloxName && s.robloxName !== s.name) swaps.push([s.name, s.robloxName]);
+      continue;
+    }
     n += 1;
     swaps.push([s.name, `Web player ${n}`]);
   }

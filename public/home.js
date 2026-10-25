@@ -33,6 +33,76 @@ function render() {
   $('who-admin').hidden = !(account && admin);
   $('logout').textContent = account ? 'Log out' : 'Sign in instead';
   $('games').replaceChildren(...games.map(gameCard));
+  if (account) loadRobloxLink();
+  else $('roblox').hidden = true;
+}
+
+// Linking a Roblox player to this account: the server hands out a short code to type into the
+// Roblox game, then this page checks every few seconds until the link shows up.
+let linkCode = null;
+let linkTimer = null;
+
+async function loadRobloxLink() {
+  const res = await getJson('/api/roblox-link');
+  if (!res?.available && !res?.link) {
+    $('roblox').hidden = true;
+    return;
+  }
+  $('roblox').hidden = false;
+  const status = $('roblox-status');
+  if (res.link) {
+    linkCode = null;
+    stopWaiting();
+    status.replaceChildren('Linked to Roblox player ', bold(res.link.robloxName || `#${res.link.robloxId}`), '. Your games carry over between the two. ', linkButton('Unlink', unlinkRoblox));
+  } else {
+    status.replaceChildren('Play CFO on Roblox too? ', linkButton('Link your Roblox account', newLinkCode), ' so your games and admin role go with you.');
+  }
+  $('roblox-code').hidden = !linkCode;
+  if (linkCode) $('roblox-code-text').textContent = linkCode.code;
+}
+
+async function newLinkCode() {
+  $('roblox-error').textContent = '';
+  const res = await postJson('/api/roblox-link', { op: 'code' });
+  if (!res?.code) {
+    $('roblox-error').textContent = res?.error || 'Could not get a code. Try again.';
+    return;
+  }
+  linkCode = res;
+  stopWaiting();
+  linkTimer = setInterval(() => {
+    if (Date.now() > linkCode.expires) {
+      linkCode = null;
+      stopWaiting();
+    }
+    loadRobloxLink();
+  }, 3000);
+  loadRobloxLink();
+}
+
+async function unlinkRoblox() {
+  $('roblox-error').textContent = '';
+  if (!(await postJson('/api/roblox-link', { op: 'unlink' }))?.ok) $('roblox-error').textContent = 'Could not unlink. Try again.';
+  loadRobloxLink();
+}
+
+function stopWaiting() {
+  clearInterval(linkTimer);
+  linkTimer = null;
+}
+
+function bold(text) {
+  const b = document.createElement('strong');
+  b.textContent = text;
+  return b;
+}
+
+function linkButton(text, onClick) {
+  const b = document.createElement('button');
+  b.className = 'link';
+  b.textContent = text;
+  b.addEventListener('click', onClick);
+  return b;
 }
 
 function gameCard(game) {
@@ -101,6 +171,15 @@ $('logout').addEventListener('click', async () => {
   }
   render();
 });
+
+async function postJson(path, body) {
+  try {
+    const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 async function getJson(path) {
   try {

@@ -67,4 +67,10 @@ function Api.match(userId: string, op: string): (any?, string?)
 	return request("POST", "/api/roblox/match/cfo", { op = op, userId = userId })
 end
 
+-- A player's link to an account on the website. op is "status", "redeem" (with code) or "unlink";
+-- the reply is { linked, admin, games = { { code, updated } } }. It never names the account.
+function Api.link(userId: string, op: string, name: string?, code: string?): (any?, string?)
+	return request("POST", "/api/roblox/link", { op = op, userId = userId, name = name, code = code })
+end
+
 return Api

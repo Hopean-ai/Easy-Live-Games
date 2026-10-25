@@ -99,6 +99,11 @@ export class CfoRoom extends DurableObject {
     if (mine < 0 && account) mine = seats.findIndex((s) => s.account === account);
     if (mine >= 0) {
       seats[mine].token = token;
+      // A linked player moving their seat from Roblox to the web.
+      if (seats[mine].roblox) {
+        delete seats[mine].roblox;
+        delete seats[mine].seen;
+      }
       if (account && !seats[mine].account && seats[mine].name.toLowerCase() === account) seats[mine].account = account;
       Object.assign(seats[mine], this.room.status === 'waiting' ? { name, guest, account, admin } : {});
       return mine;
@@ -187,14 +192,29 @@ export class CfoRoom extends DurableObject {
     let reply = {};
     if (req.op === 'join') {
       let seat = seatOf(req.userId);
+      const { account } = req;
+      const linked = account ? { guest: false, account, admin: isAdmin(this.env, account) } : { guest: true, account: null, admin: false };
       // Quick match says how many players it sent here, as for players arriving by WebSocket.
       if (r.status === 'waiting' && !r.seats.length && req.expect >= CONFIG.minPlayers && req.expect <= CONFIG.maxPlayers) r.expect = req.expect;
+      // A linked player takes over their account's seat, wherever it was played from before.
+      if (seat < 0 && account) {
+        seat = r.seats.findIndex((s) => s.account === account);
+        if (seat >= 0) {
+          for (const ws of this.socketsFor(seat)) {
+            send(ws, { t: 'replaced' });
+            ws.close(4000, 'Replaced by a newer connection');
+          }
+          Object.assign(r.seats[seat], { roblox: req.userId, robloxName: req.name, seen: now }, r.status === 'waiting' ? { name: req.name, ...linked } : {});
+          changed = true;
+        }
+      }
       if (seat < 0 && r.status === 'waiting' && r.seats.length < CONFIG.maxPlayers) {
-        r.seats.push({ token: crypto.randomUUID(), name: req.name, guest: true, account: null, admin: false, roblox: req.userId, seen: now });
+        r.seats.push({ token: crypto.randomUUID(), name: req.name, ...linked, roblox: req.userId, robloxName: req.name, seen: now });
         seat = r.seats.length - 1;
         changed = true;
         if (r.expect && r.seats.length >= r.expect) this.start();
       }
+      if (seat >= 0 && account) this.refreshList = true; // lists the game for the account
       reply = { seat: seat >= 0 ? seat : null, board: robloxBoard() };
     } else if (req.op === 'leave') {
       const seat = seatOf(req.userId);
@@ -253,8 +273,9 @@ export class CfoRoom extends DurableObject {
   async socketClosed(ws) {
     const seat = ws.deserializeAttachment()?.seat;
     if (seat === null || seat === undefined || this.socketsFor(seat, ws).length) return;
-    // Before the game, leaving gives up the seat; during it, the seat is kept for a reconnect.
-    if (this.room.status === 'waiting') {
+    // Before the game, leaving gives up the seat; during it, the seat is kept for a reconnect. A
+    // seat its player has just taken to Roblox is theirs there.
+    if (this.room.status === 'waiting' && !this.room.seats[seat]?.roblox) {
       this.room.seats.splice(seat, 1);
       this.reseat();
     }

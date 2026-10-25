@@ -17,7 +17,7 @@ test('the Roblox route needs the shared key and reaches the room named by the co
   assert.equal(got, null);
   const res = await handleRequest(post('/api/roblox/cfo/abcd', { op: 'poll', code: 'EVIL' }), env);
   assert.equal(res.status, 200);
-  assert.deepEqual(got, { id: 'ABCD', b: { op: 'poll', code: 'ABCD' } });
+  assert.deepEqual(got, { id: 'ABCD', b: { op: 'poll', code: 'ABCD', account: null } });
 });
 
 test("web players' names are masked as whole words, longest first", () => {
