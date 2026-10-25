@@ -117,6 +117,13 @@ function gameCard(game) {
   const players = document.createElement('span');
   players.className = 'small';
   players.textContent = `${game.players} players`;
+  if (game.roblox) {
+    // Played together with the Roblox hub, so the same rooms and quick match.
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = 'Also on Roblox';
+    players.append(badge);
+  }
   a.append(title, blurb, players);
   li.append(a);
   return li;

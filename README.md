@@ -39,9 +39,9 @@ npm run deploy
 
 Durable Objects with SQLite storage are available on the Workers Free plan, so no paid plan is needed.
 
-## Roblox (CFO)
+## Roblox hub
 
-`roblox/` is a Roblox game that joins the same CFO rooms as the website, so Roblox and browser players can play together. The website runs the game; Roblox only relays and draws what it is sent, so rule changes on the web need no Roblox update. Setup, publishing and what to do when the web game changes: [roblox/README.md](roblox/README.md).
+`roblox/` is one Roblox place with a game picker that joins the same rooms as the website, so Roblox and browser players can play together. Every game except Pong is on it (games flagged `roblox` in `src/games.js`; today CFO). The website runs the game; Roblox only relays and draws what it is sent, so rule changes on the web need no Roblox update. Setup, publishing, adding a game, and what to do when the web game changes: [roblox/README.md](roblox/README.md).
 
 ## Claude players (CFO)
 

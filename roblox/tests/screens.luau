@@ -6,7 +6,8 @@ local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local serde = require("@lune/serde")
 local roblox = require("@lune/roblox")
-local Bridge = require("../src/shared/Bridge")
+local Bridge = require("../src/shared/games/Cfo")
+local Hub = require("../src/shared/Hub")
 
 local fixture = serde.decode("json", fs.readFile("tests/fixture.json"))
 
@@ -55,8 +56,15 @@ local services = {
 	Players = { LocalPlayer = { WaitForChild = function() return wrap(playerGui) end } },
 	ReplicatedStorage = {
 		WaitForChild = function(_, name)
-			if name == "CfoShared" then
-				return { WaitForChild = function() return "Bridge" end }
+			if name == "HubShared" then
+				return {
+					WaitForChild = function(_, child)
+						if child == "games" then
+							return { WaitForChild = function(_, m) return "shared:" .. m end }
+						end
+						return "shared:" .. child
+					end,
+				}
 			end
 			return {
 				WaitForChild = function(_, remote)
@@ -64,8 +72,10 @@ local services = {
 						return {
 							InvokeServer = function(_, kind, arg)
 								table.insert(sent, { kind, arg })
-								if kind == "link" then
-									return { link = { linked = true, admin = true, games = { { game = "bottles", code = "OTHR", updated = 0 }, { game = "cfo", code = "WXYZ", updated = 0 } } } }
+								if kind == "hello" then
+									return { games = { { id = "cfo", name = "CFO", blurb = "An accounting board game.", players = "2–6", minPlayers = 2, maxPlayers = 6 } }, link = { linked = false } }
+								elseif kind == "link" then
+									return { link = { linked = true, admin = true, games = { { game = "bottles", code = "OTHR", updated = 2 }, { game = "cfo", code = "WXYZ", updated = 1 } } } }
 								end
 								return {}
 							end,
@@ -77,14 +87,37 @@ local services = {
 		end,
 	},
 }
+-- The client folder: the hub's Ui module and one game's screens.
+local clientFolder = {
+	WaitForChild = function(_, name)
+		if name == "games" then
+			return { GetChildren = function() return { { Name = "Cfo", IsA = function(_, c) return c == "ModuleScript" end, path = "src/client/games/Cfo.luau" } } end }
+		end
+		return { path = "src/client/" .. name .. ".luau" }
+	end,
+}
 local env = setmetatable({
 	game = { GetService = function(_, name) return services[name] end },
-	require = function(what) assert(what == "Bridge"); return Bridge end,
+	script = { Parent = clientFolder },
+	require = nil :: any,
 	Instance = { new = function(className) return wrap(roblox.Instance.new(className)) end },
 	UDim2 = roblox.UDim2, UDim = roblox.UDim, Color3 = roblox.Color3, Vector2 = roblox.Vector2, Enum = roblox.Enum,
 	-- Spawned work runs straight away, so the screens can be checked right after.
 	task = { spawn = function(fn, ...) fn(...) end, delay = function() end, wait = function() end },
 }, { __index = _G })
+local loaded = {}
+env.require = function(what)
+	if what == "shared:Hub" then
+		return Hub
+	elseif what == "shared:Cfo" then
+		return Bridge
+	end
+	assert(type(what) == "table" and what.path, "unexpected require")
+	if not loaded[what.path] then
+		loaded[what.path] = luau.load(fs.readFile(what.path), { debugName = what.path, environment = env })()
+	end
+	return loaded[what.path]
+end
 
 local function texts(): { string }
 	local out = {}
@@ -123,29 +156,32 @@ local function pressNamed(name: string)
 end
 
 luau.load(fs.readFile("src/client/Main.client.luau"), { debugName = "Main.client", environment = env })()
-assert(has("New room"), "the lobby shows")
-assert(sent[1] and sent[1][1] == "account", "the lobby asks whether this player is linked")
+assert(sent[1] and sent[1][1] == "hello", "the hub asks for the games and the account link")
+assert(has("Play CFO"), "the picker lists the games")
 assert(has("Have a link code?"), "an unlinked player can enter a link code")
 press("Link", true)
 assert(sent[#sent][1] == "link", "Link sends the code")
-assert(has("Linked to your account (admin)") and has("Rejoin game WXYZ"), "a linked player sees their games")
-assert(not has("OTHR"), "but not other games' rooms")
-press("Rejoin game WXYZ")
-assert(sent[#sent][1] == "join" and sent[#sent][2] == "WXYZ", "Rejoin joins that room")
+assert(has("Linked to your account (admin)") and has("Rejoin CFO game WXYZ"), "a linked player sees their games")
+assert(not has("OTHR"), "but not rooms of games this build doesn't have")
+press("Rejoin CFO game WXYZ")
+assert(sent[#sent][1] == "join" and sent[#sent][2].game == "cfo" and sent[#sent][2].code == "WXYZ", "Rejoin joins that game's room")
+press("All games")
 press("Unlink account")
 press("Tap again")
 assert(sent[#sent][1] == "unlink", "unlinking asks twice, then tells the server")
+press("Play CFO")
+assert(has("New room") and has("All games"), "a game's lobby shows")
 press("New room")
-assert(sent[#sent][1] == "new", "New room asks the server")
+assert(sent[#sent][1] == "new" and sent[#sent][2] == "cfo", "New room asks the server for that game")
 press("Quick match")
-assert(sent[#sent][1] == "quick", "Quick match asks the server")
+assert(sent[#sent][1] == "quick" and sent[#sent][2] == "cfo", "Quick match asks the server for that game")
 assert(onState, "the client listens for state")
 onState({ queue = { waiting = 2, max = 6, startsIn = 12 } })
 assert(has("Finding players: 2 of 6"), "the queue shows")
 press("Cancel")
 assert(sent[#sent][1] == "cancel" and has("Quick match"), "cancelling goes back to the lobby")
 
-onState({ code = "ABCD", board = fixture.board })
+onState({ game = "cfo", code = "ABCD", board = fixture.board })
 onState({ view = fixture.waiting })
 assert(has("Room ABCD"), "the waiting room shows its code")
 assert(has("Waiting for the host"), "a guest waits for the host")

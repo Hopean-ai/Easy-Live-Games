@@ -12,7 +12,6 @@ import { sanitizeName } from '../names.js';
 
 export const BRIDGE_VERSION = 1;
 export const STALE_MS = 20_000; // a Roblox seat that hasn't polled for this long shows as away
-export const MAX_ROBLOX_BODY = 4096;
 const USER_ID = /^\d{1,20}$/;
 
 // The board's words and colours, as public/cfo.js and cfo.css draw them on the web.

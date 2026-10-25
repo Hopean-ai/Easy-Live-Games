@@ -1,6 +1,7 @@
 -- Unit tests for the parts of the Roblox game that run outside Roblox. Run from roblox/:
 --   lune run tests/run
-local Bridge = require("../src/shared/Bridge")
+local Bridge = require("../src/shared/games/Cfo")
+local Hub = require("../src/shared/Hub")
 
 local passed, failed = 0, 0
 local function test(name: string, fn: () -> ())
@@ -120,8 +121,8 @@ test("the plug balances an entry on the last free line", function()
 end)
 
 test("queue text", function()
-	eq(Bridge.queueText({ waiting = 1, max = 6 }), "Finding players: 1 of 6 waiting.")
-	eq(Bridge.queueText({ waiting = 2, max = 6, startsIn = 9.2 }), "Finding players: 2 of 6 waiting. Starting in 10 s unless more join.")
+	eq(Hub.queueText({ waiting = 1, max = 6 }), "Finding players: 1 of 6 waiting.")
+	eq(Hub.queueText({ waiting = 2, max = 6, startsIn = 9.2 }), "Finding players: 2 of 6 waiting. Starting in 10 s unless more join.")
 end)
 
 test("typed amounts and counts", function()
@@ -138,9 +139,42 @@ test("typed amounts and counts", function()
 end)
 
 test("bridge versions", function()
-	eq(Bridge.updateNeeded(Bridge.SUPPORTED), false)
-	eq(Bridge.updateNeeded(Bridge.SUPPORTED + 1), true)
-	eq(Bridge.updateNeeded(nil), false)
+	eq(Hub.updateNeeded(Bridge.SUPPORTED, Bridge.SUPPORTED), false)
+	eq(Hub.updateNeeded(Bridge.SUPPORTED, Bridge.SUPPORTED + 1), true)
+	eq(Hub.updateNeeded(Bridge.SUPPORTED, nil), false)
+end)
+
+test("room codes and game ids", function()
+	eq(Hub.roomCode("abcd"), "ABCD")
+	eq(Hub.roomCode("ab"), nil)
+	eq(Hub.roomCode("ab cd"), nil)
+	eq(Hub.roomCode(nil), nil)
+	eq(Hub.gameId("cfo"), "cfo")
+	eq(Hub.gameId("CFO"), nil)
+	eq(Hub.gameId("../x"), nil)
+	eq(Hub.gameId(5), nil)
+end)
+
+test("the picker lists the website's games this build has", function()
+	local list = Hub.playable({ { id = "pong" }, { id = "cfo", name = "CFO" }, "junk" }, { cfo = true })
+	eq(#list, 1)
+	eq(list[1].name, "CFO")
+	eq(#Hub.playable(nil, { cfo = true }), 0)
+end)
+
+test("rejoins: this build's games, newest first", function()
+	local link = { games = {
+		{ game = "cfo", code = "OLD1", updated = 1 },
+		{ game = "bottles", code = "BOTL", updated = 5 },
+		{ game = "cfo", code = "NEW1", updated = 9 },
+		{ code = "BARE", updated = 3 }, -- an older website, CFO only
+	} }
+	local r = Hub.rejoins(link, { cfo = true }, 2)
+	eq(#r, 2)
+	eq(r[1].code, "NEW1")
+	eq(r[2].code, "BARE")
+	eq(r[2].game, "cfo")
+	eq(#Hub.rejoins(nil, { cfo = true }, 5), 0)
 end)
 
 test("turn text", function()
