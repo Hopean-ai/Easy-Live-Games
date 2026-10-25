@@ -250,10 +250,16 @@ local function renderLink(col: Frame, order: number)
 	local link = state.link
 	if link and link.linked then
 		heading(if link.admin then "Linked to your account (admin)" else "Linked to your account", { TextSize = 14, Parent = col, LayoutOrder = order })
-		for i, g in link.games or {} do
-			if i > 5 then
+		local shown = 0
+		for _, g in link.games or {} do
+			if g.game ~= nil and g.game ~= "cfo" then
+				continue -- another game's room
+			end
+			shown += 1
+			if shown > 5 then
 				break
 			end
+			local i = shown
 			button("Rejoin game " .. tostring(g.code), function()
 				call("join", g.code)
 			end, { Parent = col, LayoutOrder = order + i }, "secondary")

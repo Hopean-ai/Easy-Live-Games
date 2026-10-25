@@ -126,7 +126,8 @@ export async function handleRequest(request, env) {
       return Response.json({ error: 'Bad request.' }, { status: 400 });
     }
     const account = await accounts.robloxAccount(userId);
-    const games = account ? (await accounts.games(account)).filter((g) => g.game === 'cfo').map(({ code, updated }) => ({ code, updated })) : [];
+    // Every game's rooms, named by game id, so each Roblox game can pick out its own.
+    const games = account ? (await accounts.games(account)).map(({ game, code, updated }) => ({ game, code, updated })) : [];
     return Response.json({ linked: Boolean(account), admin: isAdmin(env, account), games });
   }
   if (roblox) {
