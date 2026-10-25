@@ -33,6 +33,8 @@ Every web action is on Roblox now; `WEB_ONLY` is empty.
 
 **Quick match.** Roblox players join the same quick-match queue as web players. The Roblox server asks `POST /api/roblox/match/cfo` every two seconds while a player waits (a place lapses after 10 seconds without asking), and on a match joins the room it was given, saying how many players to expect, so the game starts once everyone is in.
 
+**Linked accounts.** A player signed in on the website can link their Roblox account: the home page hands out a six-letter code (good for 10 minutes) and they type it into the **Link code** box in the Roblox lobby. The Roblox server sends it to `POST /api/roblox/link` (ops `status`, `redeem`, `unlink`), and the `Accounts` object (`src/accounts.js`) keeps the link, so it holds on every Roblox server and nothing is stored on Roblox. After that, when the Roblox server joins the player to a room, the router looks up their account and the room seats them as it: their admin role and host rights apply, the game shows in their list of games on both sides (the Roblox lobby has a Rejoin button for each), and they can move their seat between Roblox and the browser mid-game, the newer one taking over. The Roblox side is only told whether a player is linked, never the account name, and a seat that moved to Roblox shows the player's Roblox name there. Five wrong codes lock that Roblox player out for 15 minutes. Either side can unlink.
+
 Web players' names are shown in Roblox as "Web player 1", "Web player 2" and so on, in seat lists, the log and move labels. Roblox requires text shown in a game to come from Roblox users or go through its filter, and these names come from outside. The Roblox game also never points players to the website.
 
 ## Setup, once

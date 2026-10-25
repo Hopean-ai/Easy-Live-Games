@@ -61,7 +61,15 @@ local services = {
 			return {
 				WaitForChild = function(_, remote)
 					if remote == "Request" then
-						return { InvokeServer = function(_, kind, arg) table.insert(sent, { kind, arg }); return {} end }
+						return {
+							InvokeServer = function(_, kind, arg)
+								table.insert(sent, { kind, arg })
+								if kind == "link" then
+									return { link = { linked = true, admin = true, games = { { code = "WXYZ", updated = 0 } } } }
+								end
+								return {}
+							end,
+						}
 					end
 					return { OnClientEvent = { Connect = function(_, fn) onState = fn end } }
 				end,
@@ -74,6 +82,8 @@ local env = setmetatable({
 	require = function(what) assert(what == "Bridge"); return Bridge end,
 	Instance = { new = function(className) return wrap(roblox.Instance.new(className)) end },
 	UDim2 = roblox.UDim2, UDim = roblox.UDim, Color3 = roblox.Color3, Vector2 = roblox.Vector2, Enum = roblox.Enum,
+	-- Spawned work runs straight away, so the screens can be checked right after.
+	task = { spawn = function(fn, ...) fn(...) end, delay = function() end, wait = function() end },
 }, { __index = _G })
 
 local function texts(): { string }
@@ -114,8 +124,18 @@ end
 
 luau.load(fs.readFile("src/client/Main.client.luau"), { debugName = "Main.client", environment = env })()
 assert(has("New room"), "the lobby shows")
+assert(sent[1] and sent[1][1] == "account", "the lobby asks whether this player is linked")
+assert(has("Have a link code?"), "an unlinked player can enter a link code")
+press("Link", true)
+assert(sent[#sent][1] == "link", "Link sends the code")
+assert(has("Linked to your account (admin)") and has("Rejoin game WXYZ"), "a linked player sees their games")
+press("Rejoin game WXYZ")
+assert(sent[#sent][1] == "join" and sent[#sent][2] == "WXYZ", "Rejoin joins that room")
+press("Unlink account")
+press("Tap again")
+assert(sent[#sent][1] == "unlink", "unlinking asks twice, then tells the server")
 press("New room")
-assert(sent[1][1] == "new", "New room asks the server")
+assert(sent[#sent][1] == "new", "New room asks the server")
 press("Quick match")
 assert(sent[#sent][1] == "quick", "Quick match asks the server")
 assert(onState, "the client listens for state")

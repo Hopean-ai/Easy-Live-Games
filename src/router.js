@@ -4,6 +4,7 @@ import { findGame, publicGames, tableSize } from './games.js';
 import { isAdmin } from './admin.js';
 import { callClaudePlayers } from './claude.js';
 import { MAX_ROBLOX_BODY } from './cfo/roblox.js';
+import { sanitizeName } from './names.js';
 
 export { newRoomCode };
 
@@ -57,6 +58,27 @@ export async function handleRequest(request, env) {
     return Response.json({ ok: true }, { headers: { 'Set-Cookie': sessionCookie(null, request) } });
   }
 
+  // Linking a Roblox player to this account (Accounts.robloxLinkCode): GET says whether it's
+  // linked; POST { op: 'code' } hands out a code to type into the Roblox game, { op: 'unlink' } undoes it.
+  if (path === '/api/roblox-link') {
+    const name = await accountName(request, env);
+    if (!name) return Response.json({ error: 'Sign in first.' }, { status: 401 });
+    const accounts = accountsStub(env);
+    if (request.method === 'POST') {
+      const body = await readJson(request);
+      if (body?.op === 'code') {
+        if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
+        return Response.json(await accounts.robloxLinkCode(name));
+      }
+      if (body?.op === 'unlink') {
+        await accounts.unlinkRoblox({ name });
+        return Response.json({ ok: true });
+      }
+      return Response.json({ error: 'Bad request.' }, { status: 400 });
+    }
+    return Response.json({ available: Boolean(env.ROBLOX_KEY), link: await accounts.robloxLink(name) });
+  }
+
   // Admins only: ask the Claude routine to send players into this CFO room (src/claude.js).
   const claude = path.match(/^\/api\/rooms\/cfo\/([^/]+)\/claude$/);
   if (claude) {
@@ -72,7 +94,8 @@ export async function handleRequest(request, env) {
   // the shared ROBLOX_KEY secret; without one set, cross-play is off.
   const roblox = path.match(/^\/api\/roblox\/cfo\/([^/]+)$/);
   const robloxMatch = path === '/api/roblox/match/cfo';
-  if (roblox || robloxMatch) {
+  const robloxLink = path === '/api/roblox/link';
+  if (roblox || robloxMatch || robloxLink) {
     if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     if (!(await sameSecret(request.headers.get('X-Roblox-Key') ?? '', env.ROBLOX_KEY))) return Response.json({ error: 'Bad key.' }, { status: 401 });
@@ -86,13 +109,38 @@ export async function handleRequest(request, env) {
     const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(game.id));
     return Response.json(await stub.httpQueue({ who: `roblox:${body.userId}`, op: body.op, min, max }));
   }
+  // A Roblox player's link to an account, from the Roblox side: { op: 'status' | 'redeem' | 'unlink' }.
+  // Replies say only whether they're linked, never the account name: text shown in a Roblox game
+  // has to come from Roblox.
+  if (robloxLink) {
+    const body = await readJson(request);
+    const userId = String(body?.userId ?? '');
+    if (!/^\d{1,20}$/.test(userId)) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const accounts = accountsStub(env);
+    if (body.op === 'redeem') {
+      const result = await accounts.redeemRobloxLink(userId, sanitizeName(body.name), body.code);
+      if (result.error) return Response.json({ error: result.error }, { status: 400 });
+    } else if (body.op === 'unlink') {
+      await accounts.unlinkRoblox({ roblox: userId });
+    } else if (body.op !== 'status') {
+      return Response.json({ error: 'Bad request.' }, { status: 400 });
+    }
+    const account = await accounts.robloxAccount(userId);
+    const games = account ? (await accounts.games(account)).filter((g) => g.game === 'cfo').map(({ code, updated }) => ({ code, updated })) : [];
+    return Response.json({ linked: Boolean(account), admin: isAdmin(env, account), games });
+  }
   if (roblox) {
     if (!ROOM_CODE.test(roblox[1])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
     const body = await readJson(request, MAX_ROBLOX_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
     const code = roblox[1].toUpperCase();
+    // A linked Roblox player takes their seat as their account: the router looks it up, so the
+    // Roblox server can't name one.
+    const account = body.op === 'join' && /^\d{1,20}$/.test(String(body.userId ?? ''))
+      ? await accountsStub(env).robloxAccount(String(body.userId))
+      : null;
     const stub = env.CFO_ROOMS.get(env.CFO_ROOMS.idFromName(code));
-    const result = await stub.roblox({ ...body, code });
+    const result = await stub.roblox({ ...body, code, account });
     return Response.json(result, { status: result.error && !('version' in result) ? 400 : 200 });
   }
 

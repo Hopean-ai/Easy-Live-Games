@@ -2,10 +2,13 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   checkUsername, checkPassword, hashPassword, verifyPassword, newSessionToken, tokenKey, SESSION_TTL_MS,
 } from './auth.js';
+import { newRoomCode } from './codes.js';
 
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 const GAME_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+export const LINK_CODE_LENGTH = 6;
+export const LINK_CODE_TTL_MS = 10 * 60 * 1000;
 
 // One Durable Object (named "accounts") holds every account and session in its SQLite storage.
 // Durable Objects need no setup in the Cloudflare dashboard, unlike a D1 database. The Worker
@@ -26,6 +29,15 @@ export class Accounts extends DurableObject {
       CREATE TABLE IF NOT EXISTS games (
         user TEXT NOT NULL, game TEXT NOT NULL, code TEXT NOT NULL, players TEXT NOT NULL,
         updated INTEGER NOT NULL, PRIMARY KEY (user, game, code)
+      );
+      CREATE TABLE IF NOT EXISTS roblox_links (
+        roblox TEXT PRIMARY KEY, user TEXT NOT NULL UNIQUE, roblox_name TEXT NOT NULL, linked INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS link_codes (
+        code TEXT PRIMARY KEY, user TEXT NOT NULL, expires INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS link_failures (
+        roblox TEXT PRIMARY KEY, failures INTEGER NOT NULL, locked_until INTEGER NOT NULL
       );
     `);
   }
@@ -96,6 +108,73 @@ export class Accounts extends DurableObject {
     return this.sql
       .exec('SELECT game, code, players, updated FROM games WHERE user = ? ORDER BY updated DESC LIMIT 20', String(name).toLowerCase())
       .toArray();
+  }
+
+  // Linking a Roblox player to an account: the website hands a signed-in player a short code, and
+  // they type it into the Roblox game, whose server sends it here with their Roblox user id. After
+  // that the Roblox player plays as the account. One Roblox player per account, and the other way
+  // round; linking again moves the link.
+  async robloxLinkCode(name) {
+    const user = String(name).toLowerCase();
+    const now = Date.now();
+    this.sql.exec('DELETE FROM link_codes WHERE user = ? OR expires <= ?', user, now);
+    let code;
+    do code = newRoomCode(LINK_CODE_LENGTH);
+    while (this.sql.exec('SELECT 1 FROM link_codes WHERE code = ?', code).toArray().length);
+    const expires = now + LINK_CODE_TTL_MS;
+    this.sql.exec('INSERT INTO link_codes (code, user, expires) VALUES (?, ?, ?)', code, user, expires);
+    return { code, expires };
+  }
+
+  // A Roblox player's typed code. Wrong guesses lock that Roblox player out for a while, as
+  // wrong passwords do.
+  async redeemRobloxLink(roblox, robloxName, rawCode) {
+    const id = String(roblox);
+    const now = Date.now();
+    const fail = this.sql.exec('SELECT * FROM link_failures WHERE roblox = ?', id).toArray()[0];
+    if (fail && fail.locked_until > now) return { error: 'Too many wrong codes. Try again in a few minutes.' };
+    const code = String(rawCode ?? '').trim().toUpperCase();
+    const row = /^[A-Z0-9]{4,12}$/.test(code)
+      ? this.sql.exec('SELECT user FROM link_codes WHERE code = ? AND expires > ?', code, now).toArray()[0]
+      : null;
+    const owner = row && this.user(row.user);
+    if (!owner) {
+      const failures = (fail?.failures ?? 0) + 1;
+      const lock = failures >= MAX_FAILURES;
+      this.sql.exec(
+        'INSERT OR REPLACE INTO link_failures (roblox, failures, locked_until) VALUES (?, ?, ?)',
+        id, lock ? 0 : failures, lock ? now + LOCKOUT_MS : 0,
+      );
+      return { error: 'That code is wrong or has run out. Get a new one and try again.' };
+    }
+    this.sql.exec('DELETE FROM link_failures WHERE roblox = ?', id);
+    this.sql.exec('DELETE FROM link_codes WHERE code = ?', code);
+    this.sql.exec('DELETE FROM roblox_links WHERE roblox = ? OR user = ?', id, owner.key);
+    this.sql.exec(
+      'INSERT INTO roblox_links (roblox, user, roblox_name, linked) VALUES (?, ?, ?, ?)',
+      id, owner.key, String(robloxName ?? '').slice(0, 40), now,
+    );
+    return { account: owner.name };
+  }
+
+  // The account a Roblox player is linked to, or null.
+  async robloxAccount(roblox) {
+    const row = this.sql
+      .exec('SELECT u.name FROM roblox_links l JOIN users u ON u.key = l.user WHERE l.roblox = ?', String(roblox))
+      .toArray()[0];
+    return row?.name ?? null;
+  }
+
+  // The Roblox player an account is linked to, for the website, or null.
+  async robloxLink(name) {
+    const row = this.sql.exec('SELECT roblox, roblox_name, linked FROM roblox_links WHERE user = ?', String(name).toLowerCase()).toArray()[0];
+    return row ? { robloxId: row.roblox, robloxName: row.roblox_name, linked: row.linked } : null;
+  }
+
+  // Pass an account name or a Roblox user id.
+  async unlinkRoblox({ name, roblox }) {
+    if (name) this.sql.exec('DELETE FROM roblox_links WHERE user = ?', String(name).toLowerCase());
+    if (roblox) this.sql.exec('DELETE FROM roblox_links WHERE roblox = ?', String(roblox));
   }
 
   user(name) {

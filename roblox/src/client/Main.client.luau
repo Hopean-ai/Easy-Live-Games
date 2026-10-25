@@ -30,7 +30,7 @@ local function playerColor(i: number): Color3
 end
 
 -- What the client knows: the room code, the fixed board, and the latest view from the server.
-local state = { code = nil :: string?, board = nil :: any, view = nil :: any, error = nil :: string?, updateNeeded = false, queue = nil :: any }
+local state = { code = nil :: string?, board = nil :: any, view = nil :: any, error = nil :: string?, updateNeeded = false, queue = nil :: any, link = nil :: any }
 -- What this player has open or typed, kept across redraws.
 local ui = {
 	tab = "turn",
@@ -189,6 +189,7 @@ local function call(kind: string, arg: any?): any
 	if kind == "leave" and ok then
 		state.code, state.view, state.board = nil, nil, nil
 		ui.selected, ui.form, ui.editor, ui.picker = nil, nil, nil, nil
+		task.spawn(account, "account") -- the account's list of games may have changed
 	end
 	if kind == "cancel" then
 		state.queue = nil
@@ -199,6 +200,15 @@ end
 
 local function send(msg: any): any
 	return call("send", msg)
+end
+
+-- Whether this player is linked to an account, and its games in progress to rejoin.
+local function account(kind: string, arg: any?)
+	local res = call(kind, arg)
+	if res and res.link then
+		state.link = res.link
+		render()
+	end
 end
 
 -- A button that asks for a second tap before it does something hard to undo.
@@ -234,6 +244,32 @@ local function centerCard(): Frame
 	return column({ Parent = box }, 8)
 end
 
+-- A linked player plays as their account: its games and admin role go with them. The code comes
+-- from the account's page; this game never says where that is.
+local function renderLink(col: Frame, order: number)
+	local link = state.link
+	if link and link.linked then
+		heading(if link.admin then "Linked to your account (admin)" else "Linked to your account", { TextSize = 14, Parent = col, LayoutOrder = order })
+		for i, g in link.games or {} do
+			if i > 5 then
+				break
+			end
+			button("Rejoin game " .. tostring(g.code), function()
+				call("join", g.code)
+			end, { Parent = col, LayoutOrder = order + i }, "secondary")
+		end
+		confirmButton("unlink", "Unlink account", function()
+			account("unlink")
+		end, { Parent = col, LayoutOrder = order + 7 }, "secondary")
+	else
+		small("Have a link code? Enter it to keep your games and admin role with your account.", { Parent = col, LayoutOrder = order })
+		local box = textBox({ PlaceholderText = "Link code", Font = Enum.Font.GothamMedium, TextSize = 16, Parent = col, LayoutOrder = order + 1 })
+		button("Link", function()
+			account("link", box.Text)
+		end, { Parent = col, LayoutOrder = order + 2 }, "secondary")
+	end
+end
+
 -- Quick match, a new room, or a room code.
 local function renderLobby()
 	local col = centerCard()
@@ -257,8 +293,9 @@ local function renderLobby()
 		button("Join", function()
 			call("join", code.Text)
 		end, { Parent = col, LayoutOrder = 7 }, "secondary")
+		renderLink(col, 8)
 	end
-	errorLine(col, 8)
+	errorLine(col, 20)
 end
 
 -- Waiting for the host to start.
@@ -1190,3 +1227,4 @@ stateEvent.OnClientEvent:Connect(function(msg)
 end)
 
 render()
+task.spawn(account, "account")

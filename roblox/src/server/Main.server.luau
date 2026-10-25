@@ -189,6 +189,19 @@ requestFn.OnServerInvoke = function(player: Player, kind: any, arg: any)
 	elseif kind == "leave" then
 		leave(player)
 		return { ok = true }
+	elseif kind == "account" then
+		-- Whether this player is linked to an account, and that account's games in progress.
+		local res, err = Api.link(tostring(player.UserId), "status")
+		return if res then { link = res } else { error = err }
+	elseif kind == "link" then
+		if type(arg) ~= "string" or not arg:match("^%s*%w+%s*$") or #arg > 16 then
+			return { error = "Link codes are letters and numbers." }
+		end
+		local res, err = Api.link(tostring(player.UserId), "redeem", player.DisplayName, arg)
+		return if res then { link = res } else { error = err }
+	elseif kind == "unlink" then
+		local res, err = Api.link(tostring(player.UserId), "unlink")
+		return if res then { link = res } else { error = err }
 	elseif kind == "send" then
 		local code = roomOf[player]
 		local msg = Bridge.cleanMessage(arg)
