@@ -34,12 +34,12 @@ const BOARDS = {
   tesserarius: { w: [0.2, 0.3, 0.5], need: 26 },
   signifer: { w: [0.4, 0.3, 0.3], need: 34 },
   optio: { w: [0.5, 0.3, 0.2], need: 42 },
-  centurio: { w: [0.35, 0.45, 0.2], need: 52 },
-  primiordo: { w: [0.4, 0.4, 0.2], need: 60 },
-  primuspilus: { w: [0.4, 0.4, 0.2], need: 67 },
-  castrorum: { w: [0.2, 0.5, 0.3], need: 70 },
-  legionis: { w: [0.35, 0.45, 0.2], need: 76 },
-  dux: { w: [0.4, 0.4, 0.2], need: 82 },
+  centurio: { w: [0.35, 0.45, 0.2], need: 50 },
+  primiordo: { w: [0.4, 0.4, 0.2], need: 57 },
+  primuspilus: { w: [0.4, 0.4, 0.2], need: 63 },
+  castrorum: { w: [0.2, 0.5, 0.3], need: 67 },
+  legionis: { w: [0.35, 0.45, 0.2], need: 60 },
+  dux: { w: [0.4, 0.4, 0.2], need: 66 },
 };
 // Until Gallienus shut senators out of army commands (about 262), legions were led by senators.
 const LEGATES_UNTIL = 262;
@@ -405,13 +405,15 @@ CARDS.orders = {
     if (PLAGUE_YEARS.has(s.year) && r() < 0.1) push(s, 'plague');
     if (s.rank === R.tiro) {
       push(s, 'sworn');
-    } else if (s.rank < R.dux && s.inRank >= 2) {
-      const p = s.rank === R.primuspilus ? 1 : 0.14 + casualties + (PLAGUE_YEARS.has(s.year) ? 0.08 : 0);
+    } else if (s.rank < R.dux && s.inRank >= minHalves(s)) {
+      // Fewer posts the higher you go: a legion has 59 centurions but one camp prefect.
+      const base = s.rank >= R.centurio ? 0.12 : 0.22;
+      const p = s.rank === R.primuspilus ? 1 : base + casualties + (PLAGUE_YEARS.has(s.year) ? 0.06 : 0);
       if (r() < p) push(s, 'board', { rival: pick(r, RIVALS), cause: casualties ? 'battle' : pick(r, ['death', 'retire', 'transfer']) });
     }
-    if (s.rank >= R.legionis && s.stats.milites >= 45) {
-      const transition = REIGNS.some((x) => x.from === s.year) ? 0.12 : 0;
-      const p = 0.03 + s.plot * 0.07 + transition + (s.stats.milites - 45) / 400 + (s.year > 284 ? -0.03 : 0);
+    if (s.rank >= R.legionis && s.stats.milites >= 55) {
+      const transition = REIGNS.some((x) => x.from === s.year) ? 0.1 : 0;
+      const p = 0.03 + s.plot * 0.06 + transition + (s.stats.milites - 55) / 400 + (s.year > 284 ? -0.02 : 0);
       if (r() < p) push(s, 'acclaim');
     }
     if (r() < 0.5) push(s, 'event');
@@ -452,7 +454,7 @@ function emperorOrders(s) {
     {
       label: 'Abdicate and retire to grow cabbages',
       hint: 'ends the run safely',
-      off: s.reign < 4,
+      off: s.reign < 8,
       act(s2) {
         s2.ending = 'abdicated';
         story(s2, 'Laid down the purple');
@@ -515,27 +517,31 @@ CARDS.board = {
       { label: 'Stand on your record', hint: pct(promotionChance(s, to, 0)), act: (s2, r, a) => board(s2, r, a, 0) },
       {
         label: 'Ask your patron to write for you',
-        hint: `${pct(promotionChance(s, to, 10))}, costs gratia`,
+        hint: `${pct(promotionChance(s, to, 7))}, costs gratia`,
         off: s.stats.gratia < 15,
-        act(s2, r, a) { gain(s2, 'gratia', -8); return board(s2, r, a, 10); },
+        act(s2, r, a) { gain(s2, 'gratia', -10); return board(s2, r, a, 7); },
       },
       {
         label: `Pay ${cost} denarii to the right people`,
-        hint: `${pct(promotionChance(s, to, 14))}, could backfire`,
+        hint: `${pct(promotionChance(s, to, 9))}, could backfire`,
         off: s.denarii < cost,
         act(s2, r, a) {
           cash(s2, -cost);
-          if (r() < 0.1) {
+          if (r() < 0.2) {
             gain(s2, 'gratia', -12);
             return log(s2, `Your bribe is talked about. ${a.rival} gets the post, and you get a reputation.`);
           }
-          return board(s2, r, a, 14);
+          return board(s2, r, a, 9);
         },
       },
       { label: 'Let it go', act(s2, r, a) { gain(s2, 'gratia', 1); return log(s2, `You step aside for ${a.rival}.`); } },
     ];
   },
 };
+// How long you must hold a rank before you're considered for the next.
+function minHalves(s) {
+  return s.rank >= R.centurio ? 4 : 2;
+}
 function bribeCost(s) {
   return Math.round(60 * RANKS[s.rank + 1].pay);
 }
@@ -543,13 +549,14 @@ export function promotionChance(s, to, bonus) {
   const b = BOARDS[RANKS[to].id];
   const merit = b.w[0] * s.stats.virtus + b.w[1] * s.stats.gratia + b.w[2] * s.stats.litterae;
   const need = b.need + (to === R.legionis && s.year < LEGATES_UNTIL ? 10 : 0);
-  return clamp(0.5 + (merit + bonus - need) / 16, 0.03, 0.95);
+  return clamp(0.5 + (merit + bonus - need) / 20, 0.02, 0.85);
 }
 function board(s, r, a, bonus) {
   const to = s.rank + 1;
   if (r() < promotionChance(s, to, bonus)) {
     promote(s, to);
-    if (to === R.castrorum) cash(s, 1500);
+    // Knighthood brings money and the notice of the emperor's circle.
+    if (to === R.castrorum) { cash(s, 1500); gain(s, 'gratia', 8); }
     return log(s, `You are made ${RANKS[to].name}.`);
   }
   gain(s, 'gratia', 1);
@@ -594,7 +601,7 @@ function battle(s, r, a, stance) {
   const won = named ? named.won : r() < 0.62;
   const worse = won ? 1 : 2.2;
   const rankRisk = s.rank >= R.castrorum ? 0.5 : officer(s) ? 1.3 : 1;
-  const death = [0.06, 0.025, 0.008][stance] * worse * rankRisk;
+  const death = [0.07, 0.03, 0.012][stance] * worse * rankRisk;
   const wound = [0.3, 0.15, 0.06][stance] * worse;
   const roll = r();
   const where = named ? `at ${named.name}` : onFront(s);
@@ -606,10 +613,12 @@ function battle(s, r, a, stance) {
     if (s.over) return log(s, `${outcome} You are carried off the field and do not recover.`);
     lines.push('You are wounded.');
   }
-  gain(s, 'virtus', [[10, 5, 1], [6, 3, 0]][won ? 0 : 1][stance]);
+  gain(s, 'virtus', [[10, 4, 0], [6, 2, 0]][won ? 0 : 1][stance]);
+  // Hanging back is noticed, by the officers and by the men.
+  if (stance === 2) gain(s, 'gratia', -3);
   if (officer(s)) {
     if (stance === 0) gain(s, 'milites', 5);
-    if (stance === 2) { gain(s, 'gratia', -4); gain(s, 'milites', -5); }
+    if (stance === 2) gain(s, 'milites', -5);
   }
   if (stance === 0 && won && r() < 0.25) {
     const kind = a.kind ?? 'field';
@@ -680,7 +689,7 @@ CARDS.acclaim = {
   ],
 };
 export function usurpChance(s) {
-  return clamp(0.18 + (s.stats.milites - 45) / 100 + (s.stats.virtus - 50) / 400 + (s.rank >= R.dux ? 0.1 : 0) + s.plot * 0.04, 0.05, 0.8);
+  return clamp(0.14 + (s.stats.milites - 55) / 100 + (s.stats.virtus - 55) / 400 + (s.rank >= R.dux ? 0.1 : 0) + s.plot * 0.04, 0.04, 0.6);
 }
 
 CARDS.accession = {
@@ -700,7 +709,7 @@ CARDS.accession = {
           return log(s2, `You swear to ${emperorIn(s2.year).name} and pocket ${got} denarii.`);
         },
       }];
-      if (s.rank >= R.legionis && s.stats.milites >= 45) {
+      if (s.rank >= R.legionis && s.stats.milites >= 55) {
         list.push({ label: 'Let your men hail you instead', hint: 'treason', act(s2) { next(s2, 'acclaim'); return log(s2, 'You let it be known you would not refuse.'); } });
       }
       return list;
@@ -1088,7 +1097,7 @@ const EVENTS = [
     title: 'A plot',
     text: 'Your freedman hands you a list of names: officers of your own guard who are planning to kill you.',
     choices: [
-      { label: 'Execute them all', hint: 'gratia −, safer', act(s) { gain(s, 'gratia', -6); gain(s, 'milites', -4); return log(s, 'The list is shorter now, and so is your list of friends.'); } },
+      { label: 'Execute them all', hint: 'gratia −, safer', act(s) { gain(s, 'gratia', -6); gain(s, 'milites', -3); return log(s, 'The list is shorter now, and so is your list of friends.'); } },
       { label: 'Pay them off', hint: '800 denarii', act(s) { cash(s, -800); gain(s, 'milites', 5); return log(s, 'Gold buys loyalty, for a while.'); } },
       { label: 'Ignore it', act(s, r) { if (r() < 0.35) return die(s, `Murdered by his own guard after ${reignWords(s)} as emperor`); return log(s, 'Nothing happens. Perhaps the list was false.'); } },
     ],
@@ -1143,13 +1152,17 @@ function endHalf(s, r) {
   s.inRank++;
   if (s.rank === R.imperator) {
     s.reign++;
-    const risk = clamp(0.13 - s.stats.milites / 900 - s.stats.gratia / 1400 - (s.year > 284 ? 0.03 : 0), 0.02, 0.2);
+    const risk = clamp(0.17 - s.stats.milites / 1000 - s.stats.gratia / 1500 - (s.year > 284 ? 0.03 : 0), 0.05, 0.22);
     if (r() < risk) return die(s, pick(r, ['Murdered by the Praetorians', 'Killed by his own soldiers', 'Murdered by his officers']) + ` after ${reignWords(s)} as emperor`);
   }
   s.half = 1 - s.half;
   if (s.half === 0) {
     s.year++;
     s.age++;
+    // Patrons die or forget, men are discharged and replaced, and age slows everyone.
+    gain(s, 'gratia', -2);
+    if (officer(s)) gain(s, 'milites', -3);
+    if (s.age > 48) gain(s, 'virtus', -2);
     if (s.age >= 48 && r() < (s.age - 47) * 0.012) return die(s, `Died of old age${s.rank === R.imperator ? ' on the throne' : ''}`);
     if (s.age >= 70 && s.rank !== R.imperator) {
       s.ending = 'discharged';

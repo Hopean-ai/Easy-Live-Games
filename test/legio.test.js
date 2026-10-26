@@ -72,7 +72,7 @@ test('promotion boards weigh merit, a patron\'s letter and the clock', () => {
   s.stats.virtus = 70;
   assert.ok(promotionChance(s, RANK.centurio, 0) > plain);
   // Before Gallienus, senators commanded the legions.
-  s.stats = { virtus: 80, gratia: 80, litterae: 80, milites: 0 };
+  s.stats = { virtus: 60, gratia: 60, litterae: 60, milites: 0 };
   s.year = 250;
   const early = promotionChance(s, RANK.legionis, 0);
   s.year = 265;
