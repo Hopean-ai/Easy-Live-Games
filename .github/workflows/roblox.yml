@@ -36,6 +36,7 @@ jobs:
         run: |
           lune run tests/syntax
           lune run tests/run
+          (cd .. && npm ci)
           node ../scripts/roblox-fixture.mjs > tests/fixture.json
           lune run tests/screens
           lune run tests/driftmail
