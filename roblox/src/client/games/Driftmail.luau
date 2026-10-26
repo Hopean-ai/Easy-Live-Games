@@ -683,7 +683,7 @@ return function(hub: any)
 		table.insert(f.answers, a)
 		f.round += 1
 		f.pull = nil
-		say("…", false)
+		say(if a == "none" then "Too slow! The line strains…" else "You hold on…", false)
 		task.delay(0.5, nextPull)
 	end
 
@@ -765,8 +765,23 @@ return function(hub: any)
 		local f = ui.fishing
 		if f then
 			-- The minigame: watch the float, strike on the real bite, then answer each pull.
-			local box = make("Frame", { BackgroundColor3 = SEA, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = col, LayoutOrder = 2 }, { corner(8), pad(10) })
+			-- It sits at the top of the tab, with the float drawn right above the buttons, so the
+			-- float and the controls are always on screen together.
+			local box = make("Frame", { BackgroundColor3 = SEA, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = col, LayoutOrder = 0 }, { corner(8), pad(10) })
 			local bc = column({ Parent = box }, 8)
+			local water = make("Frame", { Name = "FloatView", BackgroundColor3 = Color3.fromHex("#1d4e6b"), Size = UDim2.new(1, 0, 0, 90), ClipsDescendants = true, Parent = bc, LayoutOrder = 0 }, { corner(6) })
+			local dx, dy, size = 0, 0, 16
+			if f.phase == "wait" and f.dipping then
+				local deep = f.dips > f.line.nibbles
+				dy, size = if deep then 18 else 8, if deep then 6 else 12
+				make("Frame", { Name = "Ring", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, dy), Size = UDim2.fromOffset(if deep then 52 else 30, if deep then 52 else 30), BackgroundTransparency = 1, Parent = water }, { corner(30), make("UIStroke", { Color = Color3.new(1, 1, 1), Transparency = 0.3, Thickness = 2 }) })
+			elseif f.phase == "fight" and f.pull then
+				dx = if f.pull == "left" then -90 elseif f.pull == "right" then 90 else 0
+				dy, size = if f.pull == "away" then 20 else 0, if f.pull == "away" then 6 else 12
+				local wake = if f.pull == "left" then "≫≫" elseif f.pull == "right" then "≪≪" else "◎"
+				make("TextLabel", { Name = "Wake", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, dx + (if f.pull == "left" then 36 elseif f.pull == "right" then -36 else 0), 0.5, dy), Size = UDim2.fromOffset(60, 30), BackgroundTransparency = 1, Text = wake, TextColor3 = Color3.new(1, 1, 1), TextTransparency = 0.3, TextScaled = true, Parent = water })
+			end
+			make("Frame", { Name = "Float", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, dx, 0.5, dy), Size = UDim2.fromOffset(size, size), BackgroundColor3 = Color3.fromHex("#e04a3a"), Parent = water }, { corner(size) })
 			label(f.say, { TextColor3 = if f.urgent then WARN else Color3.fromHex("#d9eef7"), Font = Enum.Font.GothamBold, Parent = bc, LayoutOrder = 1 })
 			if f.phase == "wait" then
 				button("Strike!", function()
@@ -781,7 +796,7 @@ return function(hub: any)
 				end
 			end
 		else
-			small(if kit.casts < 1 then "The fish have gone quiet. Try again next tide." else "Read the water, then pick where to cast:", { Parent = col, LayoutOrder = 2 })
+			small(if kit.casts < 1 then "The fish have gone quiet. Try again next tide." else "Casts left this tide: " .. kit.casts .. ". Read the water, then pick where to cast:", { Parent = col, LayoutOrder = 2 })
 			for i, sp in kit.spots or {} do
 				button(sp.name .. "\n" .. sp.sign, function()
 					if kit.casts >= 1 then

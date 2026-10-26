@@ -408,8 +408,10 @@ export function slack(abilities = []) {
   return abilities.includes('knots') ? 2 : 1;
 }
 
+// Casts a tide: four, and two more with Fisher's knots.
+export const CASTS = 4;
 export function castsPerTide(abilities = []) {
-  return abilities.includes('knots') ? 2 : 1;
+  return CASTS + (abilities.includes('knots') ? 2 : 0);
 }
 
 export function cast({ t, rand, hook = false, abilities = [], bait = false, spot = null }) {
@@ -470,7 +472,7 @@ export const ABILITIES = {
   hands: { name: 'Reading hands', words: 'You can tell when two letters on your shelf were written by the same hand.' },
   signs: { name: 'Sea signs', words: 'You can read what the sea is about to do, two island days ahead.' },
   currents: { name: 'Reading the current', words: 'You can judge where each of your bottles came to rest.' },
-  knots: { name: "Fisher's knots", words: 'Your line holds better: more bites, and two casts a tide.' },
+  knots: { name: "Fisher's knots", words: 'Your line holds better: more bites, and two more casts a tide.' },
   kiln: { name: 'Kiln craft', words: 'With a kiln you can fire jars, and weight a bottle to ride the deep current.' },
   carving: { name: 'Seal carving', words: 'At the seal bench you can carve a stamp of your own, and copy one you have seen often.' },
   restore: { name: 'Ink restoration', words: 'You can read the words water has blurred.' },

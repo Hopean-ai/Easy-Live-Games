@@ -498,25 +498,15 @@ function drawRocks(wl) {
   const k = (performance.now() - casting) / 1000;
   if (fishing || (casting && k < 6)) {
     const [ox, oy] = SPOT_AT[fishing?.spot] ?? [70, 14];
-    let fx = rx + ox;
-    let fy = ry + oy + Math.sin(k * 3) * 2;
-    let r = 4;
-    const now = performance.now();
-    if (fishing?.dipUntil > now) {
-      // A nibble tugs the float down a little; the real bite pulls it right under.
-      fy += fishing.deep ? 6 : 3;
-      r = fishing.deep ? 1.5 : 3;
+    const pose = floatPose(k);
+    const fx = rx + ox + pose.dx;
+    const fy = ry + oy + pose.dy;
+    const r = pose.r;
+    if (pose.ring) {
       ctx.strokeStyle = 'rgba(255,255,255,0.6)';
       ctx.beginPath();
-      ctx.arc(fx, fy, fishing.deep ? 10 + ((now / 60) % 6) : 6, 0, Math.PI * 2);
+      ctx.arc(fx, fy, pose.ring, 0, Math.PI * 2);
       ctx.stroke();
-    }
-    if (fishing?.phase === 'fight') {
-      // The fish runs, and the line goes with it.
-      const pull = fishing.pull;
-      fx += pull === 'left' ? -40 : pull === 'right' ? 40 : 0;
-      fy += pull === 'away' ? -10 : 0;
-      r = pull === 'away' ? 1.5 : 3;
     }
     ctx.strokeStyle = 'rgba(240,240,240,0.7)';
     ctx.lineWidth = 1;
@@ -529,6 +519,79 @@ function drawRocks(wl) {
     ctx.arc(fx, fy, r, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+// How the float sits right now, as an offset from where it landed: bobbing while it waits, tugged
+// down by a nibble, pulled right under by the bite, dragged along by each run in the fight.
+function floatPose(k) {
+  const now = performance.now();
+  const pose = { dx: 0, dy: Math.sin(k * 3) * 2, r: 4, ring: 0 };
+  if (fishing?.dipUntil > now) {
+    pose.dy += fishing.deep ? 6 : 3;
+    pose.r = fishing.deep ? 1.5 : 3;
+    pose.ring = fishing.deep ? 10 + ((now / 60) % 6) : 6;
+  }
+  if (fishing?.phase === 'fight') {
+    const pull = fishing.pull;
+    pose.dx = pull === 'left' ? -40 : pull === 'right' ? 40 : 0;
+    pose.dy += pull === 'away' ? -10 : 0;
+    pose.r = pull === 'away' ? 1.5 : 3;
+  }
+  return pose;
+}
+
+// The same float, close up, right above the fishing buttons, so you never have to scroll
+// between watching it and striking.
+function drawFloatView() {
+  const view = $('float-view');
+  if (!fishing || $('line').hidden) return;
+  const c = view.getContext('2d');
+  const w = view.width;
+  const h = view.height;
+  const k = (performance.now() - casting) / 1000;
+  c.fillStyle = '#1d4e6b';
+  c.fillRect(0, 0, w, h);
+  c.strokeStyle = 'rgba(255,255,255,0.12)';
+  c.lineWidth = 2;
+  for (let y = 18; y < h; y += 22) {
+    c.beginPath();
+    for (let x = 0; x <= w; x += 8) c.lineTo(x, y + Math.sin(x / 30 + k * 1.5 + y) * 3);
+    c.stroke();
+  }
+  const pose = floatPose(k);
+  const s = 2.2;
+  const fx = w / 2 + pose.dx * s;
+  const fy = h / 2 + pose.dy * s;
+  if (pose.ring) {
+    c.strokeStyle = 'rgba(255,255,255,0.7)';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(fx, fy, pose.ring * s, 0, Math.PI * 2);
+    c.stroke();
+  }
+  if (fishing.phase === 'fight' && fishing.pull) {
+    // A wake behind the float shows which way it runs.
+    c.strokeStyle = 'rgba(255,255,255,0.5)';
+    c.beginPath();
+    const back = fishing.pull === 'left' ? 1 : fishing.pull === 'right' ? -1 : 0;
+    if (back) for (const off of [-6, 6]) { c.moveTo(fx + back * 10, fy + off); c.lineTo(fx + back * 50, fy + off * 2.5); }
+    else c.arc(fx, fy, 14 + ((performance.now() / 50) % 10), 0, Math.PI * 2);
+    c.stroke();
+  }
+  c.strokeStyle = 'rgba(240,240,240,0.8)';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(w / 2, h);
+  c.quadraticCurveTo(w / 2, fy + 20, fx, fy);
+  c.stroke();
+  c.fillStyle = '#e04a3a';
+  c.beginPath();
+  c.arc(fx, fy, pose.r * s, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#f4f1e8';
+  c.beginPath();
+  c.arc(fx, fy - pose.r * s * 0.4, pose.r * s * 0.45, 0, Math.PI * 2);
+  c.fill();
 }
 
 // Where the float sits for each spot, from the rocks.
@@ -1324,8 +1387,8 @@ $('compose-form').addEventListener('submit', async (e) => {
 // The server has already decided what's down there and how it fights; this plays it out and
 // sends back when you struck and how you answered.
 const NIBBLE_MS = 450;
-const BITE_MS = 900;
-const PULL_MS = 2200;
+const BITE_MS = 1300;
+const PULL_MS = 2600;
 const PULL_WORDS = { left: 'It runs hard to the left!', right: 'It runs hard to the right!', away: 'It dives for the deep water!' };
 
 async function castAt(spot) {
@@ -1344,6 +1407,7 @@ async function castAt(spot) {
   fishing = { spot, line: s.line, phase: 'wait', dips: 0, struck: null, answers: [], timers: [] };
   showLine('The float settles on the water. Watch it…', 'wait');
   render();
+  $('line').scrollIntoView({ block: 'center', behavior: 'smooth' });
   if (!s.line.bite) {
     later(4000 + Math.random() * 2500, () => endFishing('Nothing so much as nibbles here. You reel the line back in.'));
     return;
@@ -1384,6 +1448,7 @@ function strike() {
     return;
   }
   fishing.phase = 'fight';
+  fishing.dipUntil = 0;
   fishing.round = 0;
   showLine('Hooked! Hold on…', 'urgent');
   nextPull();
@@ -1408,7 +1473,8 @@ function answer(a) {
   fishing.answers.push(a);
   fishing.round++;
   fishing.pull = null;
-  for (const id of ['lean-left', 'give-line', 'lean-right']) $(id).disabled = true;
+  // Say so between pulls, so two runs the same way read as two pulls, not one.
+  showLine(a ? 'You hold on…' : 'Too slow! The line strains…', 'hold');
   later(500, nextPull);
 }
 
@@ -1638,6 +1704,7 @@ function cap(s) {
 
 function loop() {
   draw();
+  drawFloatView();
   requestAnimationFrame(loop);
 }
 

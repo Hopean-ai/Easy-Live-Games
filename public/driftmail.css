@@ -100,6 +100,7 @@ input[type="range"] { padding: 0; }
 .dm-spots button { width: 100%; text-align: left; padding: 6px 8px; font-size: 0.85rem; }
 .dm-spots .sign { display: block; color: var(--muted); font-size: 0.75rem; font-weight: normal; }
 .dm-line { margin: 8px 0; padding: 10px; border-radius: 8px; background: #20303a; color: #d9eef7; }
+#float-view { width: 100%; height: auto; display: block; margin-bottom: 8px; border-radius: 6px; background: #1d4e6b; }
 .dm-line-say { margin: 0 0 8px; min-height: 2.6em; }
 .dm-line-say.urgent { color: #f0c674; font-weight: 600; }
 .dm-line-buttons { gap: 6px; flex-wrap: wrap; }
