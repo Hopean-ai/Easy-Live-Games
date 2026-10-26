@@ -19,7 +19,7 @@ The hub's routes on the website (`src/router.js`), all `POST` with the key:
 | `/api/roblox/<game>/<room>` | A room: ops `join`, `leave`, `act`, `poll`, answered by the room's `roblox(body)` method. |
 | `/api/roblox/match/<game>` | Quick match, in the same queue as web players. |
 | `/api/roblox/link` | The account link, shared by every game. |
-| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, answered with the player's view (`src/driftmail/roblox.js`). |
+| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, and the island actions (`gather`, `build`, `make`, `plant`, `water`, `harvest`, `seal`, `spear`, `trap`, `traps`, `snag`, `mark`, `burn`, `pass`), answered with the player's view (`src/driftmail/roblox.js`). |
 
 ## The code
 
@@ -47,9 +47,11 @@ Driftmail has no rooms, quick match or waiting room: its entry in `src/games.js`
 
 Driftmail is all player-written text, and Roblox requires every bit of it a game shows to go through its filter, whoever wrote it. So:
 
-- A letter written on Roblox is filtered (`Filter.outgoing`, for everyone) before it leaves for the website; if the filter can't be reached, the letter isn't sent.
-- The website never puts player text in the view itself. Letters, signatures and excerpts arrive in `texts`, by keys that always name the same text (`l<id>` for a letter, `n<id>` for its signature, and so on), and the server filters each one for the player reading it (`Filter.incoming`), once, remembering the result. The view refers to them by key.
-- Everything else (the clock, events, the old journal pages, curios) is the game's own words.
+- A letter written on Roblox, or a line added to a letter thrown on, is filtered (`Filter.outgoing`, for everyone) before it leaves for the website; if the filter can't be reached, it isn't sent.
+- The website never puts player text in the view itself. Letters, signatures and excerpts arrive in `texts`, by keys that always name the same text (`l<id>` for a letter, `n<id>` for its signature, `a<id>` for a line added to it, `w<hash>` for a writer's name on the chart or a map, and so on), and the server filters each one for the player reading it (`Filter.incoming`), once, remembering the result. The view refers to them by key.
+- Everything else (the clock, events, the old journal pages, curios, clues) is the game's own words.
+- Drawings sent in bottles are players' pictures, which the filter can't check, so the Roblox screens only say one is there; they're shown on the website.
+- The Roblox screens have Beach, Write, Island (materials, gathering, the garden), Build (blueprints, making things, your seal), Fishing, Journal (abilities, forecast, clues, your chart) and Letters tabs. Sound is website-only.
 
 Tests: `lune run tests/driftmail` draws the screens from the fixture and checks what each button sends. `tests/harness.luau` is the fake Roblox that both screen tests run the hub in.
 

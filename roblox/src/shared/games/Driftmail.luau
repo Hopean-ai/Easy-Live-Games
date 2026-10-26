@@ -21,6 +21,35 @@ Bridge.WORLD = true
 Bridge.POLL_SECONDS = 30
 
 Bridge.MAX_LETTER = 600
+Bridge.MAX_LINE = 140
+
+-- What can be gathered inland once a tide, and how a letter can be marked.
+Bridge.GATHER = { "leaves", "clay", "sand", "stones" }
+Bridge.GATHER_NAMES = { "Palm leaves", "Clay", "Sand", "Stones" }
+Bridge.MARKS = { "kind", "useful", "rude" }
+Bridge.WAX_NAMES = { "red", "blue", "green", "violet", "amber", "black", "rose" }
+
+Bridge.MATERIAL_NAMES = {
+	driftwood = "Driftwood", rope = "Rope", clay = "Clay", sand = "Sand", stones = "Stones", leaves = "Palm leaves", reeds = "Reeds",
+	berries = "Berries", bark = "Bark", wax = "Wax", oil = "Fish oil", scales = "Fish scales", jars = "Jars", shimmer = "Shimmering ink",
+	traps = "Traps", bottles = "Bottles", corks = "Corks", paper = "Paper", ink = "Ink", fish = "Fish", bones = "Bones", glue = "Fish glue",
+}
+
+-- "4 driftwood, 2 rope", from a cost table, in a fixed order.
+function Bridge.costWords(cost: { [string]: number }?): string
+	local parts = {}
+	for k, n in cost or {} do
+		table.insert(parts, { k = k, text = n .. " " .. string.lower(Bridge.MATERIAL_NAMES[k] or k) })
+	end
+	table.sort(parts, function(a, b)
+		return a.k < b.k
+	end)
+	local out = {}
+	for _, p in parts do
+		table.insert(out, p.text)
+	end
+	return table.concat(out, ", ")
+end
 
 -- Compass points, clockwise from north, as the website numbers them.
 Bridge.DIRS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
@@ -32,6 +61,11 @@ Bridge.STRENGTHS = { { name = "Gently", value = 0.3 }, { name = "Firmly", value 
 -- Room games forward moves with cleanMessage; Driftmail has none.
 function Bridge.cleanMessage(_msg: any): any?
 	return nil
+end
+
+-- A short id from the website's tables (a building, a recipe, a crop, a material).
+local function word(v: any): boolean
+	return type(v) == "string" and #v > 0 and #v <= 24 and v:match("^%a+$") ~= nil
 end
 
 local function int(v: any, lo: number, hi: number): number?
@@ -48,8 +82,45 @@ function Bridge.cleanWorld(arg: any): { [string]: any }?
 		return nil
 	end
 	local op = arg.op
-	if op == "state" or op == "fish" then
+	if op == "state" or op == "water" or op == "spear" or op == "trap" or op == "traps" then
 		return { op = op }
+	elseif op == "fish" then
+		return { op = op, bait = arg.bait == true }
+	elseif op == "gather" then
+		return if table.find(Bridge.GATHER, arg.what) then { op = op, what = arg.what } else nil
+	elseif op == "build" or op == "make" then
+		if not word(arg.what) then
+			return nil
+		end
+		local pattern = if arg.pattern == nil then nil else int(arg.pattern, 0, 31)
+		if arg.pattern ~= nil and pattern == nil then
+			return nil
+		end
+		return { op = op, what = arg.what, pattern = pattern }
+	elseif op == "plant" then
+		local plot = int(arg.plot, 0, 3)
+		return if plot and word(arg.crop) then { op = op, plot = plot, crop = arg.crop } else nil
+	elseif op == "harvest" then
+		local plot = int(arg.plot, 0, 3)
+		return if plot then { op = op, plot = plot } else nil
+	elseif op == "seal" then
+		local glyph, wax = int(arg.glyph, 0, #Bridge.GLYPHS - 1), int(arg.wax, 0, #Bridge.WAX - 1)
+		return if glyph and wax then { op = op, glyph = glyph, wax = wax } else nil
+	elseif op == "snag" then
+		return { op = op, keep = arg.keep == true }
+	elseif op == "mark" then
+		local id = int(arg.id, 1, 2 ^ 52)
+		return if id and table.find(Bridge.MARKS, arg.mark) then { op = op, id = id, mark = arg.mark } else nil
+	elseif op == "burn" then
+		local id = int(arg.id, 1, 2 ^ 52)
+		return if id then { op = op, id = id } else nil
+	elseif op == "pass" then
+		local id, dir = int(arg.id, 1, 2 ^ 52), int(arg.dir, 0, 7)
+		local line = if type(arg.line) == "string" then (arg.line:match("^%s*(.-)%s*$") :: string) else ""
+		if not id or not dir or utf8.len(line) == nil or (utf8.len(line) :: number) > Bridge.MAX_LINE then
+			return nil
+		end
+		return { op = op, id = id, dir = dir, line = line, strength = 0.6 }
 	elseif op == "open" then
 		local id = int(arg.id, 1, 2 ^ 52)
 		return if id then { op = op, id = id } else nil
@@ -77,9 +148,42 @@ function Bridge.cleanWorld(arg: any): { [string]: any }?
 		if arg.replyTo ~= nil and replyTo == nil then
 			return nil
 		end
+		local kind = arg.kind or "bottle"
+		if not word(kind) then
+			return nil
+		end
+		local items = {}
+		for i, it in (if type(arg.items) == "table" then arg.items else {}) do
+			if i > 20 or type(it) ~= "table" then
+				return nil
+			end
+			if it.kind == "curio" and int(it.index, 0, 999) then
+				table.insert(items, { kind = "curio", index = it.index })
+			elseif it.kind == "seeds" and word(it.crop) then
+				table.insert(items, { kind = "seeds", crop = it.crop })
+			elseif it.kind == "map" then
+				table.insert(items, { kind = "map" })
+			elseif it.kind == "materials" and type(it.what) == "table" then
+				local what = {}
+				for k, n in it.what do
+					if not word(k) or not int(n, 1, 50) then
+						return nil
+					end
+					what[k] = n
+				end
+				table.insert(items, { kind = "materials", what = what })
+			else
+				return nil
+			end
+		end
+		local forge = if arg.forge == nil then nil else int(arg.forge, 1, 2 ^ 52)
+		if arg.forge ~= nil and forge == nil then
+			return nil
+		end
 		return {
 			op = op, text = text, dir = dir, strength = strength, signed = arg.signed == true,
-			glue = arg.glue == true, page = page, replyTo = replyTo,
+			glue = arg.glue == true, page = page, replyTo = replyTo, kind = kind, items = items,
+			wax = arg.wax == true, stamp = arg.stamp == true, shimmer = arg.shimmer == true, forge = forge,
 		}
 	end
 	return nil

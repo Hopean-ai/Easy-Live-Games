@@ -817,3 +817,31 @@ test('the Roblox view keeps every word players wrote in texts, by keys that name
   assert.equal(thrown.texts[thrown.sent[0].text], 'Back at you.');
   assert.equal(robloxView(await o.visit('roblox:42')).sent[0].text, thrown.sent[0].text, 'the same key every time');
 });
+
+test('the Roblox view keeps new player words (chart names, added lines) in texts, and leaves drawings out', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
+  await o.throwBottle('alice', { text: 'With a picture.', signed: true, dir: 0, strength: 0.5, items: [{ kind: 'drawing', data: 'ab'.repeat(48) }] });
+  await deliver(o);
+  let v = await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
+  const letter = v.beach.find((b) => !b.old && !b.strange);
+  v = await robloxWorld(o, { op: 'open', userId: '42', name: 'Ray', id: letter.id });
+  const l = v.shelf.find((x) => x.id === letter.id);
+  assert.deepEqual(l.items, [{ kind: 'drawing' }]);
+  assert.equal(v.texts[v.chart[0].name], 'alice');
+  const gathered = await robloxWorld(o, { op: 'gather', userId: '42', name: 'Ray', what: 'clay' });
+  assert.equal(gathered.done, 'clay');
+  assert.ok(gathered.materials.clay >= 2);
+  const passed = await robloxWorld(o, { op: 'pass', userId: '42', name: 'Ray', id: letter.id, line: 'Ray read this too.', dir: 2, strength: 0.5 });
+  assert.equal(passed.error, undefined);
+  await deliver(o);
+  let a = await o.visit('alice');
+  a = await o.openBottle('alice', a.beach.find((b) => !b.old && !b.strange).id);
+  const back = robloxView(a);
+  const added = back.shelf.find((x) => x.added);
+  assert.equal(back.texts[added.added.text], 'Ray read this too.');
+  const { texts, ...rest } = back;
+  assert.ok(!JSON.stringify(rest).includes('Ray read this'));
+  assert.ok(!JSON.stringify(rest).includes('With a picture'));
+});

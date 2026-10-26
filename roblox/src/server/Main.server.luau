@@ -204,12 +204,15 @@ local function world(player: Player, gameId: string, arg: any)
 	if not body then
 		return { error = "That could not be sent." }
 	end
-	if body.text then
-		local filtered = Filter.outgoing(player, body.text)
-		if not filtered then
-			return { error = "Your letter could not be checked just now. Try again in a moment." }
+	-- A letter, or the line added to a letter thrown on.
+	for _, field in { "text", "line" } do
+		if type(body[field]) == "string" and body[field] ~= "" then
+			local filtered = Filter.outgoing(player, body[field])
+			if not filtered then
+				return { error = "Your letter could not be checked just now. Try again in a moment." }
+			end
+			body[field] = filtered
 		end
-		body.text = filtered
 	end
 	body.userId = tostring(player.UserId)
 	body.name = player.DisplayName
