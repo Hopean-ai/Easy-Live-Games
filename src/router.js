@@ -79,7 +79,7 @@ export async function handleRequest(request, env) {
   }
 
   // Driftmail (src/driftmail/ocean.js): one shared ocean, played as your account.
-  const driftmail = path.match(/^\/api\/driftmail\/(state|throw|open)$/);
+  const driftmail = path.match(/^\/api\/driftmail\/(state|throw|open|fish|craft)$/);
   if (driftmail) {
     const name = await accountName(request, env);
     if (!name) return Response.json({ error: 'Sign in to play Driftmail.' }, { status: 401 });
@@ -88,7 +88,11 @@ export async function handleRequest(request, env) {
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     const body = await readJson(request, MAX_LETTER_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
-    const result = driftmail[1] === 'throw' ? await ocean.throwBottle(name, body) : await ocean.openBottle(name, body.id);
+    const op = driftmail[1];
+    const result = op === 'throw' ? await ocean.throwBottle(name, body)
+      : op === 'open' ? await ocean.openBottle(name, body.id)
+        : op === 'fish' ? await ocean.fish(name)
+          : await ocean.craft(name, body.what);
     return Response.json(result, { status: result.error ? 400 : 200 });
   }
 

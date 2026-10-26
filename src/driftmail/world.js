@@ -55,10 +55,13 @@ export function drift({ from, dir, strength, t, rand, toward = null }) {
   const aim = Math.PI / 2 - (dir * Math.PI) / 4;
   const reach = 3 + 5 * strength;
   const cur = current(t);
-  const jitter = (rand() - 0.5) * 0.7;
+  // A storm or a spring tide carries a bottle much further; a storm throws it off course too.
+  const event = eventAt(t)?.kind;
+  const push = event === 'storm' || event === 'spring' ? 1.8 : 1;
+  const jitter = (rand() - 0.5) * (event === 'storm' ? 2.4 : 0.7);
   const spread = 0.85 + rand() * 0.3;
-  let x = from.x + Math.cos(aim) * reach + Math.cos(cur.angle + jitter) * cur.strength * spread;
-  let y = from.y + Math.sin(aim) * reach + Math.sin(cur.angle + jitter) * cur.strength * spread;
+  let x = from.x + Math.cos(aim) * reach + Math.cos(cur.angle + jitter) * cur.strength * spread * push;
+  let y = from.y + Math.sin(aim) * reach + Math.sin(cur.angle + jitter) * cur.strength * spread * push;
   if (toward) {
     const bearing = Math.atan2(toward.y - from.y, toward.x - from.x);
     const match = Math.cos(bearing - aim);
@@ -113,14 +116,18 @@ export function placeIsland(n) {
   return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
 }
 
-// What the tide leaves on the sand. Weights out of 100; null is nothing.
+// What the tide leaves on the sand. Weights out of 100; null is nothing. Wreckage brings far
+// more, old bottles among it.
 const FLOTSAM = [
-  [30, null], [15, 'bottles'], [15, 'corks'], [15, 'paper'], [10, 'ink'], [15, 'curio'],
+  [28, null], [15, 'bottles'], [15, 'corks'], [15, 'paper'], [10, 'ink'], [14, 'curio'], [3, 'old bottle'],
+];
+const WRECKAGE = [
+  [5, null], [20, 'bottles'], [20, 'corks'], [15, 'paper'], [10, 'ink'], [15, 'curio'], [15, 'old bottle'],
 ];
 
-export function flotsam(rand) {
+export function flotsam(rand, event = null) {
   let r = rand() * 100;
-  for (const [w, what] of FLOTSAM) {
+  for (const [w, what] of event === 'wreck' || event === 'storm' ? WRECKAGE : FLOTSAM) {
     if ((r -= w) < 0) return what;
   }
   return null;
@@ -160,4 +167,171 @@ export function seeded(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// --- Ocean events ---------------------------------------------------------------------------
+// Large, rare and the same for everyone: roughly one tide in fourteen brings something. Each
+// tide either has an event or doesn't, fixed by the tide's number, so the server and anyone
+// with the Sea signs ability agree on what's coming. Slight signs show up the tide before.
+
+export const EVENTS = {
+  storm: {
+    name: 'a storm', words: 'A storm is tearing across the sea. Bottles thrown now fly far and wild, and the waves throw up more than usual.',
+    signs: ['The gulls have all gone quiet.', 'A long, slow swell is rolling in from nowhere.'],
+  },
+  spring: {
+    name: 'a spring tide', words: 'A spring tide: the water runs higher and faster than any normal day. Bottles thrown now travel much further.',
+    signs: ['The moon looked very large last night.', 'The high-water line is creeping up the sand.'],
+  },
+  shoal: {
+    name: 'a great shoal', words: 'A great shoal is passing close to shore. The water is thick with fish.',
+    signs: ['Birds are diving far out to sea.', 'There is a silver shimmer under the waves.'],
+  },
+  wreck: {
+    name: 'wreckage', words: 'Wreckage is washing in from some far-off ship: planks, rope, and the odd old bottle.',
+    signs: ['There is a smell of tar on the wind.', 'Splinters of painted wood are turning up in the surf.'],
+  },
+};
+const EVENT_KINDS = Object.keys(EVENTS);
+const EVENT_CHANCE = 1 / 14;
+
+function tideRand(n, salt) {
+  return seeded(Math.imul(n, 2654435761) ^ salt);
+}
+
+// The event during tide number n (counting TIDE_MS from the epoch), or null.
+export function eventOn(n) {
+  const r = tideRand(n, 0x5eaf00d);
+  if (r() >= EVENT_CHANCE) return null;
+  return EVENT_KINDS[Math.floor(r() * EVENT_KINDS.length)];
+}
+
+export function eventAt(t) {
+  const n = Math.floor(t / TIDE_MS);
+  const kind = eventOn(n);
+  return kind ? { kind, start: n * TIDE_MS, end: (n + 1) * TIDE_MS } : null;
+}
+
+// Every event in the next `tides` tides after the current one.
+export function upcoming(t, tides) {
+  const n = Math.floor(t / TIDE_MS);
+  const out = [];
+  for (let k = n + 1; k <= n + tides; k++) {
+    const kind = eventOn(k);
+    if (kind) out.push({ kind, start: k * TIDE_MS });
+  }
+  return out;
+}
+
+// The slight sign anyone might notice: during the tide before an event, and not always.
+export function signAt(t) {
+  const n = Math.floor(t / TIDE_MS);
+  const kind = eventOn(n + 1);
+  if (!kind) return null;
+  const r = tideRand(n, 0x516e);
+  if (r() > 0.65) return null;
+  const signs = EVENTS[kind].signs;
+  return signs[Math.floor(r() * signs.length)];
+}
+
+// --- Fishing --------------------------------------------------------------------------------
+// A hand line off the rocks, once a tide (twice with Fisher's knots). Dawn, dusk and a rising
+// tide are best; a bone hook and the knots help; a shoal fills the water.
+
+export const BONE_HOOK_COST = 5; // bones
+export const GLUE_COST = 2; // fish per pot of glue
+const CATCHES = [[46, 'fish'], [14, 'big fish'], [16, 'cuttlefish'], [14, 'crab'], [6, 'old bottle'], [4, 'curio']];
+
+export function castsPerTide(abilities = []) {
+  return abilities.includes('knots') ? 2 : 1;
+}
+
+export function cast({ t, rand, hook = false, abilities = [] }) {
+  const c = clock(t);
+  const event = eventAt(t)?.kind;
+  let chance = 0.45;
+  if (c.part === 'dawn' || c.part === 'dusk') chance += 0.2;
+  if (!c.ebbing) chance += 0.1;
+  if (hook) chance += 0.15;
+  if (abilities.includes('knots')) chance += 0.1;
+  if (event === 'shoal') chance += 0.35;
+  if (event === 'storm') chance -= 0.25;
+  if (rand() >= Math.min(0.95, chance)) return null;
+  let r = rand() * 100;
+  let what = 'fish';
+  for (const [w, k] of CATCHES) {
+    if ((r -= w) < 0) {
+      what = k;
+      break;
+    }
+  }
+  return { what, double: event === 'shoal' && (what === 'fish' || what === 'big fish') };
+}
+
+// --- Journal pages and abilities ------------------------------------------------------------
+// Old bottles hold pages torn from the journals of people who were here long before. A few of
+// them teach something; a page you hold can be copied out and sent on with a letter.
+
+export const ABILITIES = {
+  hands: { name: 'Reading hands', words: 'You can tell when two letters on your shelf were written by the same hand.' },
+  signs: { name: 'Sea signs', words: 'You can read what the sea is about to do, two island days ahead.' },
+  currents: { name: 'Reading the current', words: 'You can judge where each of your bottles came to rest.' },
+  knots: { name: "Fisher's knots", words: 'Your line holds better: more bites, and two casts a tide.' },
+};
+
+// Two old writers, each with their own hand and mark.
+export const OLD_HANDS = { keeper: { hand: 913, emblem: 4 }, salt: { hand: 2207, emblem: 11 } };
+
+export const PAGES = [
+  {
+    id: 'keeper-1', by: 'keeper', title: 'The first page',
+    text: 'Day one, or near enough. The boat is gone and the water is very wide. I have counted my things: one knife, one tin cup, this book, a stub of pencil. I will write down what I learn so the next one need not learn it the hard way.',
+  },
+  {
+    id: 'keeper-hands', by: 'keeper', title: 'On hands', teaches: 'hands',
+    text: 'Three letters now from the same stranger, though only one was signed. You learn to see it: the way the tail of a y hooks back, how hard they press at the start of a line. Nobody writes the same as anyone else. Lay the letters side by side and look at the small strokes, not the big ones.',
+  },
+  {
+    id: 'keeper-signs', by: 'keeper', title: 'What the sea says first', teaches: 'signs',
+    text: 'The sea never does anything big without warning, it just warns quietly. Gulls going silent means weather. A swell with no wind behind it means a storm is coming from far off. Silver under the water means fish. Tar on the wind means a ship has broken up somewhere. Watch the edges of things and you will know a day or two ahead.',
+  },
+  {
+    id: 'keeper-tide', by: 'keeper', title: 'Tides',
+    text: 'Two tides each day here, and the days are short and strange. A bottle thrown on the ebb goes out far; thrown on the flood, it barely clears the reef. I have started throwing only when the water is leaving.',
+  },
+  {
+    id: 'salt-currents', by: 'salt', title: 'Where they go', teaches: 'currents',
+    text: 'I mark every bottle I throw: time, tide, which way. Then I wait to hear back. North at first light, east by noon, round and round like a clock hand. Once you know the clock, you can feel where a bottle will end up, near enough.',
+  },
+  {
+    id: 'salt-knots', by: 'salt', title: 'Knots', teaches: 'knots',
+    text: 'The old knot slips when a big one pulls. Loop it twice through the eye, wrap five turns back on itself, and pass the end through the first loop. Wet it before you pull it tight. With this I have not lost a hook all season.',
+  },
+  {
+    id: 'salt-hook', by: 'salt', title: 'Bone',
+    text: 'Fish bones dry hard in the sun. Save them. Five good ones, bound and shaped with the knife, make a hook that bites better than any bent nail. Two fish boiled down make a glue that seals a bottle as well as a cork does.',
+  },
+  {
+    id: 'keeper-island', by: 'keeper', title: 'Someone else',
+    text: 'A bottle came back today that was not mine. Different glass. The letter inside was in a hand I did not know, asking if anyone was out here. So there are others. I have read it eleven times.',
+  },
+  {
+    id: 'salt-storm', by: 'salt', title: 'After the storm',
+    text: 'The storm took the roof of my lean-to but the beach this morning was covered in gifts. Rope, a barrel stave, two bottles still corked. I suppose the sea gives back what it takes, only never to the same person.',
+  },
+  {
+    id: 'keeper-last', by: 'keeper', title: 'A page near the end',
+    text: 'I do not know how many years now. I have written to more people than I ever spoke to before the boat. If this reaches you, write to someone. It does not matter who. That is the whole trick of this place.',
+  },
+];
+
+export function page(id) {
+  return PAGES.find((p) => p.id === id) ?? null;
+}
+
+// An old bottle holds a page you haven't read yet, while there are any.
+export function oldPage(rand, read = []) {
+  const unread = PAGES.filter((p) => !read.includes(p.id));
+  const pool = unread.length ? unread : PAGES;
+  return pool[Math.floor(rand() * pool.length)];
 }

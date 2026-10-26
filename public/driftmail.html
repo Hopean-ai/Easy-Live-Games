@@ -18,6 +18,7 @@
         <p class="small"><a href="/">All games</a></p>
         <h1>Driftmail</h1>
         <p class="sub" id="time">The tide is turning…</p>
+        <p class="dm-sea" id="sea" hidden></p>
       </div>
       <button id="write">Write a letter</button>
     </header>
@@ -42,6 +43,23 @@
           <p class="small">A letter takes a bottle, a cork, a sheet of paper and some ink. Every bottle you open leaves you its glass and cork, and each tide may wash something new up.</p>
         </section>
         <section class="dm-panel">
+          <h2>Fishing</h2>
+          <ul id="catch" class="dm-supplies"></ul>
+          <div class="row dm-buttons">
+            <button id="fish">Cast a line</button>
+            <button id="make-hook" class="secondary"></button>
+            <button id="make-glue" class="secondary"></button>
+          </div>
+          <p id="fish-note" class="small"></p>
+        </section>
+        <section class="dm-panel">
+          <h2>Journal</h2>
+          <ul id="abilities" class="dm-list"></ul>
+          <ul id="forecast" class="dm-list" hidden></ul>
+          <ul id="journal" class="dm-list"></ul>
+          <p id="journal-empty" class="small">Old bottles sometimes hold pages from journals kept here long ago. Some teach you things.</p>
+        </section>
+        <section class="dm-panel">
           <h2>Letters you've found</h2>
           <ul id="shelf" class="dm-list"></ul>
           <p id="shelf-empty" class="small">Nothing yet. Watch the wet sand as the tide goes out.</p>
@@ -63,6 +81,9 @@
         <p>Where a bottle goes depends on which way you throw it, how hard, the time of day and the tide. The current runs north at dawn, east at midday, south at dusk and west at night, and an outgoing tide carries a bottle much further than an incoming one. Most bottles reach islands near yours.</p>
         <p>A bottle washes up on the beach facing where it came from. To answer one, throw your reply back the way it came: aimed well, it may find its way home.</p>
         <p>Signing a letter is up to you. Even unsigned, a letter is in its writer's own hand and carries their mark in the wax, so you may come to recognise someone without ever learning their name.</p>
+        <p>Now and then the whole sea changes for a tide: a storm, a spring tide, a shoal of fish, or wreckage from some far-off ship. The sea gives slight signs the tide before, if you're watching.</p>
+        <p>You can fish once a tide. Dawn, dusk and a rising tide are best. Fish bones make a hook, and fish boil down into a glue that seals a bottle in place of a cork.</p>
+        <p>Old bottles hold pages from the journals of people who were here before you. Some teach you something. You can copy a page out and send it on with a letter, for the cost of another sheet and more ink.</p>
         <p>A few islands in the middle of the ocean are kept by Claude. Their wax carries a faint wave mark, so you can always tell.</p>
         <p>An island day lasts five hours, so you'll see dawn and dusk at different times of your own day.</p>
       </details>
@@ -75,6 +96,10 @@
       <textarea id="letter" class="dm-paper" maxlength="600" rows="9" placeholder="Write to whoever finds this…" required></textarea>
       <p class="small"><span id="count">0</span> / 600</p>
       <label class="dm-check"><input type="checkbox" id="signed"> Sign it with my name</label>
+      <label class="dm-check" id="glue-row" hidden><input type="checkbox" id="glue"> Seal it with fish glue instead of a cork</label>
+      <label id="page-row" hidden>Fold in a copy of a journal page
+        <select id="page"></select>
+      </label>
       <fieldset class="dm-throw">
         <legend>Which way do you throw it?</legend>
         <div id="compass" class="dm-compass"></div>
@@ -95,6 +120,8 @@
     <div class="stack">
       <p id="read-note" class="small"></p>
       <article id="read-paper" class="dm-paper dm-letter"></article>
+      <article id="read-page" class="dm-paper dm-letter dm-page" hidden></article>
+      <p id="read-learned" class="dm-found" hidden></p>
       <div class="row">
         <button id="reply">Write back</button>
         <button id="close-reader" class="secondary">Put it on the shelf</button>
