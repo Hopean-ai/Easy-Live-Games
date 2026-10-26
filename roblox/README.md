@@ -1,6 +1,6 @@
 # The Roblox hub
 
-One Roblox place where people play the website's games in the same rooms as players in a browser. It opens on a game picker, with the player's account link and a Rejoin button for each of their games in progress; picking a game opens its lobby (quick match, a new room, or a room code), its waiting room, and then that game's own screens. Every website game except Pong is on Roblox; today that is CFO.
+One Roblox place where people play the website's games in the same rooms as players in a browser. It opens on a game picker, with the player's account link and a Rejoin button for each of their games in progress; picking a game opens its lobby (quick match, a new room, or a room code), its waiting room, and then that game's own screens. Every website game except Pong is on Roblox: CFO, and Driftmail, which is one shared ocean rather than rooms, so picking it opens its screens straight away.
 
 The website stays in charge of every game: the Roblox game server only relays. It joins its players to a room, forwards their moves, and asks the website for changes every two seconds.
 
@@ -19,12 +19,13 @@ The hub's routes on the website (`src/router.js`), all `POST` with the key:
 | `/api/roblox/<game>/<room>` | A room: ops `join`, `leave`, `act`, `poll`, answered by the room's `roblox(body)` method. |
 | `/api/roblox/match/<game>` | Quick match, in the same queue as web players. |
 | `/api/roblox/link` | The account link, shared by every game. |
+| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, answered with the player's view (`src/driftmail/roblox.js`). |
 
 ## The code
 
 - `src/shared/Hub.luau`: what every game has in common (poll interval, the update check, room codes, the picker and Rejoin lists, the queue line).
 - `src/shared/games/<Name>.luau`: one per game: its website `ID`, the bridge version it understands (`SUPPORTED`) and `cleanMessage`, which the server uses to check a move before forwarding it.
-- `src/server`: the relay, written once for every game; rooms are kept per game and room code.
+- `src/server`: the relay, written once for every game; rooms are kept per game and room code. `Filter.luau` runs player-written text through Roblox's `TextService`.
 - `src/client/Main.client.luau`: the picker, the account link, each game's lobby and waiting room.
 - `src/client/Ui.luau`: the colours and the small screen builders every game draws with.
 - `src/client/games/<Name>.luau`: one per game: its screens once the game is on. It returns a function that is handed the hub (state, the server calls, the Ui) and gives back `render(view)`, `reset()` and optionally `onView(before, after)`.
@@ -39,6 +40,18 @@ The hub finds games by these folders, so nothing else lists them.
 4. Add a screen test for it next to `tests/screens.luau`.
 
 The game's card then shows in the hub's picker, its rooms show in the Rejoin list, and the website's game list marks it "Also on Roblox". A game that needs its own 3D world could later get its own place, reached by teleport from the hub; nothing needs it yet.
+
+## Driftmail: one shared ocean, and the text filter
+
+Driftmail has no rooms, quick match or waiting room: its entry in `src/games.js` has `world` set, the picker shows it with `world = true`, and the hub calls its screens' `render` as soon as it is picked. The screens send `world` requests (`Bridge.cleanWorld` in `src/shared/games/Driftmail.luau` checks each one), which the server forwards to `POST /api/roblox/world/driftmail` as the player. A linked player plays their account's island; anyone else gets an island of their own, keyed by Roblox user id and signed with their Roblox display name. The screens ask again every 30 seconds while open.
+
+Driftmail is all player-written text, and Roblox requires every bit of it a game shows to go through its filter, whoever wrote it. So:
+
+- A letter written on Roblox is filtered (`Filter.outgoing`, for everyone) before it leaves for the website; if the filter can't be reached, the letter isn't sent.
+- The website never puts player text in the view itself. Letters, signatures and excerpts arrive in `texts`, by keys that always name the same text (`l<id>` for a letter, `n<id>` for its signature, and so on), and the server filters each one for the player reading it (`Filter.incoming`), once, remembering the result. The view refers to them by key.
+- Everything else (the clock, events, the old journal pages, curios) is the game's own words.
+
+Tests: `lune run tests/driftmail` draws the screens from the fixture and checks what each button sends. `tests/harness.luau` is the fake Roblox that both screen tests run the hub in.
 
 ## CFO: why web changes don't need Roblox changes
 
@@ -99,7 +112,8 @@ cd roblox
 lune run tests/syntax        # every file compiles
 lune run tests/run           # the shared helpers
 node ../scripts/roblox-fixture.mjs > tests/fixture.json
-lune run tests/screens       # draws the screens from what the website sends today
+lune run tests/screens       # draws the CFO screens from what the website sends today
+lune run tests/driftmail     # and the Driftmail ones
 rojo build -o hub.rbxl       # the place file the workflow publishes
 ```
 

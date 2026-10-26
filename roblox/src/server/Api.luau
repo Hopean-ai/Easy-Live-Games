@@ -67,6 +67,12 @@ function Api.room(gameId: string, code: string, body: { [string]: any }): (any?,
 	return request("POST", "/api/roblox/" .. gameId .. "/" .. code, body)
 end
 
+-- A game that is one shared world (Driftmail): body is { op, userId, name, ... }, and the reply is
+-- that player's view of it (src/driftmail/roblox.js).
+function Api.world(gameId: string, body: { [string]: any }): (any?, string?)
+	return request("POST", "/api/roblox/world/" .. gameId, body)
+end
+
 -- Quick match, in the same queue as web players. op is "join", "poll" or "leave"; the reply is
 -- { queued = { waiting, max, startsAt? } }, { matched = { room, players } } or { left = true }.
 function Api.match(gameId: string, userId: string, op: string): (any?, string?)

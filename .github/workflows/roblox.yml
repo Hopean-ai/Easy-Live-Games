@@ -1,14 +1,14 @@
-# Tests and builds the Roblox game from roblox/. Web CFO changes run it too, so a change the Roblox
+# Tests and builds the Roblox game from roblox/. Web CFO and Driftmail changes run it too, so a change the Roblox
 # screens can't draw fails here. On main, a change to roblox/ (or a manual run) publishes the game
 # to Roblox with the Open Cloud place publishing API. Publishing needs three repository secrets (see roblox/README.md):
 # ROBLOX_API_KEY, ROBLOX_UNIVERSE_ID and ROBLOX_PLACE_ID. Without them the build still runs.
 name: Roblox
 on:
   pull_request:
-    paths: ['roblox/**', 'src/cfo/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
+    paths: ['roblox/**', 'src/cfo/**', 'src/driftmail/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
   push:
     branches: [main]
-    paths: ['roblox/**', 'src/cfo/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
+    paths: ['roblox/**', 'src/cfo/**', 'src/driftmail/**', 'scripts/roblox-fixture.mjs', '.github/workflows/roblox.yml']
   workflow_dispatch:
 env:
   ROJO_VERSION: 7.7.1
@@ -38,6 +38,7 @@ jobs:
           lune run tests/run
           node ../scripts/roblox-fixture.mjs > tests/fixture.json
           lune run tests/screens
+          lune run tests/driftmail
       - name: Build the place
         working-directory: roblox
         run: rojo build default.project.json -o hub.rbxl

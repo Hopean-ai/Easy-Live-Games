@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("HubShared")
 local Hub = require(Shared:WaitForChild("Hub"))
 local Api = require(script.Parent:WaitForChild("Api"))
+local Filter = require(script.Parent:WaitForChild("Filter"))
 
 -- Every game this build has, by website id.
 local games: { [string]: any } = {}
@@ -194,6 +195,38 @@ local function quickMatch(player: Player, gameId: string)
 	return { ok = true }
 end
 
+-- A request in a game that is one shared world (Driftmail): checked by the game's cleanWorld, a
+-- letter filtered before it leaves, and every player-written text in the reply filtered for this
+-- player before they see it.
+local function world(player: Player, gameId: string, arg: any)
+	local g = games[gameId]
+	local body = g.WORLD and g.cleanWorld(arg)
+	if not body then
+		return { error = "That could not be sent." }
+	end
+	if body.text then
+		local filtered = Filter.outgoing(player, body.text)
+		if not filtered then
+			return { error = "Your letter could not be checked just now. Try again in a moment." }
+		end
+		body.text = filtered
+	end
+	body.userId = tostring(player.UserId)
+	body.name = player.DisplayName
+	local res, err = Api.world(gameId, body)
+	if not res then
+		return { error = err }
+	end
+	if Hub.updateNeeded(g.SUPPORTED, res.bridge) then
+		return { error = "This Roblox game needs an update to play the latest version of this game.", updateNeeded = true }
+	end
+	if res.error then
+		return { error = res.error }
+	end
+	res.texts = Filter.incoming(player, res.texts)
+	return { view = res }
+end
+
 -- The game a request is about, when this build has it.
 local function gameOf(arg: any): string?
 	local id = Hub.gameId(if type(arg) == "table" then arg.game else arg)
@@ -238,6 +271,9 @@ requestFn.OnServerInvoke = function(player: Player, kind: any, arg: any)
 			return { error = "Room codes are 4 to 12 letters and numbers." }
 		end
 		return join(player, gameId, code)
+	elseif kind == "world" then
+		local gameId = gameOf(arg)
+		return if gameId then world(player, gameId, arg) else { error = "Pick a game first." }
 	elseif kind == "leave" then
 		leave(player)
 		return { ok = true }

@@ -4,6 +4,7 @@ import { findGame, publicGames, robloxGames, tableSize } from './games.js';
 import { isAdmin } from './admin.js';
 import { callClaudePlayers } from './claude.js';
 import { sanitizeName } from './names.js';
+import { robloxWorld } from './driftmail/roblox.js';
 
 export { newRoomCode };
 
@@ -114,8 +115,9 @@ export async function handleRequest(request, env) {
   const robloxList = path === '/api/roblox/games';
   const robloxLink = path === '/api/roblox/link';
   const robloxMatch = path.match(/^\/api\/roblox\/match\/([^/]+)$/);
-  const roblox = !robloxList && !robloxLink && !robloxMatch && path.match(/^\/api\/roblox\/([^/]+)\/([^/]+)$/);
-  if (robloxList || robloxLink || robloxMatch || roblox) {
+  const robloxWorldPath = path.match(/^\/api\/roblox\/world\/([^/]+)$/);
+  const roblox = !robloxList && !robloxLink && !robloxMatch && !robloxWorldPath && path.match(/^\/api\/roblox\/([^/]+)\/([^/]+)$/);
+  if (robloxList || robloxLink || robloxMatch || robloxWorldPath || roblox) {
     if (!env.ROBLOX_KEY) return Response.json({ error: 'Roblox cross-play is not set up.' }, { status: 404 });
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     if (!(await sameSecret(request.headers.get('X-Roblox-Key') ?? '', env.ROBLOX_KEY))) return Response.json({ error: 'Bad key.' }, { status: 401 });
@@ -129,7 +131,7 @@ export async function handleRequest(request, env) {
   // Quick match for a Roblox player, in the same queue as web players (see Matchmaker.httpQueue).
   if (robloxMatch) {
     const game = robloxGame(robloxMatch[1]);
-    if (!game) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
+    if (!game?.rooms) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
     const body = await readJson(request);
     if (!body || !/^\d{1,20}$/.test(String(body.userId ?? '')) || !['join', 'poll', 'leave'].includes(body.op)) return Response.json({ error: 'Bad request.' }, { status: 400 });
     const { min, max } = tableSize(game);
@@ -157,9 +159,22 @@ export async function handleRequest(request, env) {
     const games = account ? (await accounts.games(account)).map(({ game, code, updated }) => ({ game, code, updated })) : [];
     return Response.json({ linked: Boolean(account), admin: isAdmin(env, account), games });
   }
+  // A game that is one shared world rather than rooms (Driftmail), played as the Roblox player:
+  // as their linked account, or as an island of their own.
+  if (robloxWorldPath) {
+    const game = robloxGame(robloxWorldPath[1]);
+    if (!game?.world) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
+    const body = await readJson(request, MAX_LETTER_BODY);
+    const userId = String(body?.userId ?? '');
+    if (!body || !/^\d{1,20}$/.test(userId)) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const account = await accountsStub(env).robloxAccount(userId);
+    const ocean = env[game.world].get(env[game.world].idFromName('ocean'));
+    const result = await robloxWorld(ocean, { ...body, userId, name: sanitizeName(body.name, `Castaway ${userId.slice(-4)}`), account });
+    return Response.json(result, { status: result.error && !('bridge' in result) ? 400 : 200 });
+  }
   if (roblox) {
     const game = robloxGame(roblox[1]);
-    if (!game) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
+    if (!game?.rooms) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
     if (!ROOM_CODE.test(roblox[2])) return Response.json({ error: 'Bad room code.' }, { status: 400 });
     const body = await readJson(request, MAX_ROBLOX_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });

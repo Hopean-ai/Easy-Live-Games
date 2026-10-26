@@ -4,9 +4,10 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { GAMES, robloxGames, publicGames } from '../src/games.js';
 import { handleRequest } from '../src/router.js';
 import { BRIDGE_VERSION as CFO_BRIDGE } from '../src/cfo/roblox.js';
+import { BRIDGE_VERSION as DRIFTMAIL_BRIDGE } from '../src/driftmail/roblox.js';
 
 // Each Roblox game's website bridge version, by game id. A new game on Roblox adds its own here.
-const BRIDGES = { cfo: CFO_BRIDGE };
+const BRIDGES = { cfo: CFO_BRIDGE, driftmail: DRIFTMAIL_BRIDGE };
 const luau = (dir, name) => new URL(`../roblox/src/${dir}/games/${name}.luau`, import.meta.url);
 
 // A game on Roblox has a module in shared/games (its id and bridge version) and one in
@@ -36,6 +37,8 @@ test('Pong is not on Roblox; the hub lists the rest with their table sizes', () 
   assert.deepEqual(list.find((g) => g.id === 'cfo'), { id: 'cfo', name: 'CFO', blurb: GAMES.find((g) => g.id === 'cfo').blurb, players: '2–6', minPlayers: 2, maxPlayers: 6 });
   assert.equal(publicGames().find((g) => g.id === 'cfo').roblox, true);
   assert.equal(publicGames().find((g) => g.id === 'pong').roblox, false);
+  // Driftmail is one shared world: no table size, and the hub opens it without a lobby.
+  assert.deepEqual(list.find((g) => g.id === 'driftmail'), { id: 'driftmail', name: 'Driftmail', blurb: GAMES.find((g) => g.id === 'driftmail').blurb, players: 'Any number of', world: true });
 });
 
 const key = { 'X-Roblox-Key': 'sekrit' };
@@ -65,4 +68,7 @@ test('the Roblox routes take any game on Roblox, and only those', async () => {
   assert.deepEqual(q, { queued: { waiting: 1, max: 6 } });
   assert.deepEqual(queued[0], ['cfo', { who: 'roblox:7', op: 'join', min: 2, max: 6 }]);
   assert.equal((await handleRequest(post('/api/roblox/match/pong', { op: 'join', userId: '7' }), env)).status, 404);
+  assert.equal((await handleRequest(post('/api/roblox/match/driftmail', { op: 'join', userId: '7' }), env)).status, 404, 'a world has no quick match');
+  assert.equal((await handleRequest(post('/api/roblox/driftmail/ABCD', { op: 'poll' }), env)).status, 404, 'or rooms');
+  assert.equal((await handleRequest(post('/api/roblox/world/cfo', { op: 'state', userId: '7' }), env)).status, 404, 'CFO is not a world');
 });
