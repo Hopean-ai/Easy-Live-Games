@@ -1,6 +1,6 @@
 # Easy-Live-Games
 
-Real-time multiplayer games on Cloudflare Workers and Durable Objects. Pong is the first one.
+Real-time multiplayer games on Cloudflare Workers and Durable Objects: Pong, CFO and Driftmail.
 
 Sign in with a username and password, or play as a guest, then pick a game. In Pong, **Quick match** pairs you with the next player who is looking, or you can create a private room and share its link. Anyone else who opens a room's link watches as a spectator. First to 7 wins.
 
@@ -42,6 +42,17 @@ Durable Objects with SQLite storage are available on the Workers Free plan, so n
 ## Roblox hub
 
 `roblox/` is one Roblox place with a game picker that joins the same rooms as the website, so Roblox and browser players can play together. Every game except Pong is on it (games flagged `roblox` in `src/games.js`; today CFO). The website runs the game; Roblox only relays and draws what it is sent, so rule changes on the web need no Roblox update. Setup, publishing, adding a game, and what to do when the web game changes: [roblox/README.md](roblox/README.md).
+
+## Driftmail
+
+Alone on an island, you write letters, throw them to sea, and read what strangers send back. It needs an account (your island is kept on it). There are no rooms: the whole game is one ocean, the `Ocean` Durable Object in `src/driftmail/ocean.js`, holding every island and bottle in SQLite. The page (`public/driftmail.html` / `driftmail.js`) asks `/api/driftmail/state` every 30 seconds and posts to `/api/driftmail/throw` and `/api/driftmail/open`.
+
+- **`src/driftmail/world.js`**: the rules, as pure functions. An island day lasts five hours with two tides. Where a bottle comes to rest depends on the direction and strength of the throw, the current (north at dawn, east at midday, south at dusk, west at night) and the tide (an outgoing tide carries it twice as far). It goes to the nearest island seen in the last three days; if none is in reach it drifts on, looking further each hour, and after a day it goes to anyone, or back to its sender if nobody else is there. It washes up on the beach facing where it came from, and a reply thrown back that way bends toward the original writer.
+- **Supplies**: a letter costs a bottle, a cork, paper and ink. You start with three of each, opening a bottle gives back its glass and cork, and each tide since your last visit (at most two) may leave flotsam.
+- **Players never see coordinates**, only the beach a bottle landed on and when. Unsigned letters keep the writer's handwriting and wax mark (random per island, so they can't be traced to an account name).
+- **Claude castaways** (`src/driftmail/castaways.js`): two islands in the middle kept by Claude, which answer the letters that reach them 15 to 45 minutes later. Their wax carries a faint wave mark. They write through the Claude API with `claude-opus-5-5` at low effort, with server-side refusal fallbacks on. Set the key once with `npx wrangler secret put ANTHROPIC_API_KEY`; without it the castaways are quiet and bottles pass them by.
+
+The brainstorm and what comes next (crops, building, seals, the map, abilities, events): [Driftmail brainstorm](https://claude.ai/artifact/Axmpz1BVCJTNzKVtgPQBXW).
 
 ## Claude players (CFO)
 
