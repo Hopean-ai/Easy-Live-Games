@@ -19,6 +19,7 @@ let offset = 0; // server clock minus ours
 let dir = null;
 let replyTo = null;
 let throwing = null; // the bottle flying off after a throw, for a moment
+let casting = 0; // when the line last went out, for the little float on the water
 const bottleSpots = [];
 
 // --- talking to the ocean -------------------------------------------------------------------
@@ -106,7 +107,7 @@ function draw() {
     ctx.stroke();
   }
 
-  const wl = waterline(c.tide);
+  const wl = waterline(state.event?.kind === 'spring' ? Math.min(1, c.tide + 0.6) : c.tide);
   ellipse(wl.rx + 8, wl.ry + 6, 'rgba(255,255,255,0.18)'); // surf
   ellipse(wl.rx, wl.ry, '#b59c6d'); // wet sand
   ellipse(246, 146, '#e2cc98'); // dry sand above the high-water mark
@@ -151,12 +152,14 @@ function draw() {
   ctx.arc(fx, fy, 5, 0, Math.PI * 2);
   ctx.fill();
 
+  drawRocks(wl);
+
   // Bottles waiting on the wet sand, on the beach they washed up on.
   bottleSpots.length = 0;
   for (const b of state.beach) {
     const spot = bottleSpot(b, wl);
     bottleSpots.push({ ...spot, id: b.id });
-    drawBottle(spot.x, spot.y, spot.angle);
+    drawBottle(spot.x, spot.y, spot.angle, b.old);
   }
   if (throwing) {
     const k = Math.min(1, (performance.now() - throwing.start) / 1400);
@@ -175,6 +178,8 @@ function draw() {
     ctx.fillStyle = 'rgba(255,140,80,0.12)';
     ctx.fillRect(0, 0, W, H);
   }
+  const event = state.event && Date.now() + offset < state.event.ends ? state.event.kind : null;
+  if (event) drawEvent(event);
   compassRose();
   canvas.classList.toggle('pointer', bottleSpots.length > 0);
 }
@@ -210,11 +215,11 @@ function bottleSpot(b, wl) {
   return { x: CX + Math.cos(a) * rx, y: CY + Math.sin(a) * ry, angle: a + b.id };
 }
 
-function drawBottle(x, y, angle) {
+function drawBottle(x, y, angle, old = false) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
-  ctx.fillStyle = 'rgba(120,190,150,0.85)';
+  ctx.fillStyle = old ? 'rgba(110,95,60,0.9)' : 'rgba(120,190,150,0.85)';
   ctx.strokeStyle = 'rgba(30,70,50,0.9)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -226,7 +231,78 @@ function drawBottle(x, y, angle) {
   ctx.fillRect(10, -2.5, 4, 5);
   ctx.fillStyle = 'rgba(243,234,214,0.9)';
   ctx.fillRect(-7, -2, 9, 4); // the rolled letter inside
+  if (old) {
+    // Barnacles.
+    ctx.fillStyle = 'rgba(230,225,210,0.9)';
+    for (const [bx, by] of [[-9, -3], [-4, 4], [2, -4], [-1, 3]]) ctx.fillRect(bx, by, 2, 2);
+  }
   ctx.restore();
+}
+
+// The rocks on the east point, where you fish from, and your float when the line is out.
+function drawRocks(wl) {
+  const rx = CX + wl.rx - 30;
+  const ry = CY + 30;
+  ctx.fillStyle = '#6d6a62';
+  for (const [x, y, r] of [[0, 0, 16], [18, 10, 12], [8, 22, 10], [-14, 14, 9]]) {
+    ctx.beginPath();
+    ctx.arc(rx + x, ry + y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const k = (performance.now() - casting) / 1000;
+  if (casting && k < 6) {
+    const fx = rx + 70;
+    const fy = ry + 14 + Math.sin(k * 3) * 2;
+    ctx.strokeStyle = 'rgba(240,240,240,0.7)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rx + 6, ry - 4);
+    ctx.quadraticCurveTo(rx + 40, ry - 30, fx, fy);
+    ctx.stroke();
+    ctx.fillStyle = '#e04a3a';
+    ctx.beginPath();
+    ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// What the sea is doing, drawn over everything: rain, silver fish, floating planks.
+function drawEvent(kind) {
+  const t = performance.now();
+  if (kind === 'storm') {
+    ctx.fillStyle = 'rgba(20,25,35,0.35)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(200,215,235,0.35)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 90; i++) {
+      const x = (i * 97 + t / 3) % (W + 40) - 20;
+      const y = (i * 53 + t / 1.5) % H;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - 8, y + 18);
+      ctx.stroke();
+    }
+  } else if (kind === 'shoal') {
+    ctx.fillStyle = 'rgba(220,235,245,0.55)';
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2 + t / 6000;
+      const r = 1.35 + ((i * 7) % 5) / 20;
+      const x = CX + Math.cos(a) * 250 * r;
+      const y = CY + Math.sin(a) * 150 * r;
+      if (x > 0 && x < W && y > 0 && y < H) ctx.fillRect(x, y, 6, 2);
+    }
+  } else if (kind === 'wreck') {
+    ctx.fillStyle = '#7a5531';
+    for (let i = 0; i < 9; i++) {
+      const x = (i * 131 + t / 120) % W;
+      const y = (i * 89) % 70 + (i % 2 ? H - 70 : 6);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(i);
+      ctx.fillRect(-14, -3, 28, 6);
+      ctx.restore();
+    }
+  }
 }
 
 function compassRose() {
@@ -273,6 +349,46 @@ function render() {
     ? `${state.beach.length === 1 ? 'A bottle has' : `${state.beach.length} bottles have`} washed up. Tap one to open it.`
     : 'Nothing on the sand right now.';
 
+  const sea = $('sea');
+  sea.hidden = !state.event && !state.sign;
+  sea.classList.toggle('event', Boolean(state.event));
+  sea.textContent = state.event ? state.event.words : state.sign ?? '';
+
+  const kit = state.kit;
+  $('catch').replaceChildren(...[['Fish', kit.fish], ['Bones', kit.bones], ['Fish glue', kit.glue], ['Hook', kit.hook ? 'bone' : 'nail']].map(([label, n]) => {
+    const li = el('li', '', label);
+    li.append(el('strong', '', String(n)));
+    return li;
+  }));
+  $('fish').disabled = kit.casts < 1;
+  $('fish').textContent = kit.casts < 1 ? 'Fished out this tide' : 'Cast a line';
+  $('make-hook').hidden = kit.hook;
+  $('make-hook').textContent = `Make a bone hook (${kit.hookCost} bones)`;
+  $('make-hook').disabled = kit.bones < kit.hookCost;
+  $('make-glue').textContent = `Boil down glue (${kit.glueCost} fish)`;
+  $('make-glue').disabled = kit.fish < kit.glueCost;
+
+  $('abilities').replaceChildren(...state.abilities.map((a) => {
+    const li = el('li', 'ability', a.name);
+    li.append(el('span', 'when', a.words));
+    return li;
+  }));
+  $('forecast').hidden = !state.forecast;
+  if (state.forecast) {
+    $('forecast').replaceChildren(...(state.forecast.length ? state.forecast : [null]).map((f) => (f
+      ? el('li', 'forecast', `${cap(f.name)} ${until(f.start)}.`)
+      : el('li', 'when', 'The sea will stay calm for the next two island days.'))));
+  }
+  $('journal').replaceChildren(...state.journal.map((p) => {
+    const b = el('button', 'link', p.title);
+    b.addEventListener('click', () => readPage(p));
+    const li = el('li');
+    li.append(b);
+    if (p.teaches) li.append(el('span', 'when', `Teaches ${p.teaches}`));
+    return li;
+  }));
+  $('journal-empty').hidden = state.journal.length > 0;
+
   $('supplies').replaceChildren(...Object.entries(SUPPLY_NAMES).map(([k, label]) => {
     const li = el('li', state.island.supplies[k] < 1 ? 'low' : '', label);
     li.append(el('strong', '', String(state.island.supplies[k])));
@@ -280,7 +396,8 @@ function render() {
   }));
 
   $('shelf').replaceChildren(...state.shelf.map((l) => {
-    const b = el('button', 'link', l.own ? `Your own letter, back again: ${firstLine(l.text)}` : firstLine(l.text));
+    const label = l.old ? `An old journal page: ${l.title ?? firstLine(l.text)}` : l.own ? `Your own letter, back again: ${firstLine(l.text)}` : firstLine(l.text);
+    const b = el('button', 'link', label);
     b.addEventListener('click', () => read(l));
     const li = el('li');
     li.append(b, el('span', 'when', `${l.shore} beach, ${ago(l.landed)}`));
@@ -290,7 +407,8 @@ function render() {
 
   $('sent').replaceChildren(...state.sent.map((s) => {
     const li = el('li', '', firstLine(s.text));
-    li.append(el('span', 'when', `${s.ashore ? 'Washed up somewhere' : 'Still drifting'} · thrown ${ago(s.thrown)}`));
+    const where = s.ashore ? (s.rest ? `Washed up somewhere, it ${s.rest}` : 'Washed up somewhere') : 'Still drifting';
+    li.append(el('span', 'when', `${where} · thrown ${ago(s.thrown)}${s.page ? ` · with “${s.page}”` : ''}`));
     return li;
   }));
   $('sent-empty').hidden = state.sent.length > 0;
@@ -315,25 +433,49 @@ async function openBottle(id) {
   }
   take(s);
   const letter = s.shelf.find((l) => l.id === s.opened);
-  if (letter) read(letter);
+  if (letter) read(letter, s.learned);
 }
 
 let reading = null;
 
-function read(letter) {
+function read(letter, learned = null) {
   reading = letter;
-  $('read-note').textContent = letter.own
-    ? `Your own bottle washed back to your ${letter.shore} beach. Nobody else was in reach.`
-    : `Washed up on your ${letter.shore} beach at ${letter.part}, ${letter.tide}.`;
+  let note = letter.old
+    ? `An old bottle, crusted with barnacles, washed up on your ${letter.shore} beach. Inside is a page torn from someone's journal.`
+    : letter.own
+      ? `Your own bottle washed back to your ${letter.shore} beach. Nobody else was in reach.`
+      : `Washed up on your ${letter.shore} beach at ${letter.part}, ${letter.tide}.`;
+  if (letter.handOf) {
+    note += letter.handOf.letters > 1
+      ? ` You know this hand: it's hand ${letter.handOf.mark}, on ${letter.handOf.letters} letters on your shelf.`
+      : ` A hand you haven't seen before (hand ${letter.handOf.mark}).`;
+  }
+  $('read-note').textContent = note;
   const paper = $('read-paper');
   paper.replaceChildren();
   handwriting(paper, letter.hand);
   if (letter.replyTo) paper.append(el('span', 'reply-of', `In answer to your letter: “${letter.replyTo}”`));
+  if (letter.title) paper.append(el('span', 'reply-of', letter.title));
   paper.append(document.createTextNode(letter.text));
   if (letter.name) paper.append(el('span', 'sig', `— ${letter.name}`));
   paper.append(seal(letter.emblem, letter.marked));
-  $('reply').hidden = letter.own;
+  // A copied journal page folded in with the letter, in the writer's own hand.
+  const pg = $('read-page');
+  pg.hidden = !letter.page;
+  if (letter.page) {
+    pg.replaceChildren(el('span', 'title', `A copied journal page is folded in with it: “${letter.page.title}”`), document.createTextNode(letter.page.text));
+    handwriting(pg, letter.hand);
+  }
+  $('read-learned').hidden = !learned;
+  $('read-learned').textContent = learned ? `You learned something: ${learned}.` : '';
+  $('reply').hidden = letter.own || letter.old;
   $('reader').showModal();
+}
+
+function readPage(p) {
+  read({ text: p.text, title: p.title, old: true, own: false, hand: 0, emblem: 0, shore: '', page: null });
+  $('read-note').textContent = p.teaches ? `A page from your journal. It taught you ${p.teaches}.` : 'A page from your journal.';
+  $('read-paper').querySelector('.dm-seal')?.remove();
 }
 
 $('close-reader').addEventListener('click', () => $('reader').close());
@@ -391,6 +533,15 @@ function compose(answering = null) {
   if (answering) {
     $('reply-note').textContent = `Answering the letter from your ${answering.shore} beach. Throw back the way it came and it may find its way home.`;
   }
+  $('glue-row').hidden = !(state.kit.glue > 0);
+  $('glue').checked = false;
+  $('page-row').hidden = state.journal.length === 0;
+  $('page').replaceChildren(el('option', '', 'No page'), ...state.journal.map((p) => {
+    const o = el('option', '', p.title);
+    o.value = p.id;
+    return o;
+  }));
+  $('page').value = '';
   const c = clockNow();
   $('throw-hint').textContent = `Right now it's ${c.part}, ${c.words}, and the current runs ${DIR_WORDS[c.currentDir]}.${c.ebbing ? ' An outgoing tide carries bottles far.' : ''}`;
   $('compose').showModal();
@@ -413,6 +564,8 @@ $('compose-form').addEventListener('submit', async (e) => {
     dir,
     strength: Number($('strength').value) / 100,
     replyTo: replyTo?.id ?? null,
+    glue: $('glue').checked,
+    page: $('page').value || null,
   });
   if (!s) return;
   if (s.error) {
@@ -425,6 +578,33 @@ $('compose-form').addEventListener('submit', async (e) => {
   $('found').textContent = `Your bottle bobs away to the ${DIR_WORDS[dir]}.`;
   take({ ...s, found: [] });
 });
+
+// --- fishing -------------------------------------------------------------------------------
+
+$('fish').addEventListener('click', async () => {
+  casting = performance.now();
+  const s = await call('/api/driftmail/fish', {});
+  if (!s) return;
+  if (s.error) {
+    $('fish-note').textContent = s.error;
+    return;
+  }
+  take({ ...s, found: [] });
+  $('fish-note').textContent = s.caught === 'nothing' ? 'Nothing bit. The line comes back empty.' : `You caught ${s.caught}.`;
+});
+
+for (const [id, what] of [['make-hook', 'hook'], ['make-glue', 'glue']]) {
+  $(id).addEventListener('click', async () => {
+    const s = await call('/api/driftmail/craft', { what });
+    if (!s) return;
+    if (s.error) {
+      $('fish-note').textContent = s.error;
+      return;
+    }
+    take({ ...s, found: [] });
+    $('fish-note').textContent = what === 'hook' ? 'You carve and bind a bone hook. It bites better than the old nail.' : 'You boil the fish down into a pot of sticky glue.';
+  });
+}
 
 // --- little helpers -------------------------------------------------------------------------
 
@@ -458,6 +638,12 @@ function ago(t) {
   const h = Math.round(m / 60);
   if (h < 24) return `${h} h ago`;
   return `${Math.round(h / 24)} d ago`;
+}
+
+function until(t) {
+  const m = Math.round((t - Date.now() - offset) / 60000);
+  if (m < 60) return `within the hour`;
+  return `in about ${Math.round(m / 60)} hours`;
 }
 
 function list(items) {

@@ -143,7 +143,7 @@ test('throwing a letter uses supplies, and a neighbour finds it on the right bea
   assert.equal(opened.shelf[0].text, 'Is anyone out there?');
   assert.equal(opened.shelf[0].name, 'alice');
   assert.equal(opened.shelf[0].marked, false);
-  assert.equal(opened.island.supplies.bottles, 4, 'the empty bottle is yours to reuse');
+  assert.equal(opened.island.supplies.bottles, bob.island.supplies.bottles + 1, 'the empty bottle is yours to reuse');
   assert.ok((await o.openBottle('bob', bob.beach[0].id)).error, 'opened only once');
   assert.ok((await o.openBottle('alice', bob.beach[0].id)).error, 'only by its finder');
 });
@@ -238,4 +238,166 @@ test('without a Claude key the castaways stay quiet and bottles pass them by', a
   later(o, MAX_DRIFT_MS + 2 * REDRIFT_MS);
   await o.alarm();
   assert.equal(o.sql.exec("SELECT COUNT(*) AS n FROM bottles WHERE finder LIKE 'castaway:%'").toArray()[0].n, 0);
+});
+
+// --- Events, fishing, journal pages --------------------------------------------------------
+
+const { EVENTS, PAGES, cast, eventAt, eventOn, signAt, upcoming, flotsam } = await import('../src/driftmail/world.js');
+
+// The first tide from `from` with an event of this kind.
+function tideWith(kind, from = 0) {
+  for (let n = from; n < from + 5000; n++) if (eventOn(n) === kind) return n;
+  throw new Error(`no ${kind}`);
+}
+
+test('ocean events are rare, fixed by the tide, and the tide before can show a sign', () => {
+  let count = 0;
+  const kinds = new Set();
+  for (let n = 0; n < 2800; n++) {
+    const k = eventOn(n);
+    if (k) {
+      count++;
+      kinds.add(k);
+    }
+  }
+  assert.ok(count > 120 && count < 300, `about one tide in fourteen (${count})`);
+  assert.deepEqual([...kinds].sort(), Object.keys(EVENTS).sort());
+  const n = tideWith('storm', 100);
+  assert.equal(eventAt(n * TIDE_MS + 5).kind, 'storm');
+  assert.equal(eventAt(n * TIDE_MS + 5).end, (n + 1) * TIDE_MS);
+  assert.ok(upcoming((n - 2) * TIDE_MS, 4).some((e) => e.kind === 'storm' && e.start === n * TIDE_MS));
+  // Signs only ever point at the event that's actually coming.
+  for (let k = 0; k < 2800; k++) {
+    const sign = signAt(k * TIDE_MS);
+    if (sign) assert.ok(EVENTS[eventOn(k + 1)].signs.includes(sign));
+  }
+});
+
+test('a storm throws bottles much further than a calm sea', () => {
+  const storm = tideWith('storm', 50);
+  // A calm tide at the same time of the island day (two tides to a day).
+  let calm = storm + 2;
+  while (eventOn(calm)) calm += 2;
+  const far = (n) => {
+    let total = 0;
+    for (let i = 0; i < 40; i++) {
+      const p = drift({ from: { x: 0, y: 0 }, dir: 0, strength: 0.5, t: n * TIDE_MS + TIDE_MS / 4, rand: seeded(i) });
+      total += Math.hypot(p.x, p.y);
+    }
+    return total;
+  };
+  assert.ok(far(storm) > far(calm) * 1.3);
+  // Wreckage leaves old bottles far more often.
+  const olds = (event) => Array.from({ length: 400 }, (_, i) => flotsam(seeded(i), event)).filter((w) => w === 'old bottle').length;
+  assert.ok(olds('wreck') > olds(null) * 3);
+});
+
+test('fishing: once a tide, catches add fish and bones, and a shoal helps', async () => {
+  const o = ocean({ seed: 3 });
+  await o.visit('alice');
+  let caught = 0;
+  for (let i = 0; i < 30; i++) {
+    const r = await o.fish('alice');
+    assert.equal(r.error, undefined);
+    assert.equal(typeof r.caught, 'string');
+    if (r.caught !== 'nothing') caught++;
+    assert.equal(r.kit.casts, 0);
+    assert.ok((await o.fish('alice')).error, 'one cast a tide');
+    later(o, TIDE_MS);
+  }
+  assert.ok(caught > 5);
+  const shoal = tideWith('shoal', 200);
+  const bites = (n) => Array.from({ length: 200 }, (_, i) => cast({ t: n * TIDE_MS + 1000, rand: seeded(i) })).filter(Boolean).length;
+  let calm = shoal + 1;
+  while (eventOn(calm)) calm++;
+  // Same part of the day and tide, a whole number of island days apart.
+  while ((calm - shoal) % 2) calm++;
+  if (eventOn(calm)) calm += 2;
+  assert.ok(bites(shoal) > bites(calm));
+});
+
+test('bones make a hook and fish make glue, which seals a bottle instead of a cork', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await o.visit('bob');
+  assert.ok((await o.craft('alice', 'hook')).error);
+  const island = o.island('alice');
+  island.kit.bones = 6;
+  island.kit.fish = 2;
+  o.saveIsland(island);
+  const hooked = await o.craft('alice', 'hook');
+  assert.equal(hooked.kit.hook, true);
+  assert.equal(hooked.kit.bones, 1);
+  assert.ok((await o.craft('alice', 'hook')).error, 'one hook is enough');
+  const glued = await o.craft('alice', 'glue');
+  assert.equal(glued.kit.glue, 1);
+  assert.equal(glued.kit.fish, 0);
+  const corks = glued.island.supplies.corks;
+  const sent = await o.throwBottle('alice', { text: 'Sealed with glue.', dir: 1, strength: 0.4, glue: true });
+  assert.equal(sent.error, undefined);
+  assert.equal(sent.island.supplies.corks, corks);
+  assert.equal(sent.kit.glue, 0);
+  assert.ok((await o.throwBottle('alice', { text: 'Again.', dir: 1, strength: 0.4, glue: true })).error, 'no glue left');
+});
+
+test('an old bottle holds a journal page that can teach an ability', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  const island = o.island('alice');
+  // Every page but the one on reading hands has been read, so that one comes next.
+  island.kit.pages = PAGES.filter((p) => p.id !== 'keeper-hands').map((p) => p.id);
+  o.oldBottle(island, o.now());
+  o.saveIsland(island);
+  const s = await o.visit('alice');
+  const old = s.beach.find((b) => b.old);
+  assert.ok(old);
+  const opened = await o.openBottle('alice', old.id);
+  assert.equal(opened.learned, 'Reading hands');
+  assert.equal(opened.shelf[0].old, true);
+  assert.equal(opened.shelf[0].title, 'On hands');
+  assert.deepEqual(opened.abilities.map((a) => a.id), ['hands']);
+  assert.equal(opened.journal.length, PAGES.length);
+});
+
+test('a page copied into a letter teaches its finder too, and costs paper and ink', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await o.visit('bob');
+  const island = o.island('alice');
+  island.kit.pages = ['salt-knots'];
+  o.saveIsland(island);
+  assert.ok((await o.throwBottle('alice', { text: 'Try this.', dir: 0, strength: 0.5, page: 'keeper-signs' })).error, 'only pages you hold');
+  const sent = await o.throwBottle('alice', { text: 'Try this.', dir: 0, strength: 0.5, page: 'salt-knots' });
+  assert.equal(sent.error, undefined);
+  assert.deepEqual(sent.island.supplies, { bottles: 2, corks: 2, paper: 1, ink: 1 });
+  later(o, MAX_DRIFT_MS + 2 * REDRIFT_MS);
+  await o.alarm();
+  const bob = await o.visit('bob');
+  const opened = await o.openBottle('bob', bob.beach[0].id);
+  assert.equal(opened.learned, "Fisher's knots");
+  assert.equal(opened.shelf[0].page.title, 'Knots');
+  assert.equal(opened.kit.casts, 2, 'two casts a tide now');
+});
+
+test('abilities: reading hands groups letters, sea signs forecast, the current tells where bottles went', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await o.visit('bob');
+  for (const text of ['One.', 'Two.']) await o.throwBottle('alice', { text, dir: 0, strength: 0.5 });
+  later(o, MAX_DRIFT_MS + 2 * REDRIFT_MS);
+  await o.alarm();
+  let bob = await o.visit('bob');
+  for (const b of bob.beach) bob = await o.openBottle('bob', b.id);
+  assert.equal(bob.shelf[0].handOf, undefined, 'not without the ability');
+  assert.equal(bob.forecast, null);
+  const island = o.island('bob');
+  island.kit.abilities = ['hands', 'signs', 'currents'];
+  o.saveIsland(island);
+  await o.throwBottle('bob', { text: 'Back.', dir: 4, strength: 0.5 });
+  bob = await o.visit('bob');
+  const alices = bob.shelf.filter((l) => !l.own);
+  assert.equal(alices.length, 2);
+  assert.ok(alices.every((l) => l.handOf?.letters === 2 && l.handOf.mark === alices[0].handOf.mark));
+  assert.ok(Array.isArray(bob.forecast));
+  assert.match(bob.sent[0].rest, /^came to rest (not far|a good way|far) to the /);
 });
