@@ -29,6 +29,11 @@
     </section>
 
     <section id="game" hidden>
+      <ol id="guide" class="dm-guide" hidden>
+        <li id="guide-1">Press <strong>Write a letter</strong> and write to whoever finds it.</li>
+        <li id="guide-2">Pick a direction and how hard to throw. The hint tells you which way the current runs.</li>
+        <li id="guide-3">Throw it, then come back later: bottles wash up as the tide goes out.</li>
+      </ol>
       <div class="dm-stage">
         <canvas id="beach" width="800" height="520" aria-label="Your island, seen from above"></canvas>
         <p id="beach-hint" class="hint"></p>
@@ -43,12 +48,49 @@
           <p class="small">A letter takes a bottle, a cork, a sheet of paper and some ink. Every bottle you open leaves you its glass and cork, and each tide may wash something new up.</p>
         </section>
         <section class="dm-panel">
+          <h2>Materials</h2>
+          <ul id="materials" class="dm-supplies"></ul>
+          <p class="small" id="gather-note">Once a tide you can gather inland:</p>
+          <div class="row dm-buttons dm-two" id="gather"></div>
+        </section>
+        <section class="dm-panel">
+          <h2>Garden</h2>
+          <ul id="garden" class="dm-list dm-garden"></ul>
+          <button id="water" class="secondary">Water the garden</button>
+          <p id="seeds" class="small"></p>
+        </section>
+        <section class="dm-panel dm-wide">
+          <h2>Build</h2>
+          <ul id="blueprints" class="dm-list dm-tall"></ul>
+        </section>
+        <section class="dm-panel">
+          <h2>Make</h2>
+          <ul id="recipes" class="dm-list dm-tall"></ul>
+          <label id="stamp-row" class="small" hidden>Stamp pattern <select id="stamp-pattern"></select></label>
+          <p id="make-note" class="small"></p>
+        </section>
+        <section class="dm-panel" id="seal-panel" hidden>
+          <h2>Your seal</h2>
+          <p id="seal-now" class="small"></p>
+          <div class="dm-seal-pick">
+            <label>Mark <select id="seal-glyph"></select></label>
+            <label>Wax <select id="seal-wax"></select></label>
+          </div>
+          <button id="design-seal" class="secondary">Cut a seal ring</button>
+        </section>
+        <section class="dm-panel">
           <h2>Fishing</h2>
           <ul id="catch" class="dm-supplies"></ul>
+          <label class="dm-check small"><input type="checkbox" id="bait"> Bait the hook with a berry</label>
           <div class="row dm-buttons">
             <button id="fish">Cast a line</button>
-            <button id="make-hook" class="secondary"></button>
-            <button id="make-glue" class="secondary"></button>
+            <button id="spear" class="secondary" hidden>Wade out with the spear</button>
+            <button id="set-trap" class="secondary" hidden>Set a baited trap</button>
+            <button id="pull-traps" class="secondary" hidden>Pull up the traps</button>
+          </div>
+          <div id="snag" class="dm-snag" hidden>
+            <p class="small">A bottle is tangled in your line, still on its way to someone.</p>
+            <div class="row"><button id="snag-keep">Keep it</button><button id="snag-free" class="secondary">Let it drift on</button></div>
           </div>
           <p id="fish-note" class="small"></p>
         </section>
@@ -56,11 +98,12 @@
           <h2>Journal</h2>
           <ul id="abilities" class="dm-list"></ul>
           <ul id="forecast" class="dm-list" hidden></ul>
+          <ul id="clues" class="dm-list"></ul>
           <ul id="journal" class="dm-list"></ul>
           <p id="journal-empty" class="small">Old bottles sometimes hold pages from journals kept here long ago. Some teach you things.</p>
         </section>
         <section class="dm-panel">
-          <h2>Letters you've found</h2>
+          <h2>Letters you've found <span id="room" class="small"></span></h2>
           <ul id="shelf" class="dm-list"></ul>
           <p id="shelf-empty" class="small">Nothing yet. Watch the wet sand as the tide goes out.</p>
         </section>
@@ -68,10 +111,23 @@
           <h2>Bottles you've thrown</h2>
           <ul id="sent" class="dm-list"></ul>
           <p id="sent-empty" class="small">None yet.</p>
+          <p id="marks" class="small"></p>
+        </section>
+        <section class="dm-panel">
+          <h2>Your chart</h2>
+          <canvas id="chart" width="240" height="240" aria-label="Your chart: who writes to you, and from which way"></canvas>
+          <p id="chart-note" class="small"></p>
         </section>
         <section class="dm-panel">
           <h2>Washed up beside you</h2>
           <ul id="curios" class="dm-list"></ul>
+        </section>
+        <section class="dm-panel">
+          <h2>Sound</h2>
+          <button id="sound" class="secondary">Turn sound on</button>
+          <label class="small">Sea <input type="range" id="vol-sea" min="0" max="100" value="60"></label>
+          <label class="small">Music <input type="range" id="vol-music" min="0" max="100" value="40"></label>
+          <label class="small">Effects <input type="range" id="vol-fx" min="0" max="100" value="70"></label>
         </section>
       </div>
 
@@ -81,11 +137,14 @@
         <p>Where a bottle goes depends on which way you throw it, how hard, the time of day and the tide. The current runs north at dawn, east at midday, south at dusk and west at night, and an outgoing tide carries a bottle much further than an incoming one. Most bottles reach islands near yours.</p>
         <p>A bottle washes up on the beach facing where it came from. To answer one, throw your reply back the way it came: aimed well, it may find its way home.</p>
         <p>Signing a letter is up to you. Even unsigned, a letter is in its writer's own hand and carries their mark in the wax, so you may come to recognise someone without ever learning their name.</p>
-        <p>Now and then the whole sea changes for a tide: a storm, a spring tide, a shoal of fish, or wreckage from some far-off ship. The sea gives slight signs the tide before, if you're watching.</p>
-        <p>You can fish once a tide. Dawn, dusk and a rising tide are best. Fish bones make a hook, and fish boil down into a glue that seals a bottle in place of a cork.</p>
+        <p>Now and then the whole sea changes for a while: a storm, a spring tide, a shoal of fish, wreckage from some far-off ship, and rarer things: a red tide, a comet, a great ebb, a fog bank, currents that run backwards. The sea gives slight signs the tide before, if you're watching.</p>
+        <p>The tide leaves driftwood, rope, clay and more, and you can gather leaves, clay, sand and stones inland once a tide. Build a shack in three stages to keep more letters, and a kiln, a drying rack and an ink press to make your own bottles, paper and ink. Plant the seeds from your crate, and water them: crops only grow while watered.</p>
+        <p>You can fish once a tide. Dawn, dusk and a rising tide are best, and a berry for bait helps. Fish bones make a hook, and fish boil down into glue or oil. At low tide you can wade out with a spear, and traps fill while you're away.</p>
+        <p>A bottle can carry one thing with the letter: a curio, seeds, a drawing or a map of who writes to you. Jars carry three; boxes and barrels, launched from a dock, carry far more but can break in a storm. Long drifts let water in and blur the ink, unless the bottle is double-corked.</p>
+        <p>Mark the letters you find kind, useful or rude. The sea remembers, and a writer it thinks rude finds fewer bottles reach anyone. Write to the same person long enough and a steady current runs between you.</p>
         <p>Old bottles hold pages from the journals of people who were here before you. Some teach you something. You can copy a page out and send it on with a letter, for the cost of another sheet and more ink.</p>
         <p>A few islands in the middle of the ocean are kept by Claude. Their wax carries a faint wave mark, so you can always tell.</p>
-        <p>An island day lasts five hours, so you'll see dawn and dusk at different times of your own day.</p>
+        <p>An island day lasts an hour, with two half-hour tides, so one sitting sees dawn, dusk and both tides.</p>
       </details>
     </section>
   </main>
@@ -96,7 +155,29 @@
       <textarea id="letter" class="dm-paper" maxlength="600" rows="9" placeholder="Write to whoever finds this…" required></textarea>
       <p class="small"><span id="count">0</span> / 600</p>
       <label class="dm-check"><input type="checkbox" id="signed"> Sign it with my name</label>
+      <label>Send it in
+        <select id="container"></select>
+      </label>
+      <p id="container-note" class="small"></p>
       <label class="dm-check" id="glue-row" hidden><input type="checkbox" id="glue"> Seal it with fish glue instead of a cork</label>
+      <label class="dm-check" id="wax-row" hidden><input type="checkbox" id="wax"> Seal it in wax with your ring</label>
+      <label class="dm-check" id="stamp-use-row" hidden><input type="checkbox" id="stamp"> Press your stamp on it</label>
+      <label class="dm-check" id="shimmer-row" hidden><input type="checkbox" id="shimmer"> Write in shimmering ink</label>
+      <label id="forge-row" hidden>Write in someone else's hand
+        <select id="forge"></select>
+      </label>
+      <fieldset class="dm-throw" id="items">
+        <legend>Put something in with it</legend>
+        <label id="curio-row">A curio <select id="item-curio"></select></label>
+        <label id="seed-row">Seeds <select id="item-seeds"></select></label>
+        <label class="dm-check"><input type="checkbox" id="item-map"> A copy of your chart (a sheet of paper and some ink)</label>
+        <label class="dm-check"><input type="checkbox" id="item-drawing"> A drawing (a sheet of paper)</label>
+        <canvas id="pad" width="240" height="160" hidden aria-label="Drawing pad: tap squares to draw"></canvas>
+        <div id="bundle-row" class="row" hidden>
+          <label>A bundle of <select id="bundle-what"></select></label>
+          <label>× <input type="number" id="bundle-n" min="0" max="50" value="0"></label>
+        </div>
+      </fieldset>
       <label id="page-row" hidden>Fold in a copy of a journal page
         <select id="page"></select>
       </label>
@@ -121,9 +202,23 @@
       <p id="read-note" class="small"></p>
       <article id="read-paper" class="dm-paper dm-letter"></article>
       <article id="read-page" class="dm-paper dm-letter dm-page" hidden></article>
+      <div id="read-items" class="dm-items" hidden></div>
       <p id="read-learned" class="dm-found" hidden></p>
+      <div class="row" id="mark-row">
+        <span class="small">Mark it:</span>
+        <button class="secondary" data-mark="kind">Kind</button>
+        <button class="secondary" data-mark="useful">Useful</button>
+        <button class="secondary" data-mark="rude">Rude</button>
+      </div>
+      <div id="pass-row" class="stack" hidden>
+        <input id="pass-line" maxlength="140" placeholder="Add a line of your own (optional)">
+        <label>Throw it <select id="pass-dir"></select></label>
+        <div class="row"><button id="pass-go">Throw it on</button><button id="pass-cancel" class="secondary">Keep it</button></div>
+      </div>
       <div class="row">
         <button id="reply">Write back</button>
+        <button id="pass" class="secondary">Throw it on…</button>
+        <button id="burn" class="secondary">Burn it</button>
         <button id="close-reader" class="secondary">Put it on the shelf</button>
       </div>
     </div>
