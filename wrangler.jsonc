@@ -12,13 +12,15 @@
       { "name": "ROOMS", "class_name": "PongRoom" },
       { "name": "ACCOUNTS", "class_name": "Accounts" },
       { "name": "MATCHMAKER", "class_name": "Matchmaker" },
-      { "name": "CFO_ROOMS", "class_name": "CfoRoom" }
+      { "name": "CFO_ROOMS", "class_name": "CfoRoom" },
+      { "name": "OCEAN", "class_name": "Ocean" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["PongRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["Accounts", "Matchmaker"] },
-    { "tag": "v3", "new_sqlite_classes": ["CfoRoom"] }
+    { "tag": "v3", "new_sqlite_classes": ["CfoRoom"] },
+    { "tag": "v4", "new_sqlite_classes": ["Ocean"] }
   ],
   // Pull request builds run `wrangler preview`. Binding the class with no script_name gives each
   // Preview its own Durable Object namespace, so preview rooms and accounts never touch production ones.
@@ -28,7 +30,8 @@
         { "name": "ROOMS", "class_name": "PongRoom" },
         { "name": "ACCOUNTS", "class_name": "Accounts" },
         { "name": "MATCHMAKER", "class_name": "Matchmaker" },
-        { "name": "CFO_ROOMS", "class_name": "CfoRoom" }
+        { "name": "CFO_ROOMS", "class_name": "CfoRoom" },
+        { "name": "OCEAN", "class_name": "Ocean" }
       ]
     }
   },

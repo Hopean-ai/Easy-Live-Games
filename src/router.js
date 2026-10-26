@@ -78,6 +78,20 @@ export async function handleRequest(request, env) {
     return Response.json({ available: Boolean(env.ROBLOX_KEY), link: await accounts.robloxLink(name) });
   }
 
+  // Driftmail (src/driftmail/ocean.js): one shared ocean, played as your account.
+  const driftmail = path.match(/^\/api\/driftmail\/(state|throw|open)$/);
+  if (driftmail) {
+    const name = await accountName(request, env);
+    if (!name) return Response.json({ error: 'Sign in to play Driftmail.' }, { status: 401 });
+    const ocean = env.OCEAN.get(env.OCEAN.idFromName('ocean'));
+    if (driftmail[1] === 'state') return Response.json(await ocean.visit(name));
+    if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+    const body = await readJson(request, MAX_LETTER_BODY);
+    if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const result = driftmail[1] === 'throw' ? await ocean.throwBottle(name, body) : await ocean.openBottle(name, body.id);
+    return Response.json(result, { status: result.error ? 400 : 200 });
+  }
+
   // Admins only: ask the Claude routine to send players into this CFO room (src/claude.js).
   const claude = path.match(/^\/api\/rooms\/cfo\/([^/]+)\/claude$/);
   if (claude) {
@@ -160,7 +174,7 @@ export async function handleRequest(request, env) {
   const match = path.match(/^\/api\/match\/([^/]+)\/ws$/);
   if (match) {
     const game = findGame(match[1]);
-    if (!game) return new Response('Unknown game', { status: 404 });
+    if (!game?.rooms) return new Response('Unknown game', { status: 404 });
     if (request.headers.get('Upgrade') !== 'websocket') {
       return new Response('Expected a WebSocket upgrade', { status: 426 });
     }
@@ -178,7 +192,7 @@ export async function handleRequest(request, env) {
   const room = path.match(/^\/api\/rooms\/([^/]+)\/ws$/) ?? path.match(/^\/api\/rooms\/([^/]+)\/([^/]+)\/ws$/);
   if (room) {
     const game = findGame(room.length === 3 ? room[1] : 'pong');
-    if (!game) return new Response('Unknown game', { status: 404 });
+    if (!game?.rooms) return new Response('Unknown game', { status: 404 });
     const code = room.at(-1);
     if (!ROOM_CODE.test(code)) return new Response('Bad room code', { status: 400 });
     if (request.headers.get('Upgrade') !== 'websocket') {
@@ -231,6 +245,9 @@ function sameOrigin(request, url) {
     return false;
   }
 }
+
+// A Driftmail letter is up to 600 characters, which JSON escaping can grow a few times over.
+const MAX_LETTER_BODY = 4096;
 
 // The most a Roblox game server may send in one room request (a move with a journal entry fits).
 const MAX_ROBLOX_BODY = 4096;

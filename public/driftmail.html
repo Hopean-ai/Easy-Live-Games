@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Driftmail · Live Multiplayer Games</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Handwriting: each castaway's hand is one of these, with its own slant, size and ink. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat&family=Covered+By+Your+Grace&family=Gochi+Hand&family=Homemade+Apple&family=Indie+Flower&family=Kalam&family=Nanum+Pen+Script&family=Patrick+Hand&family=Reenie+Beanie&family=Shadows+Into+Light&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/driftmail.css">
+</head>
+<body class="driftmail">
+  <main>
+    <header class="dm-head">
+      <div>
+        <p class="small"><a href="/">All games</a></p>
+        <h1>Driftmail</h1>
+        <p class="sub" id="time">The tide is turning…</p>
+      </div>
+      <button id="write">Write a letter</button>
+    </header>
+
+    <section id="signin" class="stack narrow" hidden>
+      <p>Driftmail keeps your island on your account, so it's there whenever you come back.</p>
+      <p><a id="signin-link" href="/">Sign in or create an account</a> to wash up on your island.</p>
+    </section>
+
+    <section id="game" hidden>
+      <div class="dm-stage">
+        <canvas id="beach" width="800" height="520" aria-label="Your island, seen from above"></canvas>
+        <p id="beach-hint" class="hint"></p>
+      </div>
+      <p id="found" class="dm-found" role="status" hidden></p>
+      <p id="error" class="error" role="alert"></p>
+
+      <div class="dm-panels">
+        <section class="dm-panel">
+          <h2>Supplies</h2>
+          <ul id="supplies" class="dm-supplies"></ul>
+          <p class="small">A letter takes a bottle, a cork, a sheet of paper and some ink. Every bottle you open leaves you its glass and cork, and each tide may wash something new up.</p>
+        </section>
+        <section class="dm-panel">
+          <h2>Letters you've found</h2>
+          <ul id="shelf" class="dm-list"></ul>
+          <p id="shelf-empty" class="small">Nothing yet. Watch the wet sand as the tide goes out.</p>
+        </section>
+        <section class="dm-panel">
+          <h2>Bottles you've thrown</h2>
+          <ul id="sent" class="dm-list"></ul>
+          <p id="sent-empty" class="small">None yet.</p>
+        </section>
+        <section class="dm-panel">
+          <h2>Washed up beside you</h2>
+          <ul id="curios" class="dm-list"></ul>
+        </section>
+      </div>
+
+      <details class="dm-help">
+        <summary>How the sea works</summary>
+        <p>You're alone on your island. The only way to reach anyone is a letter in a bottle, and nobody can choose who finds it.</p>
+        <p>Where a bottle goes depends on which way you throw it, how hard, the time of day and the tide. The current runs north at dawn, east at midday, south at dusk and west at night, and an outgoing tide carries a bottle much further than an incoming one. Most bottles reach islands near yours.</p>
+        <p>A bottle washes up on the beach facing where it came from. To answer one, throw your reply back the way it came: aimed well, it may find its way home.</p>
+        <p>Signing a letter is up to you. Even unsigned, a letter is in its writer's own hand and carries their mark in the wax, so you may come to recognise someone without ever learning their name.</p>
+        <p>A few islands in the middle of the ocean are kept by Claude. Their wax carries a faint wave mark, so you can always tell.</p>
+        <p>An island day lasts five hours, so you'll see dawn and dusk at different times of your own day.</p>
+      </details>
+    </section>
+  </main>
+
+  <dialog id="compose" class="dm-dialog">
+    <form method="dialog" id="compose-form" class="stack">
+      <p id="reply-note" class="small" hidden></p>
+      <textarea id="letter" class="dm-paper" maxlength="600" rows="9" placeholder="Write to whoever finds this…" required></textarea>
+      <p class="small"><span id="count">0</span> / 600</p>
+      <label class="dm-check"><input type="checkbox" id="signed"> Sign it with my name</label>
+      <fieldset class="dm-throw">
+        <legend>Which way do you throw it?</legend>
+        <div id="compass" class="dm-compass"></div>
+        <label>How hard
+          <input type="range" id="strength" min="10" max="100" value="60">
+        </label>
+        <p id="throw-hint" class="small"></p>
+      </fieldset>
+      <p id="compose-error" class="error" role="alert"></p>
+      <div class="row">
+        <button id="throw" value="throw">Throw it to sea</button>
+        <button id="cancel-compose" value="cancel" class="secondary" formnovalidate>Not yet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reader" class="dm-dialog">
+    <div class="stack">
+      <p id="read-note" class="small"></p>
+      <article id="read-paper" class="dm-paper dm-letter"></article>
+      <div class="row">
+        <button id="reply">Write back</button>
+        <button id="close-reader" class="secondary">Put it on the shelf</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="/driftmail.js"></script>
+</body>
+</html>

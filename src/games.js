@@ -23,6 +23,15 @@ export const GAMES = [
     rooms: 'CFO_ROOMS',
     roblox: 'Cfo',
   },
+  {
+    id: 'driftmail',
+    name: 'Driftmail',
+    blurb: 'Alone on an island, you write letters, throw them to sea, and read what strangers send back.',
+    players: 'Any number of',
+    page: '/driftmail',
+    // One shared ocean rather than rooms, so there's no quick match; it needs an account.
+    world: 'OCEAN',
+  },
 ];
 
 export function findGame(id) {
