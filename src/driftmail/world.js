@@ -351,15 +351,73 @@ const CATCHES = [
   [42, 'fish'], [13, 'big fish'], [14, 'cuttlefish'], [12, 'crab'], [6, 'old bottle'], [4, 'curio'], [5, 'snag'], [4, 'strange'],
 ];
 
+// Where you can cast from the rocks. Each spot bites differently and favours its own catch; one
+// of them is lively each tide (fish are feeding there), and the water shows it if you look.
+export const SPOTS = {
+  shallows: {
+    name: 'The shallows', bite: 0.1, plain: 'Clear water over sand. Small fish dart about.',
+    lively: 'Little fish are jumping clear of the water.',
+    catches: [[60, 'fish'], [4, 'big fish'], [8, 'cuttlefish'], [18, 'crab'], [4, 'old bottle'], [4, 'curio'], [2, 'snag']],
+  },
+  reef: {
+    name: 'The reef', bite: 0, plain: 'Dark rock just under the surface.',
+    lively: 'Something is snapping at the weed on the rocks.',
+    catches: [[30, 'fish'], [10, 'big fish'], [10, 'cuttlefish'], [35, 'crab'], [5, 'curio'], [5, 'snag'], [5, 'strange']],
+  },
+  weed: {
+    name: 'The kelp bed', bite: 0, plain: 'A slow raft of kelp, swaying.',
+    lively: 'A cloud of ink is drifting out of the kelp.',
+    catches: [[30, 'fish'], [8, 'big fish'], [35, 'cuttlefish'], [6, 'crab'], [8, 'old bottle'], [6, 'curio'], [7, 'snag']],
+  },
+  deep: {
+    name: 'The deep water', bite: -0.15, plain: 'The bottom falls away here. The water is nearly black.',
+    lively: 'Gulls are diving, far out over the drop.',
+    catches: [[35, 'fish'], [35, 'big fish'], [6, 'cuttlefish'], [6, 'old bottle'], [6, 'snag'], [12, 'strange']],
+  },
+};
+export const SPOT_KINDS = Object.keys(SPOTS);
+
+// Which spot is lively during the tide at time t: the same for everyone, and new each tide.
+export function livelySpot(t) {
+  return SPOT_KINDS[Math.floor(tideRand(Math.floor(t / TIDE_MS), 0x5907)() * SPOT_KINDS.length)];
+}
+
+// What the water looks like at each spot right now.
+export function spotsAt(t) {
+  const lively = livelySpot(t);
+  return SPOT_KINDS.map((id) => ({ id, name: SPOTS[id].name, sign: id === lively ? SPOTS[id].lively : SPOTS[id].plain }));
+}
+
+// Once something bites, it fights: a run of pulls the player answers one at a time. Left wants you
+// to lean right, right wants you to lean left, and a dive away wants you to give it line. Bigger
+// things fight longer.
+export const PULLS = ['left', 'right', 'away'];
+export const ANSWERS = { left: 'right', right: 'left', away: 'give' };
+const FIGHT = { fish: 3, 'big fish': 5, cuttlefish: 3, crab: 2, 'old bottle': 2, curio: 1, snag: 2, strange: 4 };
+
+export function fight(what, rand) {
+  const n = FIGHT[what] ?? 3;
+  const runs = [];
+  for (let i = 0; i < n; i++) runs.push(PULLS[Math.floor(rand() * PULLS.length)]);
+  // Before the real bite, a few nibbles: small dips that pull nothing in if you strike at them.
+  return { runs, nibbles: Math.floor(rand() * 4) };
+}
+
+// Mistakes a fight forgives: one, and one more with Fisher's knots.
+export function slack(abilities = []) {
+  return abilities.includes('knots') ? 2 : 1;
+}
+
 export function castsPerTide(abilities = []) {
   return abilities.includes('knots') ? 2 : 1;
 }
 
-export function cast({ t, rand, hook = false, abilities = [], bait = false }) {
+export function cast({ t, rand, hook = false, abilities = [], bait = false, spot = null }) {
   const c = clock(t);
   const event = eventAt(t)?.kind;
   if (event === 'redtide') return null;
   let chance = 0.45;
+  if (spot && SPOTS[spot]) chance += SPOTS[spot].bite + (livelySpot(t) === spot ? 0.25 : 0);
   if (c.part === 'dawn' || c.part === 'dusk') chance += 0.2;
   if (!c.ebbing) chance += 0.1;
   if (hook) chance += 0.15;
@@ -370,7 +428,7 @@ export function cast({ t, rand, hook = false, abilities = [], bait = false }) {
   if (rand() >= Math.min(0.95, chance)) return null;
   let r = rand() * 100;
   let what = 'fish';
-  for (const [w, k] of CATCHES) {
+  for (const [w, k] of (spot && SPOTS[spot] ? SPOTS[spot].catches : CATCHES)) {
     if ((r -= w) < 0) {
       what = k;
       break;

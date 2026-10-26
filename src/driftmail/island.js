@@ -17,11 +17,13 @@ export const MATERIAL_FOUND = {
 };
 
 // --- The garden -----------------------------------------------------------------------------
-// Four plots. A crop grows one step for every tide it has been watered within the last two
+// Two wild plots by the stream from the start; garden beds make it four, keep the soil damp a
+// tide longer and add one to every harvest. A crop grows one step for every tide it has been watered within the last two
 // tides, so it pauses (never withers) while you're away. Harvesting gives its yield and one seed
 // back. The first seeds come in your starter crate; the rest come from strangers' bottles.
 
 export const PLOTS = 4;
+export const WILD_PLOTS = 2;
 export const CROPS = {
   berries: { name: 'Berry bush', seed: 'berry seeds', tides: 3, yields: { berries: 3 }, words: 'Berries press into ink, and make good bait.' },
   reeds: { name: 'Reeds', seed: 'reed shoots', tides: 2, yields: { reeds: 3 }, words: 'Reeds dry into paper on a drying rack.' },
@@ -30,17 +32,23 @@ export const CROPS = {
 };
 export const CROP_KINDS = Object.keys(CROPS);
 const DRY_AFTER = 2; // tides without water before a crop stops growing
+const BEDS_DRY_AFTER = 3;
+
+// What garden beds change: how many plots there are, how long they stay damp, and the bonus yield.
+export function gardenOf(builds = {}) {
+  return builds.garden ? { plots: PLOTS, dryAfter: BEDS_DRY_AFTER, bonus: 1 } : { plots: WILD_PLOTS, dryAfter: DRY_AFTER, bonus: 0 };
+}
 
 export function tideOf(t) {
   return Math.floor(t / TIDE_MS);
 }
 
 // Brings a plot up to the tide `now`: one step of growth for each watered tide.
-export function grow(plot, now) {
+export function grow(plot, now, dryAfter = DRY_AFTER) {
   if (!plot?.crop) return plot;
   const tide = tideOf(now);
   for (let n = plot.lastTide + 1; n <= tide; n++) {
-    if (n - plot.watered <= DRY_AFTER && plot.growth < CROPS[plot.crop].tides) plot.growth++;
+    if (n - plot.watered <= dryAfter && plot.growth < CROPS[plot.crop].tides) plot.growth++;
   }
   plot.lastTide = Math.max(plot.lastTide, tide);
   return plot;
@@ -56,12 +64,12 @@ export function ripe(plot) {
 }
 
 // A plot as the page shows it.
-export function plotView(plot, now) {
+export function plotView(plot, now, dryAfter = DRY_AFTER) {
   if (!plot?.crop) return { crop: null };
   const c = CROPS[plot.crop];
   return {
     crop: plot.crop, name: c.name, growth: plot.growth, needs: c.tides, ripe: ripe(plot),
-    dry: tideOf(now) - plot.watered > DRY_AFTER, watered: plot.watered === tideOf(now),
+    dry: tideOf(now) - plot.watered > dryAfter, watered: plot.watered === tideOf(now),
   };
 }
 
@@ -77,6 +85,18 @@ export const BUILDINGS = {
       { name: 'roof', cost: { leaves: 6, rope: 2 } },
     ],
     words: 'Somewhere dry to keep your letters: room for 300 once the roof is on.',
+  },
+  garden: {
+    name: 'Garden beds', cost: { driftwood: 2, stones: 3 },
+    words: 'Raised beds by the stream: four plots instead of two, soil that stays damp a tide longer, and one more of everything you pick.',
+  },
+  workshop: {
+    name: 'Workshop', cost: { driftwood: 4, rope: 2 },
+    words: 'A work table out of the wind: carve hooks, spears and traps, cut corks, boil glue and oil, and double-cork bottles.',
+  },
+  desk: {
+    name: 'Writing desk', cost: { driftwood: 3, leaves: 1 }, needs: 'shack',
+    words: 'Somewhere to copy out journal pages, draw pictures and keep a chart of who writes to you.',
   },
   shelves: { name: 'Shelves', cost: { driftwood: 3 }, needs: 'shack', room: 200, words: 'Room for 200 more letters.' },
   chest: { name: 'Sea chest', cost: { driftwood: 4, rope: 2 }, needs: 'shack', room: 200, words: 'Room for 200 more letters.' },
@@ -146,12 +166,12 @@ export const RECIPES = {
   paper: { name: 'Dry paper', needs: 'rack', cost: { reeds: 2 }, gives: { paper: 1 } },
   ink: { name: 'Press ink', needs: 'press', cost: { berries: 2 }, gives: { ink: 1 } },
   shimmer: { name: 'Press shimmering ink', needs: 'press', cost: { berries: 1, scales: 2 }, gives: { shimmer: 1 } },
-  cork: { name: 'Cut corks', cost: { bark: 1 }, gives: { corks: 2 } },
-  hook: { name: 'Carve a bone hook', cost: { bones: 5 }, once: 'hook' },
-  glue: { name: 'Boil down fish glue', cost: { fish: 2 }, gives: { glue: 1 } },
-  oil: { name: 'Render fish oil', cost: { fish: 2 }, gives: { oil: 1 } },
-  spear: { name: 'Make a spear', cost: { driftwood: 1, bones: 2 }, once: 'spear' },
-  trap: { name: 'Weave a trap', cost: { driftwood: 2, rope: 1 }, gives: { traps: 1 } },
+  cork: { needs: 'workshop', name: 'Cut corks', cost: { bark: 1 }, gives: { corks: 2 } },
+  hook: { needs: 'workshop', name: 'Carve a bone hook', cost: { bones: 5 }, once: 'hook' },
+  glue: { needs: 'workshop', name: 'Boil down fish glue', cost: { fish: 2 }, gives: { glue: 1 } },
+  oil: { needs: 'workshop', name: 'Render fish oil', cost: { fish: 2 }, gives: { oil: 1 } },
+  spear: { needs: 'workshop', name: 'Make a spear', cost: { driftwood: 1, bones: 2 }, once: 'spear' },
+  trap: { needs: 'workshop', name: 'Weave a trap', cost: { driftwood: 2, rope: 1 }, gives: { traps: 1 } },
   stamp: { name: 'Carve a stamp', needs: 'bench', ability: 'carving', cost: { driftwood: 1, bones: 1 }, once: 'stamp' },
 };
 
@@ -161,9 +181,9 @@ export const RECIPES = {
 
 export const CONTAINERS = {
   bottle: { name: 'Bottle', items: 1, cost: { bottles: 1, corks: 1 } },
-  double: { name: 'Double-corked bottle', items: 1, cost: { bottles: 1, corks: 2, wax: 1 }, words: 'Keeps the water out on a long drift, and rides the outer currents.' },
-  weighted: { name: 'Weighted bottle', items: 1, ability: 'deep', cost: { bottles: 1, corks: 1, stones: 2 }, words: 'Sinks into the deep current and surfaces far away, much later.' },
-  sailed: { name: 'Sailed float', items: 1, ability: 'deep', cost: { bottles: 1, corks: 1, driftwood: 1, rope: 1 }, words: 'Follows the wind instead of the current.' },
+  double: { name: 'Double-corked bottle', items: 1, needs: 'workshop', cost: { bottles: 1, corks: 2, wax: 1 }, words: 'Keeps the water out on a long drift, and rides the outer currents.' },
+  weighted: { name: 'Weighted bottle', items: 1, ability: 'deep', needs: 'workshop', cost: { bottles: 1, corks: 1, stones: 2 }, words: 'Sinks into the deep current and surfaces far away, much later.' },
+  sailed: { name: 'Sailed float', items: 1, ability: 'deep', needs: 'workshop', cost: { bottles: 1, corks: 1, driftwood: 1, rope: 1 }, words: 'Follows the wind instead of the current.' },
   jar: { name: 'Jar', items: 3, cost: { jars: 1, wax: 1 }, words: 'A few things at once; shorter and slower than a bottle.' },
   box: { name: 'Box', items: 8, needs: 'dock', cost: { driftwood: 4, rope: 2, glue: 1 }, words: 'Pushed off the dock on the tide: slow, close to the surface, and it can break in a storm.' },
   barrel: { name: 'Barrel', items: 20, needs: 'dock', cost: { driftwood: 8, rope: 2, glue: 1 }, words: 'Launched from the dock onto the outer currents. Travels far; storms can break it open.' },

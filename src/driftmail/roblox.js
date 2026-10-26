@@ -13,7 +13,7 @@ export const BRIDGE_VERSION = 1;
 
 const OPS = ['state', 'open', 'fish', 'craft', 'throw'];
 // Everything else goes to Ocean.act as { op, ... }.
-const ACTS = ['gather', 'build', 'make', 'plant', 'water', 'harvest', 'seal', 'spear', 'trap', 'traps', 'snag', 'mark', 'burn', 'pass'];
+const ACTS = ['cast', 'reel', 'gather', 'build', 'make', 'plant', 'water', 'harvest', 'seal', 'spear', 'trap', 'traps', 'snag', 'mark', 'burn', 'pass'];
 const SHELF = 25;
 const SENT = 10;
 
@@ -96,6 +96,9 @@ export function robloxView(s) {
     welcome: s.welcome ?? false,
     got: s.got ?? [],
     lostRing: s.lostRing ?? false,
+    line: s.line ?? null,
+    lost: s.lost ?? null,
+    beds: s.beds ?? false,
     done: s.gathered ?? s.built ?? s.made ?? s.planted ?? s.harvested ?? s.watered ?? null,
     materials: s.materials,
     seeds: s.seeds,

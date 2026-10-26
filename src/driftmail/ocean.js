@@ -1,12 +1,12 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   ABILITIES, ACTIVE_MS, DIRECTIONS, EVENTS, MAX_LETTER, MAX_TRAPS, OLD_HANDS, PAGES, REDRIFT_MS, STARTER_SUPPLIES,
-  SUPPLIES, TIDE_MS, canSpear, cast, castsPerTide, clock, curio, directionTo, drift, eventAt, eventOn, finder, flotsam,
+  ANSWERS, SPOTS, SUPPLIES, TIDE_MS, canSpear, cast, castsPerTide, fight, slack, spotsAt, clock, curio, directionTo, drift, eventAt, eventOn, finder, flotsam,
   oldPage, page, pagesFor, placeIsland, shore, signAt, spear, strangeCurio, tideWords, trapCatch, uniqueCurio, upcoming,
 } from './world.js';
 import {
   BUILDINGS, BUILD_KINDS, CONTAINERS, CROPS, CROP_KINDS, MARKS, MATERIALS, MATERIAL_FOUND, PEN_PAL_LETTERS, PLOTS,
-  RECIPES, RING_LOSS_IN_STORM, SEAL_GLYPHS, SEAL_WAX, STAMP_PATTERNS, blur, blurAmount, costWords, grow, nextBuild,
+  RECIPES, RING_LOSS_IN_STORM, gardenOf, SEAL_GLYPHS, SEAL_WAX, STAMP_PATTERNS, blur, blurAmount, costWords, grow, nextBuild,
   plant, plotView, ripe, shelfRoom, sinkChance, tideOf,
 } from './island.js';
 import { clue, clueText, echo, futureLetter, islandDay, knowingLetter, matchesClue } from './mysteries.js';
@@ -30,7 +30,7 @@ const FLOTSAM_ROLLS = 3;
 const WELCOME_BACK_MS = 12 * 60 * 60 * 1000;
 const WELCOME_ROLLS = 4;
 // What a castaway can gather inland once a tide, two at a time.
-const GATHER = ['leaves', 'clay', 'sand', 'stones'];
+const GATHER = ['leaves', 'clay', 'sand', 'stones', 'reeds', 'berries'];
 const GATHER_AMOUNT = 2;
 const MAX_LINE = 140;
 const CLUE_TIDES = 12;
@@ -239,6 +239,7 @@ export class Ocean extends DurableObject {
     let enclosed = null;
     if (pageId != null && pageId !== '') {
       if (!kit.pages.includes(pageId) || !page(pageId)) return { error: 'That page is not in your journal.' };
+      if (!kit.builds.desk) return { error: 'You need a writing desk to copy out a page.' };
       enclosed = pageId;
       // Copying a page out takes another sheet and more ink.
       add('paper');
@@ -319,6 +320,8 @@ export class Ocean extends DurableObject {
         if (!CROPS[it.crop]) return { error: 'There are no such seeds.' };
         cost[`seed:${it.crop}`] = (cost[`seed:${it.crop}`] ?? 0) + 1;
         out.push({ kind: 'seeds', crop: it.crop });
+      } else if ((it?.kind === 'drawing' || it?.kind === 'map') && !island.kit.builds.desk) {
+        return { error: `You need a writing desk to make a ${it.kind}.` };
       } else if (it?.kind === 'drawing') {
         if (typeof it.data !== 'string' || !/^[0-9a-f]{96}$/.test(it.data)) return { error: 'That drawing is smudged beyond saving.' };
         cost.paper = (cost.paper ?? 0) + 1;
@@ -400,6 +403,14 @@ export class Ocean extends DurableObject {
     kit.casts++;
     if (bait) kit.materials.berries--;
     const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: Boolean(bait) });
+    const { caught, snagged } = this.land(island, bite, now);
+    this.saveIsland(island);
+    return { ...this.state(island, now), caught: caught ?? 'nothing', snagged };
+  }
+
+  // What comes up on the line, onto the island: fish, ink, a crab, a bottle, a curio.
+  land(island, bite, now) {
+    const kit = island.kit;
     let caught = null;
     let snagged = false;
     if (bite) {
@@ -443,8 +454,7 @@ export class Ocean extends DurableObject {
         caught = name;
       }
     }
-    this.saveIsland(island);
-    return { ...this.state(island, now), caught: caught ?? 'nothing', snagged };
+    return { caught: caught ?? 'nothing', snagged };
   }
 
   catchFish(kit, n) {
@@ -743,7 +753,8 @@ export class Ocean extends DurableObject {
     const handIds = [...hands.keys()];
     const event = eventAt(now);
     const tideNow = tideOf(now);
-    for (const p of kit.plots) grow(p, now);
+    const garden = gardenOf(kit.builds);
+    for (const p of kit.plots) grow(p, now, garden.dryAfter);
     const pals = this.sql.exec(
       `SELECT sender, MAX(sender_name) AS name FROM bottles WHERE finder = ? AND old = 0 AND sender NOT LIKE 'sea:%' AND sender != ?
          GROUP BY sender HAVING COUNT(*) >= ?`,
@@ -793,12 +804,15 @@ export class Ocean extends DurableObject {
         traps: kit.traps.map((t) => ({ set: t.set, tides: Math.min(3, tideNow - tideOf(t.set)) })), maxTraps: MAX_TRAPS,
         snag: snag ? { id: snag.id, kind: snag.kind } : null,
         gathered: kit.gatheredTide === tideNow,
+        line: kit.line && tideOf(kit.line.cast) === tideNow ? { spot: kit.line.spot } : null,
+        spots: spotsAt(now),
         // The published Roblox build reads these for its hook and glue buttons.
         hookCost: RECIPES.hook.cost.bones, glueCost: RECIPES.glue.cost.fish,
       },
       materials: Object.fromEntries(Object.entries(kit.materials).filter(([, n]) => n > 0)),
       seeds: kit.seeds,
-      garden: kit.plots.map((p) => plotView(p, now)),
+      garden: kit.plots.map((p, i) => ({ ...plotView(p, now, garden.dryAfter), locked: i >= garden.plots && !p.crop })),
+      beds: Boolean(kit.builds.garden),
       crops: CROPS,
       builds: kit.builds,
       blueprints: BUILD_KINDS.map((k) => {
@@ -826,7 +840,7 @@ export class Ocean extends DurableObject {
       clues: kit.clues.filter((k) => k.until > now).map((k) => ({ text: clueText(k), until: k.until })),
       pals: pals.map((p) => p.name).filter(Boolean),
       marks: { kind: marks.kind, useful: marks.useful },
-      chart: this.chart(island),
+      chart: kit.builds.desk ? this.chart(island) : [],
       neighbours,
       room,
       held: shelf.length,
@@ -845,7 +859,7 @@ export class Ocean extends DurableObject {
 const ACTIONS = {
   // Pick up what's lying inland: palm leaves, clay, sand or stones, once a tide.
   gather(island, { what }) {
-    if (!GATHER.includes(what)) return { error: 'You can gather palm leaves, clay, sand or stones.' };
+    if (!GATHER.includes(what)) return { error: 'You can gather palm leaves, clay, sand, stones, wild reeds or wild berries.' };
     const kit = island.kit;
     const tide = tideOf(this.now());
     if (kit.gatheredTide === tide) return { error: 'You have gathered all you can carry this tide.' };
@@ -885,6 +899,7 @@ const ACTIONS = {
   plant(island, { plot, crop }, now) {
     const kit = island.kit;
     if (!Number.isInteger(plot) || plot < 0 || plot >= PLOTS) return { error: 'There is no such plot.' };
+    if (plot >= gardenOf(kit.builds).plots) return { error: 'Build garden beds for more room to plant.' };
     if (kit.plots[plot]?.crop) return { error: 'Something is already growing there.' };
     if (!CROPS[crop]) return { error: 'There are no such seeds.' };
     if (!(kit.seeds[crop] > 0)) return { error: `You have no ${CROPS[crop].seed}.` };
@@ -899,7 +914,7 @@ const ACTIONS = {
     let n = 0;
     for (const p of island.kit.plots) {
       if (!p?.crop) continue;
-      grow(p, now);
+      grow(p, now, gardenOf(island.kit.builds).dryAfter);
       p.watered = tide;
       n++;
     }
@@ -911,13 +926,15 @@ const ACTIONS = {
     const kit = island.kit;
     const p = kit.plots[plot];
     if (!p?.crop) return { error: 'Nothing is growing there.' };
-    grow(p, now);
+    grow(p, now, gardenOf(kit.builds).dryAfter);
     if (!ripe(p)) return { error: 'It isn\'t ready yet.' };
     const crop = CROPS[p.crop];
-    for (const [k, n] of Object.entries(crop.yields)) kit.materials[k] = (kit.materials[k] ?? 0) + n;
+    const bonus = gardenOf(kit.builds).bonus;
+    const got = Object.fromEntries(Object.entries(crop.yields).map(([k, n]) => [k, n + bonus]));
+    for (const [k, n] of Object.entries(got)) kit.materials[k] = (kit.materials[k] ?? 0) + n;
     kit.seeds[p.crop]++;
     kit.plots[plot] = { crop: null };
-    return { harvested: costWords(crop.yields) };
+    return { harvested: costWords(got) };
   },
 
   // Design a crest at the seal bench, cut into a ring you seal letters with.
@@ -937,6 +954,48 @@ const ACTIONS = {
     const r = await this.fish(island.key, { bait });
     Object.assign(island, this.island(island.key));
     return r.error ? r : { caught: r.caught, snagged: r.snagged };
+  },
+
+  // The fishing minigame, in two steps. Cast at a spot (reading the water tells you which one is
+  // lively): the server decides now what, if anything, will bite, and how it will fight. Then
+  // reel: strike on the real bite rather than a nibble, and answer each of its pulls.
+  cast(island, { spot, bait }, now) {
+    const kit = island.kit;
+    if (!SPOTS[spot]) return { error: 'Pick where to cast.' };
+    const tide = tideOf(now);
+    if (kit.fishedTide !== tide) {
+      kit.fishedTide = tide;
+      kit.casts = 0;
+    }
+    if (kit.casts >= castsPerTide(kit.abilities)) return { error: 'The fish have gone quiet. Try again next tide.' };
+    if (bait && !(kit.materials.berries > 0)) return { error: 'You have no berries for bait.' };
+    kit.casts++;
+    if (bait) kit.materials.berries--;
+    const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: Boolean(bait), spot });
+    if (!bite) {
+      kit.line = null;
+      return { line: { spot, bite: false } };
+    }
+    const f = fight(bite.what, this.rand);
+    kit.line = { spot, bite, ...f, slack: slack(kit.abilities), cast: now };
+    return { line: { spot, bite: true, nibbles: f.nibbles, runs: f.runs, slack: kit.line.slack } };
+  },
+
+  reel(island, { strike, answers }, now) {
+    const kit = island.kit;
+    const line = kit.line;
+    if (!line) return { error: 'Your line isn\'t in the water.' };
+    kit.line = null;
+    // A line left out past the tide has long since been stripped of its bait.
+    if (tideOf(now) !== tideOf(line.cast)) return { caught: 'nothing', lost: 'The line went slack while you were away.' };
+    if (strike !== line.nibbles) {
+      return { caught: 'nothing', lost: strike < line.nibbles ? 'You struck at a nibble, and the fish took fright.' : 'You were too slow. Whatever it was spat the hook.' };
+    }
+    const given = Array.isArray(answers) ? answers : [];
+    let misses = 0;
+    for (let i = 0; i < line.runs.length; i++) if (given[i] !== ANSWERS[line.runs[i]]) misses++;
+    if (misses > line.slack) return { caught: 'nothing', lost: 'The line snapped. It got away.' };
+    return this.land(island, line.bite, now);
   },
 
   // Wade out at low tide with a spear, once a tide.
@@ -1080,7 +1139,7 @@ function kitOf(json = '{}') {
     plots: Array.from({ length: PLOTS }, (_, i) => plots[i] ?? { crop: null }),
     builds: k.builds ?? {}, ring: Boolean(k.ring), designed: Boolean(k.designed), stamp: k.stamp ?? null,
     spear: Boolean(k.spear), spearTide: k.spearTide ?? null, traps: k.traps ?? [], snag: k.snag ?? null,
-    clues: k.clues ?? [], gatheredTide: k.gatheredTide ?? null,
+    clues: k.clues ?? [], gatheredTide: k.gatheredTide ?? null, line: k.line ?? null,
   };
 }
 

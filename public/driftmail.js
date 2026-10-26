@@ -12,7 +12,7 @@ const MATERIAL_NAMES = {
   driftwood: 'Driftwood', rope: 'Rope', clay: 'Clay', sand: 'Sand', stones: 'Stones', leaves: 'Palm leaves', reeds: 'Reeds',
   berries: 'Berries', bark: 'Bark', wax: 'Wax', oil: 'Fish oil', scales: 'Fish scales', jars: 'Jars', shimmer: 'Shimmering ink', traps: 'Traps',
 };
-const GATHER = [['leaves', 'Palm leaves'], ['clay', 'Clay'], ['sand', 'Sand'], ['stones', 'Stones']];
+const GATHER = [['leaves', 'Palm leaves'], ['clay', 'Clay'], ['sand', 'Sand'], ['stones', 'Stones'], ['reeds', 'Wild reeds'], ['berries', 'Wild berries']];
 const WAX_NAMES = ['red', 'blue', 'green', 'violet', 'amber', 'black', 'rose'];
 const STRANGE_NOTES = {
   knowing: 'A bottle with no seal washed up, very cold to the touch. Nobody signed it. It seems to know you.',
@@ -33,6 +33,7 @@ let dir = null;
 let replyTo = null;
 let throwing = null; // the bottle flying off after a throw, for a moment
 let casting = 0; // when the line last went out, for the little float on the water
+let fishing = null; // the fishing minigame while it plays: { spot, phase, dip, pull, ... }
 const bottleSpots = [];
 
 // --- talking to the ocean -------------------------------------------------------------------
@@ -495,9 +496,28 @@ function drawRocks(wl) {
     ctx.fill();
   }
   const k = (performance.now() - casting) / 1000;
-  if (casting && k < 6) {
-    const fx = rx + 70;
-    const fy = ry + 14 + Math.sin(k * 3) * 2;
+  if (fishing || (casting && k < 6)) {
+    const [ox, oy] = SPOT_AT[fishing?.spot] ?? [70, 14];
+    let fx = rx + ox;
+    let fy = ry + oy + Math.sin(k * 3) * 2;
+    let r = 4;
+    const now = performance.now();
+    if (fishing?.dipUntil > now) {
+      // A nibble tugs the float down a little; the real bite pulls it right under.
+      fy += fishing.deep ? 6 : 3;
+      r = fishing.deep ? 1.5 : 3;
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.beginPath();
+      ctx.arc(fx, fy, fishing.deep ? 10 + ((now / 60) % 6) : 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (fishing?.phase === 'fight') {
+      // The fish runs, and the line goes with it.
+      const pull = fishing.pull;
+      fx += pull === 'left' ? -40 : pull === 'right' ? 40 : 0;
+      fy += pull === 'away' ? -10 : 0;
+      r = pull === 'away' ? 1.5 : 3;
+    }
     ctx.strokeStyle = 'rgba(240,240,240,0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -506,10 +526,13 @@ function drawRocks(wl) {
     ctx.stroke();
     ctx.fillStyle = '#e04a3a';
     ctx.beginPath();
-    ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    ctx.arc(fx, fy, r, 0, Math.PI * 2);
     ctx.fill();
   }
 }
+
+// Where the float sits for each spot, from the rocks.
+const SPOT_AT = { shallows: [50, 30], reef: [80, -30], weed: [70, 50], deep: [130, 6] };
 
 // What the sea is doing, drawn over everything: rain, silver fish, floating planks.
 function drawEvent(kind) {
@@ -652,8 +675,17 @@ function render() {
     li.append(el('strong', '', String(n)));
     return li;
   }));
-  $('fish').disabled = kit.casts < 1;
-  $('fish').textContent = kit.casts < 1 ? 'Fished out this tide' : 'Cast a line';
+  $('casts-left').textContent = kit.casts < 1 ? 'The fish have gone quiet. Try again next tide.'
+    : `Read the water, then pick where to cast${kit.casts > 1 ? ` (${kit.casts} casts left this tide)` : ''}:`;
+  $('spots').replaceChildren(...kit.spots.map((sp) => {
+    const b = el('button', 'secondary', sp.name);
+    b.append(el('span', 'sign', sp.sign));
+    b.disabled = kit.casts < 1 || Boolean(fishing);
+    b.addEventListener('click', () => castAt(sp.id));
+    const li = el('li');
+    li.append(b);
+    return li;
+  }));
   $('spear').hidden = !kit.spear;
   $('spear').disabled = !kit.canSpear;
   $('spear').textContent = kit.canSpear ? 'Wade out with the spear' : kit.lowTide ? 'Speared this tide' : 'Spear (wait for low tide)';
@@ -749,6 +781,7 @@ function renderIsland() {
   }));
 
   $('garden').replaceChildren(...state.garden.map((p, i) => {
+    if (p.locked) return el('li', 'when', 'Room for another plot, once you build garden beds.');
     const li = el('li');
     const row = el('div', 'row');
     if (!p.crop) {
@@ -905,7 +938,8 @@ function drawChart() {
       g.fillText(c.name.length > 14 ? `${c.name.slice(0, 13)}…` : c.name, x, y - 8);
     });
   }
-  $('chart-note').textContent = state.chart.length
+  $('chart-note').textContent = !state.builds.desk ? 'Build a writing desk to keep a chart of who writes to you.'
+    : state.chart.length
     ? `Placed by the beaches their letters reach.${state.pals.length ? ` Ringed: pen pals, with a steady current between you.` : ''}`
     : 'Signed letters you find will mark this chart, by the beach they wash up on.';
 }
@@ -1149,6 +1183,9 @@ function compose(answering = null) {
   $('item-seeds').value = '';
   $('item-map').checked = false;
   $('item-drawing').checked = false;
+  const desk = Boolean(state.builds.desk);
+  $('item-map').closest('label').hidden = !desk;
+  $('item-drawing').closest('label').hidden = !desk;
   $('pad').hidden = true;
   pad.fill(0);
   paintPad();
@@ -1158,7 +1195,7 @@ function compose(answering = null) {
     return o;
   }));
   $('bundle-n').value = '0';
-  $('page-row').hidden = state.journal.length === 0;
+  $('page-row').hidden = state.journal.length === 0 || !state.builds.desk;
   $('page').replaceChildren(blank('No page'), ...state.journal.map((p) => {
     const o = el('option', '', p.title);
     o.value = p.id;
@@ -1283,18 +1320,141 @@ $('compose-form').addEventListener('submit', async (e) => {
 
 // --- fishing -------------------------------------------------------------------------------
 
-$('fish').addEventListener('click', async () => {
+// The minigame: cast at a spot, watch the float, strike on the real bite, then answer the pulls.
+// The server has already decided what's down there and how it fights; this plays it out and
+// sends back when you struck and how you answered.
+const NIBBLE_MS = 450;
+const BITE_MS = 900;
+const PULL_MS = 2200;
+const PULL_WORDS = { left: 'It runs hard to the left!', right: 'It runs hard to the right!', away: 'It dives for the deep water!' };
+
+async function castAt(spot) {
+  if (fishing) return;
   casting = performance.now();
   sound.fx('cast');
-  const s = await call('/api/driftmail/fish', { bait: $('bait').checked });
+  const s = await act('cast', { spot, bait: $('bait').checked });
   if (!s) return;
   if (s.error) {
     $('fish-note').textContent = s.error;
     return;
   }
   take({ ...s, found: [] });
-  $('fish-note').textContent = s.caught === 'nothing' ? 'Nothing bit. The line comes back empty.' : `You caught ${s.caught}.`;
   $('bait').checked = false;
+  $('fish-note').textContent = '';
+  fishing = { spot, line: s.line, phase: 'wait', dips: 0, struck: null, answers: [], timers: [] };
+  showLine('The float settles on the water. Watch it…', 'wait');
+  render();
+  if (!s.line.bite) {
+    later(4000 + Math.random() * 2500, () => endFishing('Nothing so much as nibbles here. You reel the line back in.'));
+    return;
+  }
+  // A few nibbles at uneven gaps, then the real bite.
+  let t = 1200 + Math.random() * 1500;
+  for (let i = 0; i < s.line.nibbles; i++) {
+    const at = t;
+    later(at, () => dip(false));
+    t += 1300 + Math.random() * 1800;
+  }
+  later(t, () => dip(true));
+}
+
+function later(ms, fn) {
+  fishing.timers.push(setTimeout(fn, ms));
+}
+
+function dip(deep) {
+  if (!fishing || fishing.phase !== 'wait') return;
+  const index = fishing.dips++;
+  fishing.deep = deep;
+  fishing.dipUntil = performance.now() + (deep ? BITE_MS : NIBBLE_MS);
+  fishing.dipIndex = index;
+  sound.fx(deep ? 'bite' : 'nibble');
+  showLine(deep ? 'The float goes right under!' : 'The float dips…', deep ? 'urgent' : 'wait');
+  // Too slow on the real bite: it spits the hook.
+  if (deep) later(BITE_MS, () => fishing?.phase === 'wait' && reel(fishing.line.nibbles + 1));
+}
+
+function strike() {
+  if (!fishing || fishing.phase !== 'wait') return;
+  const now = performance.now();
+  // Struck while nothing was pulling counts as striking at a nibble.
+  const on = fishing.dipUntil > now ? fishing.dipIndex : -1;
+  if (on !== fishing.line.nibbles) {
+    reel(on);
+    return;
+  }
+  fishing.phase = 'fight';
+  fishing.round = 0;
+  showLine('Hooked! Hold on…', 'urgent');
+  nextPull();
+}
+
+function nextPull() {
+  const runs = fishing.line.runs;
+  if (fishing.round >= runs.length) {
+    reel(fishing.line.nibbles);
+    return;
+  }
+  const round = fishing.round;
+  fishing.pull = runs[round];
+  sound.fx('pull');
+  showLine(PULL_WORDS[fishing.pull], 'fight');
+  later(PULL_MS, () => fishing?.round === round && answer(null));
+}
+
+// One answer per pull: presses between pulls count for nothing.
+function answer(a) {
+  if (!fishing || fishing.phase !== 'fight' || !fishing.pull) return;
+  fishing.answers.push(a);
+  fishing.round++;
+  fishing.pull = null;
+  for (const id of ['lean-left', 'give-line', 'lean-right']) $(id).disabled = true;
+  later(500, nextPull);
+}
+
+async function reel(strikeAt) {
+  if (!fishing || fishing.phase === 'done') return;
+  fishing.phase = 'done';
+  const s = await act('reel', { strike: strikeAt, answers: fishing.answers });
+  if (!s || s.error) {
+    endFishing(s?.error ?? '');
+    return;
+  }
+  take({ ...s, found: [] });
+  endFishing(s.caught === 'nothing' ? s.lost ?? 'It got away.' : `You land ${s.caught}.`);
+}
+
+function endFishing(words) {
+  if (fishing) for (const t of fishing.timers) clearTimeout(t);
+  fishing = null;
+  $('line').hidden = true;
+  $('fish-note').textContent = words;
+  if (state) render();
+}
+
+function showLine(words, mode) {
+  $('line').hidden = false;
+  $('line-say').textContent = words;
+  $('line-say').classList.toggle('urgent', mode === 'urgent' || mode === 'fight');
+  const fight = mode === 'fight';
+  $('strike').hidden = fight || fishing?.phase === 'fight';
+  for (const id of ['lean-left', 'give-line', 'lean-right']) {
+    $(id).hidden = !(fishing?.phase === 'fight');
+    $(id).disabled = !fight;
+  }
+}
+
+$('strike').addEventListener('click', strike);
+$('lean-left').addEventListener('click', () => answer('left'));
+$('lean-right').addEventListener('click', () => answer('right'));
+$('give-line').addEventListener('click', () => answer('give'));
+document.addEventListener('keydown', (e) => {
+  if (!fishing || e.target.closest?.('textarea, input, select')) return;
+  const key = { ' ': 'strike', ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'give' }[e.key];
+  if (!key) return;
+  e.preventDefault();
+  if (key === 'strike') strike();
+  else if (fishing.phase === 'fight' && fishing.pull) answer(key);
 });
 
 // --- sound ---------------------------------------------------------------------------------
@@ -1384,6 +1544,10 @@ const sound = (() => {
       f.frequency.value = name === 'cast' ? 1800 : 900;
       n.connect(f).connect(out);
       n.start();
+    } else if (name === 'nibble' || name === 'bite') {
+      tone(name === 'bite' ? 330 : 520, name === 'bite' ? 0.35 : 0.1, 'sine', out, name === 'bite' ? 0.3 : 0.12);
+    } else if (name === 'pull') {
+      tone(180, 0.25, 'sawtooth', out, 0.06); // the line singing
     } else if (name === 'open') {
       tone(880, 0.15, 'triangle', out, 0.25); // the cork
       setTimeout(() => ac && tone(660, 0.4, 'sine', out, 0.1), 90);
