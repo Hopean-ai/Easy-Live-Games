@@ -5,5 +5,6 @@ export { Accounts } from './accounts.js';
 export { Matchmaker } from './matchmaker.js';
 export { CfoRoom } from './cfo/room.js';
 export { Ocean } from './driftmail/ocean.js';
+export { Camp } from './legio/camp.js';
 
 export default { fetch: handleRequest };

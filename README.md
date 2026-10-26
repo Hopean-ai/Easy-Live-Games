@@ -1,6 +1,6 @@
 # Easy-Live-Games
 
-Real-time multiplayer games on Cloudflare Workers and Durable Objects: Pong, CFO and Driftmail.
+Real-time multiplayer games on Cloudflare Workers and Durable Objects: Pong, CFO and Driftmail, plus Legio, a single-player game with a shared leaderboard.
 
 Sign in with a username and password, or play as a guest, then pick a game. In Pong, **Quick match** pairs you with the next player who is looking, or you can create a private room and share its link. Anyone else who opens a room's link watches as a spectator. First to 7 wins.
 
@@ -57,6 +57,18 @@ Alone on an island, you write letters, throw them to sea, and read what stranger
 - **Claude castaways** (`src/driftmail/castaways.js`): two islands in the middle kept by Claude, which answer the letters that reach them 15 to 45 minutes later. Their wax carries a faint wave mark. They write through the Claude API with `claude-opus-5-5` at low effort, with server-side refusal fallbacks on. Set the key once with `npx wrangler secret put ANTHROPIC_API_KEY`; without it the castaways are quiet and bottles pass them by.
 
 The brainstorm and what comes next (crops, building, seals, the map): [Driftmail brainstorm](https://claude.ai/artifact/Axmpz1BVCJTNzKVtgPQBXW).
+
+## Legio
+
+A single-player roguelike: you enlist in a Roman legion in 235 AD, at the start of the third-century crisis, and try to climb from *tiro* (recruit) to *Imperator*. You have one life, a full career takes about an hour (around 100 choices), and finished careers go on a shared leaderboard. It needs an account, which keeps your career so you can stop and come back.
+
+- **`src/legio/rules.js`**: the whole game, as pure functions over a plain run object. Everything is a card: each half-year (campaign season, winter quarters) starts with an orders card (drill, study letters, court the officers, side work, raids, and for officers spending on or squeezing your men), and what you order plus the year's history queue battles, promotion boards, plague, civil wars and random events behind it. The run carries its own seeded dice, so the server alone decides outcomes and a reload can't reroll.
+- **Ranks** use their Latin names with an English line under each: tiro, miles gregarius, immunis, tesserarius, signifer, optio, centurio, centurio primi ordinis, primus pilus, praefectus castrorum, praefectus legionis, dux, Imperator. A promotion needs a vacancy above you; the board weighs *virtus* (courage), *gratia* (favour) and *litterae* (letters), and you can lean on a patron's letter or a bribe. Until about 262, when Gallienus shut senators out of army commands, commanding a legion is much harder to get.
+- **History**: the real emperors from Maximinus Thrax to Diocletian (each change can leave your legion on the losing side), the campaign years on each front, named battles (Misiche, Abritus, Edessa, Naissus, Emesa, Châlons and more), the Plague of Cyprian, III Augusta's dissolution in 238, the Gallic Empire, and debased coinage.
+- **The purple**: as praefectus legionis or dux with your soldiers' love (*milites*) high enough, your men may hail you emperor. As emperor, every half-year risks assassination; abdicating after two years ends the run safely with a big bonus. Death ends the run; the score is the highest rank reached plus standing, decorations, years served, wealth and reign.
+- **`src/legio/camp.js`**: the `Camp` Durable Object (named "legio") keeps each account's career and the leaderboard in SQLite. The page (`public/legio.html` / `legio.js`) calls `/api/legio/state`, `/api/legio/enlist` and `/api/legio/choose` (with the card's turn number, so a double click can't answer twice).
+
+The brainstorm and the research behind it: [Climbing the Eagle](https://claude.ai/artifact/DBV1Mgnin4RBs8pe7VvJUJ).
 
 ## Claude players (CFO)
 

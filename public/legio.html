@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Legio · Live Multiplayer Games</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/legio.css">
+</head>
+<body class="legio">
+  <main>
+    <header class="lg-head">
+      <p class="small"><a href="/">All games</a></p>
+      <h1>Legio</h1>
+      <p class="sub" id="sub">From recruit to emperor, if you live.</p>
+    </header>
+
+    <section id="signin" class="stack narrow" hidden>
+      <p>Legio keeps your career on your account, so you can stop and pick it up later, and puts your best career on the leaderboard.</p>
+      <p><a id="signin-link" href="/">Sign in or create an account</a> to enlist.</p>
+    </section>
+
+    <section id="intro" class="stack lg-intro" hidden>
+      <p>It is 235 AD. The army has just murdered its emperor and hailed one of its own, a soldier who rose from the ranks. For the next fifty years, emperors will be made and killed by the legions.</p>
+      <p>You enlist as a recruit. Every half-year you choose what to do; battles, plague, patrons and civil wars do the rest. Climb from <em>tiro</em> to <em>centurio</em>, to <em>primus pilus</em>, and perhaps to the purple. You have one life, and a full career takes about an hour.</p>
+      <div class="row"><button id="enlist">Enlist</button></div>
+    </section>
+
+    <section id="game" class="lg-game" hidden>
+      <div class="lg-main">
+        <article id="card" class="lg-card" aria-live="polite">
+          <h2 id="card-title"></h2>
+          <p id="card-text"></p>
+          <div id="choices" class="lg-choices"></div>
+          <p id="error" class="error" role="alert"></p>
+        </article>
+
+        <section id="ended" class="lg-card lg-ended" hidden>
+          <h2>Your career</h2>
+          <p id="fate" class="lg-fate"></p>
+          <p>Score: <strong id="final-score"></strong></p>
+          <ol id="story" class="lg-story"></ol>
+          <div class="row"><button id="again">Enlist again</button></div>
+        </section>
+
+        <section>
+          <h3>Recent days</h3>
+          <ol id="log" class="lg-log"></ol>
+        </section>
+      </div>
+
+      <aside class="lg-side">
+        <section class="lg-panel">
+          <h3 id="soldier-name"></h3>
+          <p class="small" id="soldier-rank"></p>
+          <dl class="lg-facts">
+            <dt>Legion</dt><dd id="f-legion"></dd>
+            <dt>Front</dt><dd id="f-front"></dd>
+            <dt>Emperor</dt><dd id="f-emperor"></dd>
+            <dt>Age</dt><dd id="f-age"></dd>
+            <dt>Service</dt><dd id="f-years"></dd>
+            <dt>Purse</dt><dd id="f-denarii"></dd>
+            <dt>Score</dt><dd id="f-score"></dd>
+          </dl>
+        </section>
+        <section class="lg-panel">
+          <h3>Standing</h3>
+          <div id="stats" class="lg-stats"></div>
+        </section>
+        <section class="lg-panel">
+          <h3>The ladder</h3>
+          <ol id="ladder" class="lg-ladder"></ol>
+        </section>
+        <section class="lg-panel" id="decorations-panel" hidden>
+          <h3>Decorations</h3>
+          <ul id="decorations" class="lg-list"></ul>
+        </section>
+      </aside>
+    </section>
+
+    <section id="board-section" class="lg-board" hidden>
+      <h2>The leaderboard</h2>
+      <p class="small" id="my-best"></p>
+      <table>
+        <thead><tr><th>#</th><th>Soldier</th><th>Highest rank</th><th class="fate">Fate</th><th class="num">Score</th></tr></thead>
+        <tbody id="board"></tbody>
+      </table>
+      <p class="small" id="board-empty" hidden>No careers have ended yet. Yours could be the first.</p>
+    </section>
+  </main>
+  <script type="module" src="/legio.js"></script>
+</body>
+</html>
