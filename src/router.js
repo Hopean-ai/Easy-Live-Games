@@ -79,6 +79,20 @@ export async function handleRequest(request, env) {
     return Response.json({ available: Boolean(env.ROBLOX_KEY), link: await accounts.robloxLink(name) });
   }
 
+  // Legio (src/legio/camp.js): a solo career on a shared leaderboard, played as your account.
+  const legio = path.match(/^\/api\/legio\/(state|enlist|choose)$/);
+  if (legio) {
+    const name = await accountName(request, env);
+    if (!name) return Response.json({ error: 'Sign in to play Legio.' }, { status: 401 });
+    const camp = env.CAMP.get(env.CAMP.idFromName('legio'));
+    if (legio[1] === 'state') return Response.json(await camp.state(name));
+    if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+    const body = await readJson(request);
+    if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const result = legio[1] === 'enlist' ? await camp.enlist(name) : await camp.choose(name, body);
+    return Response.json(result, { status: result.error ? 400 : 200 });
+  }
+
   // Driftmail (src/driftmail/ocean.js): one shared ocean, played as your account.
   const driftmail = path.match(/^\/api\/driftmail\/(state|throw|open|fish|craft)$/);
   if (driftmail) {

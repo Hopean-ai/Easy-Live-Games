@@ -116,7 +116,7 @@ function gameCard(game) {
   blurb.textContent = game.blurb;
   const players = document.createElement('span');
   players.className = 'small';
-  players.textContent = `${game.players} players`;
+  players.textContent = game.players === 1 ? 'Single player' : `${game.players} players`;
   if (game.roblox) {
     // Played together with the Roblox hub, so the same rooms and quick match.
     const badge = document.createElement('span');

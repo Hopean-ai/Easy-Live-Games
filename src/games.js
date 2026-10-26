@@ -34,6 +34,16 @@ export const GAMES = [
     world: 'OCEAN',
     roblox: 'Driftmail',
   },
+  {
+    id: 'legio',
+    name: 'Legio',
+    blurb: 'Enlist in a Roman legion in 235 AD and climb from recruit to emperor, if you live. One life, about an hour, and a leaderboard.',
+    players: 1,
+    page: '/legio',
+    // Played alone against the dice, so no rooms or quick match: the Camp object (src/legio/camp.js)
+    // keeps each account's career and the leaderboard.
+    solo: 'CAMP',
+  },
 ];
 
 export function findGame(id) {
