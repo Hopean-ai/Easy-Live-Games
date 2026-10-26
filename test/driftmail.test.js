@@ -300,7 +300,7 @@ test('a storm throws bottles much further than a calm sea', () => {
   assert.ok(olds('wreck') > olds(null) * 3);
 });
 
-test('fishing: once a tide, catches add fish and bones, and a shoal helps', async () => {
+test('fishing: a few casts a tide, catches add fish and bones, and a shoal helps', async () => {
   const o = ocean({ seed: 3 });
   await o.visit('alice');
   let caught = 0;
@@ -309,8 +309,9 @@ test('fishing: once a tide, catches add fish and bones, and a shoal helps', asyn
     assert.equal(r.error, undefined);
     assert.equal(typeof r.caught, 'string');
     if (r.caught !== 'nothing') caught++;
-    assert.equal(r.kit.casts, 0);
-    assert.ok((await o.fish('alice')).error, 'one cast a tide');
+    assert.equal(r.kit.casts, 3);
+    for (let n = 0; n < 3; n++) assert.equal((await o.fish('alice')).error, undefined);
+    assert.ok((await o.fish('alice')).error, 'four casts a tide');
     later(o, TIDE_MS);
   }
   assert.ok(caught > 5);
@@ -386,7 +387,7 @@ test('a page copied into a letter teaches its finder too, and costs paper and in
   const opened = await o.openBottle('bob', bob.beach[0].id);
   assert.equal(opened.learned, "Fisher's knots");
   assert.equal(opened.shelf[0].page.title, 'Knots');
-  assert.equal(opened.kit.casts, 2, 'two casts a tide now');
+  assert.equal(opened.kit.casts, 6, 'two more casts a tide now');
 });
 
 test('abilities: reading hands groups letters, sea signs forecast, the current tells where bottles went', async () => {
