@@ -46,7 +46,7 @@ await robloxWorld(ocean, { ...rb, op: 'state' });
 await ocean.visit('miles');
 await ocean.throwBottle('miles', { text: 'Is anyone out there?\nI can see smoke to the east.', signed: true, dir: 0, strength: 0.5 });
 const island = ocean.island('roblox:1');
-island.kit = { ...island.kit, pages: ['salt-knots'], abilities: ['knots'], fish: 3, bones: 2 };
+island.kit = { ...island.kit, pages: ['salt-knots'], abilities: ['knots'], fish: 3, bones: 2, builds: { desk: 1 } };
 ocean.saveIsland(island);
 now += MAX_DRIFT_MS + 2 * REDRIFT_MS;
 await ocean.alarm();

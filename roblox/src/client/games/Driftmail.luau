@@ -47,6 +47,7 @@ return function(hub: any)
 		ui.shimmer = false
 		ui.forge = 0 -- index into the hands the player can copy, 0 for their own
 		ui.bait = false
+		ui.fishing = nil
 		ui.passing = false
 		ui.passDir = 0
 		ui.passLine = ""
@@ -57,6 +58,7 @@ return function(hub: any)
 	end
 
 	local usable, seedList, forgeable
+	local answer, strike, castAt
 
 	local function text(view: any, key: string?): string?
 		return key and view.texts and view.texts[key] or nil
@@ -388,7 +390,7 @@ return function(hub: any)
 				render()
 			end, { Parent = opts, LayoutOrder = 2 })
 		end
-		if #v.journal > 0 then
+		if #v.journal > 0 and v.builds.desk then
 			local p = v.journal[ui.page]
 			chip("Fold in a page: " .. (if p then p.title else "none"), function()
 				ui.page = (ui.page + 1) % (#v.journal + 1)
@@ -444,10 +446,12 @@ return function(hub: any)
 				render()
 			end, { Parent = things, LayoutOrder = 2 })
 		end
-		chip((if ui.map then "✓ " else "") .. "A copy of my chart", function()
-			ui.map = not ui.map
-			render()
-		end, { Parent = things, LayoutOrder = 3 })
+		if v.builds.desk then
+			chip((if ui.map then "✓ " else "") .. "A copy of my chart", function()
+				ui.map = not ui.map
+				render()
+			end, { Parent = things, LayoutOrder = 3 })
+		end
 		heading("Which way do you throw it?", { TextSize = 14, Parent = col, LayoutOrder = 5 })
 		local dirs = row({ Parent = col, LayoutOrder = 6 })
 		for i, d in Bridge.DIRS do
@@ -470,7 +474,7 @@ return function(hub: any)
 				render()
 				return
 			end
-			local p = v.journal[ui.page]
+			local p = if v.builds.desk then v.journal[ui.page] else nil
 			local dir = ui.dir
 			local items = {}
 			if v.curios[ui.curio] then
@@ -480,7 +484,7 @@ return function(hub: any)
 			if sd then
 				table.insert(items, { kind = "seeds", crop = sd })
 			end
-			if ui.map then
+			if ui.map and v.builds.desk then
 				table.insert(items, { kind = "map" })
 			end
 			local h = forgeable(v)[ui.forge]
@@ -531,7 +535,9 @@ return function(hub: any)
 		local seeds = seedList(v)
 		for i, p in v.garden do
 			local plot = i - 1
-			if not p.crop then
+			if p.locked then
+				small("Room for another plot, once you build garden beds.", { Parent = col, LayoutOrder = 4 + i })
+			elseif not p.crop then
 				if #seeds > 0 then
 					local r = row({ Parent = col, LayoutOrder = 4 + i })
 					small("Plot " .. i .. " is empty. Plant:", { Parent = r, LayoutOrder = 0 })
@@ -621,6 +627,133 @@ return function(hub: any)
 		end
 	end
 
+	-- The fishing minigame. The server has already decided what is down there and how it fights;
+	-- this plays it out with timers and sends back when the player struck and how they answered.
+	local function endFishing(words: string)
+		ui.fishing = nil
+		ui.note = words
+		render()
+	end
+
+	local function reel(strikeAt: number)
+		local f = ui.fishing
+		if not f or f.phase == "done" then
+			return
+		end
+		f.phase = "done"
+		local res = ask("reel", { strike = strikeAt, answers = f.answers })
+		if res then
+			endFishing(if res.caught == "nothing" or res.caught == nil then (res.lost or "It got away.") else "You land " .. res.caught .. ".")
+		else
+			endFishing("")
+		end
+	end
+
+	local function say(words: string, urgent: boolean?)
+		ui.fishing.say = words
+		ui.fishing.urgent = urgent == true
+		render()
+	end
+
+	local function nextPull()
+		local f = ui.fishing
+		if not f or f.phase ~= "fight" then
+			return
+		end
+		if f.round > #f.line.runs then
+			reel(f.line.nibbles)
+			return
+		end
+		local round = f.round
+		f.pull = f.line.runs[round]
+		say(Bridge.PULL_WORDS[f.pull], true)
+		task.delay(Bridge.PULL_SECONDS, function()
+			if ui.fishing == f and f.round == round and f.pull then
+				answer("none")
+			end
+		end)
+	end
+
+	-- One answer per pull: presses between pulls count for nothing.
+	function answer(a: string)
+		local f = ui.fishing
+		if not f or f.phase ~= "fight" or not f.pull then
+			return
+		end
+		table.insert(f.answers, a)
+		f.round += 1
+		f.pull = nil
+		say("…", false)
+		task.delay(0.5, nextPull)
+	end
+
+	function strike()
+		local f = ui.fishing
+		if not f or f.phase ~= "wait" then
+			return
+		end
+		-- Struck while nothing was pulling counts as striking at a nibble.
+		local on = if f.dipping then f.dips - 1 else -1
+		if on ~= f.line.nibbles then
+			reel(on)
+			return
+		end
+		f.phase = "fight"
+		f.round = 1
+		say("Hooked! Hold on…", true)
+		task.delay(0.6, nextPull)
+	end
+
+	local function dip(deep: boolean)
+		local f = ui.fishing
+		if not f or f.phase ~= "wait" then
+			return
+		end
+		f.dips += 1
+		f.dipping = true
+		local index = f.dips
+		say(if deep then "The float goes right under!" else "The float dips…", deep)
+		task.delay(if deep then Bridge.BITE_SECONDS else Bridge.NIBBLE_SECONDS, function()
+			if ui.fishing ~= f or f.dips ~= index or f.phase ~= "wait" then
+				return
+			end
+			f.dipping = false
+			if deep then
+				reel(f.line.nibbles + 1) -- too slow: it spat the hook
+			else
+				say("The float settles again. Watch it…")
+			end
+		end)
+	end
+
+	function castAt(spot: string)
+		if ui.fishing then
+			return
+		end
+		local res = ask("cast", { spot = spot, bait = ui.bait })
+		if not res or not res.line then
+			return
+		end
+		ui.bait = false
+		local f = { line = res.line, phase = "wait", dips = 0, dipping = false, answers = {}, say = "The float settles on the water. Watch it…" }
+		ui.fishing = f
+		render()
+		if not res.line.bite then
+			task.delay(4 + math.random() * 2.5, function()
+				if ui.fishing == f then
+					endFishing("Nothing so much as nibbles here. You reel the line back in.")
+				end
+			end)
+			return
+		end
+		local t = 1.2 + math.random() * 1.5
+		for _ = 1, res.line.nibbles do
+			task.delay(t, dip, false)
+			t += 1.3 + math.random() * 1.8
+		end
+		task.delay(t, dip, true)
+	end
+
 	local function renderFishing(col: Frame, v: any)
 		local kit = v.kit
 		local _, c = card({ Parent = col, LayoutOrder = 1 })
@@ -629,17 +762,34 @@ return function(hub: any)
 		pair(c, "Bones", tostring(kit.bones), 3)
 		pair(c, "Fish glue", tostring(kit.glue), 4)
 		pair(c, "Hook", if kit.hook then "bone" else "nail", 5)
-		button(if kit.casts < 1 then "Fished out this tide" else "Cast a line", function()
-			if kit.casts < 1 then
-				return
+		local f = ui.fishing
+		if f then
+			-- The minigame: watch the float, strike on the real bite, then answer each pull.
+			local box = make("Frame", { BackgroundColor3 = SEA, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = col, LayoutOrder = 2 }, { corner(8), pad(10) })
+			local bc = column({ Parent = box }, 8)
+			label(f.say, { TextColor3 = if f.urgent then WARN else Color3.fromHex("#d9eef7"), Font = Enum.Font.GothamBold, Parent = bc, LayoutOrder = 1 })
+			if f.phase == "wait" then
+				button("Strike!", function()
+					strike()
+				end, { Parent = bc, LayoutOrder = 2 })
+			elseif f.phase == "fight" then
+				local r = row({ Parent = bc, LayoutOrder = 2 })
+				for i, a in { { "left", "← Lean left" }, { "give", "↓ Give line" }, { "right", "Lean right →" } } do
+					chip(a[2], function()
+						answer(a[1])
+					end, { Parent = r, LayoutOrder = i }, if f.pull then "primary" else "secondary")
+				end
 			end
-			local res = ask("fish", { bait = ui.bait })
-			if res and res.caught then
-				ui.bait = false
-				ui.note = if res.caught == "nothing" then "Nothing bit. The line comes back empty." else "You caught " .. res.caught .. "."
-				render()
+		else
+			small(if kit.casts < 1 then "The fish have gone quiet. Try again next tide." else "Read the water, then pick where to cast:", { Parent = col, LayoutOrder = 2 })
+			for i, sp in kit.spots or {} do
+				button(sp.name .. "\n" .. sp.sign, function()
+					if kit.casts >= 1 then
+						castAt(sp.id)
+					end
+				end, { Parent = col, LayoutOrder = 2, Name = "Spot" .. i, TextXAlignment = Enum.TextXAlignment.Left }, if kit.casts < 1 then "secondary" else "primary")
 			end
-		end, { Parent = col, LayoutOrder = 2 }, if kit.casts < 1 then "secondary" else "primary")
+		end
 		if (v.materials.berries or 0) > 0 then
 			chip((if ui.bait then "✓ " else "") .. "Bait the hook with a berry", function()
 				ui.bait = not ui.bait
@@ -675,7 +825,7 @@ return function(hub: any)
 				doing("snag", { keep = false }, "You untangle it and let it drift on its way.")
 			end, { Parent = r, LayoutOrder = 2 }, "secondary")
 		end
-		small("You can fish once a tide. Dawn, dusk and a rising tide are best, and a berry for bait helps. Make a bone hook, glue, oil, a spear and traps on the Build tab.", { Parent = col, LayoutOrder = 5 })
+		small("One spot is lively each tide, and the water shows which. Little dips are only nibbles: strike when the float goes right under. Then lean against each run, and give it line when it dives. Dawn, dusk, a rising tide and bait all help; make a hook, spear and traps at a workshop (Build tab).", { Parent = col, LayoutOrder = 5 })
 	end
 
 	local function renderJournal(col: Frame, v: any)
@@ -697,7 +847,9 @@ return function(hub: any)
 			small("A clue from a strange bottle. It goes stale " .. Bridge.untilText(v.now, k["until"]) .. ".", { Parent = col, LayoutOrder = 31 + i * 2 })
 		end
 		heading("Your chart", { TextSize = 14, Parent = col, LayoutOrder = 60 })
-		if #v.chart == 0 then
+		if not v.builds.desk then
+			small("Build a writing desk to keep a chart of who writes to you.", { Parent = col, LayoutOrder = 61 })
+		elseif #v.chart == 0 then
 			small("Signed letters you find mark your chart, by the beach they wash up on.", { Parent = col, LayoutOrder = 61 })
 		end
 		local pals = {}

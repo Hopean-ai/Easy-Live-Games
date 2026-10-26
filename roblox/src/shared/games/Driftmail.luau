@@ -24,8 +24,15 @@ Bridge.MAX_LETTER = 600
 Bridge.MAX_LINE = 140
 
 -- What can be gathered inland once a tide, and how a letter can be marked.
-Bridge.GATHER = { "leaves", "clay", "sand", "stones" }
-Bridge.GATHER_NAMES = { "Palm leaves", "Clay", "Sand", "Stones" }
+Bridge.GATHER = { "leaves", "clay", "sand", "stones", "reeds", "berries" }
+Bridge.GATHER_NAMES = { "Palm leaves", "Clay", "Sand", "Stones", "Wild reeds", "Wild berries" }
+
+-- The fishing minigame: how a fish pulls, how to answer each pull, and the words for it.
+Bridge.ANSWERS = { left = "right", right = "left", away = "give" }
+Bridge.PULL_WORDS = { left = "It runs hard to the left!", right = "It runs hard to the right!", away = "It dives for the deep water!" }
+Bridge.NIBBLE_SECONDS = 0.5
+Bridge.BITE_SECONDS = 1
+Bridge.PULL_SECONDS = 2.5
 Bridge.MARKS = { "kind", "useful", "rude" }
 Bridge.WAX_NAMES = { "red", "blue", "green", "violet", "amber", "black", "rose" }
 
@@ -86,6 +93,21 @@ function Bridge.cleanWorld(arg: any): { [string]: any }?
 		return { op = op }
 	elseif op == "fish" then
 		return { op = op, bait = arg.bait == true }
+	elseif op == "cast" then
+		return if word(arg.spot) then { op = op, spot = arg.spot, bait = arg.bait == true } else nil
+	elseif op == "reel" then
+		local strike = int(arg.strike, -1, 20)
+		local answers = {}
+		if strike == nil or (arg.answers ~= nil and type(arg.answers) ~= "table") then
+			return nil
+		end
+		for i, a in arg.answers or {} do
+			if i > 10 or not (a == "left" or a == "right" or a == "give" or a == "none") then
+				return nil
+			end
+			answers[i] = a
+		end
+		return { op = op, strike = strike, answers = answers }
 	elseif op == "gather" then
 		return if table.find(Bridge.GATHER, arg.what) then { op = op, what = arg.what } else nil
 	elseif op == "build" or op == "make" then

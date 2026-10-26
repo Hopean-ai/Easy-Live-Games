@@ -96,3 +96,11 @@ input[type="range"] { padding: 0; }
 #mark-row { align-items: center; gap: 6px; }
 #mark-row button { padding: 4px 10px; font-size: 0.85rem; }
 #mark-row button[aria-pressed="true"] { background: var(--accent); color: #062018; }
+
+.dm-spots button { width: 100%; text-align: left; padding: 6px 8px; font-size: 0.85rem; }
+.dm-spots .sign { display: block; color: var(--muted); font-size: 0.75rem; font-weight: normal; }
+.dm-line { margin: 8px 0; padding: 10px; border-radius: 8px; background: #20303a; color: #d9eef7; }
+.dm-line-say { margin: 0 0 8px; min-height: 2.6em; }
+.dm-line-say.urgent { color: #f0c674; font-weight: 600; }
+.dm-line-buttons { gap: 6px; flex-wrap: wrap; }
+.dm-line-buttons button { flex: 1; padding: 8px 6px; }

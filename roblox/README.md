@@ -19,7 +19,7 @@ The hub's routes on the website (`src/router.js`), all `POST` with the key:
 | `/api/roblox/<game>/<room>` | A room: ops `join`, `leave`, `act`, `poll`, answered by the room's `roblox(body)` method. |
 | `/api/roblox/match/<game>` | Quick match, in the same queue as web players. |
 | `/api/roblox/link` | The account link, shared by every game. |
-| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, and the island actions (`gather`, `build`, `make`, `plant`, `water`, `harvest`, `seal`, `spear`, `trap`, `traps`, `snag`, `mark`, `burn`, `pass`), answered with the player's view (`src/driftmail/roblox.js`). |
+| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, and the island actions (`cast`, `reel`, `gather`, `build`, `make`, `plant`, `water`, `harvest`, `seal`, `spear`, `trap`, `traps`, `snag`, `mark`, `burn`, `pass`), answered with the player's view (`src/driftmail/roblox.js`). |
 
 ## The code
 

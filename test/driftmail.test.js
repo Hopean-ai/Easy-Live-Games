@@ -332,6 +332,7 @@ test('bones make a hook and fish make glue, which seals a bottle instead of a co
   const island = o.island('alice');
   island.kit.bones = 6;
   island.kit.fish = 2;
+  island.kit.builds = { workshop: 1 };
   o.saveIsland(island);
   const hooked = await o.craft('alice', 'hook');
   assert.equal(hooked.kit.hook, true);
@@ -373,6 +374,7 @@ test('a page copied into a letter teaches its finder too, and costs paper and in
   await o.visit('bob');
   const island = o.island('alice');
   island.kit.pages = ['salt-knots'];
+  island.kit.builds = { desk: 1 };
   o.saveIsland(island);
   assert.ok((await o.throwBottle('alice', { text: 'Try this.', dir: 0, strength: 0.5, page: 'keeper-signs' })).error, 'only pages you hold');
   const sent = await o.throwBottle('alice', { text: 'Try this.', dir: 0, strength: 0.5, page: 'salt-knots' });
@@ -459,6 +461,7 @@ test('the garden grows while watered, pauses while dry, and gives a crop and a s
   assert.equal(dry.growth, 2, 'two tides on one watering, then it waits');
   const o = ocean();
   await o.visit('a');
+  assert.match((await o.act('a', { op: 'plant', plot: 2, crop: 'reeds' })).error, /garden beds/, 'two wild plots until there are beds');
   assert.ok((await o.act('a', { op: 'plant', plot: 0, crop: 'reeds' })).seeds.reeds === 1);
   assert.ok((await o.act('a', { op: 'plant', plot: 0, crop: 'berries' })).error, 'one crop a plot');
   assert.ok((await o.act('a', { op: 'harvest', plot: 0 })).error, 'not ready');
@@ -470,12 +473,24 @@ test('the garden grows while watered, pauses while dry, and gives a crop and a s
   assert.equal(h.materials.reeds, 3);
   assert.equal(h.seeds.reeds, 2);
   assert.equal(h.garden[0].crop, null);
+  // Garden beds: two more plots, and one more of everything picked.
+  give(o, 'a', (_, k) => { k.builds = { garden: 1 }; });
+  assert.equal((await o.act('a', { op: 'plant', plot: 2, crop: 'reeds' })).error, undefined);
+  later(o, TIDE_MS);
+  await o.act('a', { op: 'water' });
+  later(o, TIDE_MS);
+  assert.equal((await o.act('a', { op: 'harvest', plot: 2 })).materials.reeds, 7);
+  // Wild reeds and berries can be gathered too.
+  later(o, TIDE_MS);
+  assert.equal((await o.act('a', { op: 'gather', what: 'berries' })).materials.berries >= 2, true);
 });
 
 test('recipes need their building and ability, and turn materials into supplies', async () => {
   const o = ocean();
   await o.visit('a');
   give(o, 'a', (_, k) => { k.materials = { reeds: 4, rope: 2, clay: 6, sand: 4, stones: 4, driftwood: 4, bark: 1 }; });
+  assert.match((await o.act('a', { op: 'make', what: 'cork' })).error, /workshop/);
+  give(o, 'a', (_, k) => { k.builds = { workshop: 1 }; });
   assert.ok((await o.act('a', { op: 'make', what: 'paper' })).error, 'needs a drying rack');
   await o.act('a', { op: 'build', what: 'rack' });
   const paper = await o.act('a', { op: 'make', what: 'paper' });
@@ -515,6 +530,8 @@ test('drawings and maps go in a bottle; a map lists the writers you have heard f
   const o = ocean();
   await o.visit('alice');
   await o.visit('bob');
+  assert.match((await o.throwBottle('alice', { text: 'Look.', dir: 0, strength: 0.5, items: [{ kind: 'drawing', data: 'f0'.repeat(48) }] })).error, /writing desk/);
+  for (const k of ['alice', 'bob']) give(o, k, (_, kit) => { kit.builds = { shack: 3, desk: 1 }; });
   assert.ok((await o.throwBottle('alice', { text: 'Look.', dir: 0, strength: 0.5, items: [{ kind: 'drawing', data: 'zz' }] })).error);
   const data = 'f0'.repeat(48);
   await o.throwBottle('alice', { text: 'Look.', signed: true, dir: 0, strength: 0.5, items: [{ kind: 'drawing', data }] });
@@ -532,7 +549,7 @@ test('drawings and maps go in a bottle; a map lists the writers you have heard f
 test('weighted and sailed bottles need deep current lore, which takes two pages', async () => {
   const o = ocean();
   await o.visit('a');
-  give(o, 'a', (_, k) => { k.materials = { stones: 2 }; });
+  give(o, 'a', (_, k) => { k.materials = { stones: 2 }; k.builds = { workshop: 1 }; });
   assert.match((await o.throwBottle('a', { text: 'Deep.', dir: 0, strength: 0.5, kind: 'weighted' })).error, /know how/);
   const island = o.island('a');
   assert.match(o.learn(island, 'salt-deep-1'), /1 of 2/);
@@ -702,7 +719,7 @@ test('fishing extras: bait, a spear at low tide, traps, and snagging a bottle on
   await o.visit('alice');
   await o.visit('bob');
   assert.ok((await o.fish('alice', { bait: true })).error, 'no berries');
-  give(o, 'alice', (_, k) => { k.materials = { berries: 3, driftwood: 4, rope: 2 }; k.bones = 2; });
+  give(o, 'alice', (_, k) => { k.materials = { berries: 3, driftwood: 4, rope: 2 }; k.bones = 2; k.builds = { workshop: 1 }; });
   const baited = await o.fish('alice', { bait: true });
   assert.equal(baited.materials.berries, 2);
   await o.act('alice', { op: 'make', what: 'spear' });
@@ -822,6 +839,8 @@ test('the Roblox view keeps new player words (chart names, added lines) in texts
   const o = ocean();
   await o.visit('alice');
   await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
+  give(o, 'alice', (_, k) => { k.builds = { desk: 1 }; });
+  give(o, 'roblox:42', (_, k) => { k.builds = { desk: 1 }; });
   await o.throwBottle('alice', { text: 'With a picture.', signed: true, dir: 0, strength: 0.5, items: [{ kind: 'drawing', data: 'ab'.repeat(48) }] });
   await deliver(o);
   let v = await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
@@ -844,4 +863,41 @@ test('the Roblox view keeps new player words (chart names, added lines) in texts
   const { texts, ...rest } = back;
   assert.ok(!JSON.stringify(rest).includes('Ray read this'));
   assert.ok(!JSON.stringify(rest).includes('With a picture'));
+});
+
+test('fishing as a minigame: read the water, strike on the real bite, and answer each pull', async () => {
+  const { SPOT_KINDS, livelySpot, spotsAt, ANSWERS } = await import('../src/driftmail/world.js');
+  const signs = spotsAt(5 * TIDE_MS);
+  assert.equal(signs.length, SPOT_KINDS.length);
+  assert.equal(livelySpot(5 * TIDE_MS), livelySpot(5 * TIDE_MS + 1000), 'the same all tide');
+  // Find a cast that bites, playing it right.
+  const play = async (seed, wrong = 0, early = false) => {
+    const o = ocean({ seed });
+    await o.visit('a');
+    for (let i = 0; i < 20; i++) {
+      const c = await o.act('a', { op: 'cast', spot: livelySpot(o.now()) });
+      assert.equal(c.error, undefined);
+      if (c.line.bite) {
+        const answers = c.line.runs.map((r, k) => (k < wrong ? 'nonsense' : ANSWERS[r]));
+        return { o, c, r: await o.act('a', { op: 'reel', strike: early ? c.line.nibbles - 1 : c.line.nibbles, answers }) };
+      }
+      assert.ok((await o.act('a', { op: 'reel', strike: 0, answers: [] })).error, 'nothing to reel in');
+      later(o, TIDE_MS);
+    }
+    throw new Error('nothing bit');
+  };
+  const good = await play(3);
+  assert.notEqual(good.r.caught, 'nothing');
+  assert.ok((await good.o.act('a', { op: 'reel', strike: 0, answers: [] })).error, 'the line comes in once');
+  const snapped = await play(3, 3);
+  assert.equal(snapped.r.caught, 'nothing');
+  assert.match(snapped.r.lost, /snapped/);
+  const forgiven = await play(3, 1);
+  assert.notEqual(forgiven.r.caught, 'nothing', 'one wrong move is forgiven');
+  let s = 4;
+  let nibbly;
+  do nibbly = await play(s++); while (nibbly.c.line.nibbles === 0);
+  const early = await play(s - 1, 0, true);
+  assert.match(early.r.lost, /nibble/);
+  assert.ok((await early.o.act('a', { op: 'cast', spot: 'moon' })).error);
 });
