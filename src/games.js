@@ -29,8 +29,10 @@ export const GAMES = [
     blurb: 'Alone on an island, you write letters, throw them to sea, and read what strangers send back.',
     players: 'Any number of',
     page: '/driftmail',
-    // One shared ocean rather than rooms, so there's no quick match; it needs an account.
+    // One shared ocean rather than rooms, so there's no quick match. On the web it needs an
+    // account; on Roblox, an unlinked player gets an island of their own (src/driftmail/roblox.js).
     world: 'OCEAN',
+    roblox: 'Driftmail',
   },
 ];
 
@@ -52,6 +54,8 @@ export function publicGames() {
 // What the Roblox hub lists in its game picker: the games it can relay, in the site's order.
 export function robloxGames() {
   return GAMES.filter((g) => g.roblox).map((g) => {
+    // A world has no rooms or tables: the hub opens its screens straight away.
+    if (g.world) return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), world: true };
     const { min, max } = tableSize(g);
     return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), minPlayers: min, maxPlayers: max };
   });

@@ -401,3 +401,51 @@ test('abilities: reading hands groups letters, sea signs forecast, the current t
   assert.ok(Array.isArray(bob.forecast));
   assert.match(bob.sent[0].rest, /^came to rest (not far|a good way|far) to the /);
 });
+
+// --- Roblox ---------------------------------------------------------------------------------
+
+const { robloxWorld, robloxView, BRIDGE_VERSION } = await import('../src/driftmail/roblox.js');
+
+test('a Roblox player gets their own island, signed with their Roblox name, or their linked account\'s', async () => {
+  const o = ocean();
+  const mine = await robloxWorld(o, { op: 'state', userId: '42', name: 'RobloxRay', account: null });
+  assert.equal(mine.bridge, BRIDGE_VERSION);
+  assert.ok(o.island('roblox:42'));
+  assert.equal(o.island('roblox:42').name, 'RobloxRay');
+  await o.visit('alice');
+  const linked = await robloxWorld(o, { op: 'state', userId: '43', name: 'Other', account: 'alice' });
+  assert.equal(linked.hand, o.island('alice').hand);
+  assert.equal(o.island('roblox:43'), null);
+  assert.equal((await robloxWorld(o, { op: 'nope', userId: '42' })).error, 'Bad request.');
+  const bad = await robloxWorld(o, { op: 'throw', userId: '42', name: 'RobloxRay', text: '', dir: 0, strength: 0.5 });
+  assert.equal(bad.bridge, BRIDGE_VERSION);
+  assert.ok(bad.error);
+});
+
+test('the Roblox view keeps every word players wrote in texts, by keys that name one text', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
+  await o.throwBottle('alice', { text: 'Hello from the web.', signed: true, dir: 0, strength: 0.5 });
+  const island = o.island('roblox:42');
+  o.oldBottle(island, o.now());
+  o.saveIsland(island);
+  later(o, MAX_DRIFT_MS + 2 * REDRIFT_MS);
+  await o.alarm();
+  let v = await robloxWorld(o, { op: 'state', userId: '42', name: 'Ray' });
+  for (const b of v.beach) v = await robloxWorld(o, { op: 'open', userId: '42', name: 'Ray', id: b.id });
+  const letter = v.shelf.find((l) => !l.old);
+  const old = v.shelf.find((l) => l.old);
+  assert.ok(letter && old);
+  assert.equal(v.texts[letter.text], 'Hello from the web.');
+  assert.equal(v.texts[letter.name], 'alice');
+  assert.equal(old.text, null, 'the journals are the game\'s own words');
+  assert.ok(old.body.length > 20);
+  // Nothing a player wrote is anywhere else in the view.
+  const { texts, ...rest } = v;
+  assert.ok(!JSON.stringify(rest).includes('Hello from the web'));
+  assert.ok(!JSON.stringify(rest).includes('alice'));
+  const thrown = await robloxWorld(o, { op: 'throw', userId: '42', name: 'Ray', text: 'Back at you.', dir: 4, strength: 0.6, signed: true });
+  assert.equal(thrown.texts[thrown.sent[0].text], 'Back at you.');
+  assert.equal(robloxView(await o.visit('roblox:42')).sent[0].text, thrown.sent[0].text, 'the same key every time');
+});

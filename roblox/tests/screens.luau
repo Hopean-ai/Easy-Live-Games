@@ -3,159 +3,27 @@
 -- every property set; button presses and the server are faked. Run from roblox/:
 --   node ../scripts/roblox-fixture.mjs > tests/fixture.json && lune run tests/screens
 local fs = require("@lune/fs")
-local luau = require("@lune/luau")
 local serde = require("@lune/serde")
-local roblox = require("@lune/roblox")
 local Bridge = require("../src/shared/games/Cfo")
-local Hub = require("../src/shared/Hub")
+local Harness = require("./harness")
 
 local fixture = serde.decode("json", fs.readFile("tests/fixture.json"))
 
--- Real instances behind thin wrappers that add the events Lune's instances don't have.
-local realOf: { [any]: any } = setmetatable({}, { __mode = "k" }) :: any
-local clicks: { [any]: () -> () } = {}
-local function unwrap(v: any): any
-	return realOf[v] or v
-end
-local function wrap(inst: any): any
-	if inst == nil then
-		return nil
-	end
-	local proxy
-	proxy = setmetatable({}, {
-		__index = function(_, k)
-			if k == "Activated" then
-				return { Connect = function(_, fn) clicks[inst] = fn end }
-			elseif k == "GetPropertyChangedSignal" then
-				return function() return { Connect = function() end } end
-			elseif k == "ClearAllChildren" then
-				return function() inst:ClearAllChildren() end
-			elseif k == "WaitForChild" then
-				return function(_, name) return wrap(inst:FindFirstChild(name)) end
-			end
-			local v = inst[k]
-			return if typeof(v) == "Instance" then wrap(v) else v
-		end,
-		__newindex = function(_, k, v)
-			inst[k] = unwrap(v)
-		end,
-	})
-	realOf[proxy] = inst
-	return proxy
-end
-
-local playerGui = roblox.Instance.new("Folder")
-local sent: { { any } } = {}
-local onState: ((any) -> ())? = nil
-local focused: any = nil
-local services = {
-	UserInputService = {
-		GetFocusedTextBox = function() return focused end,
-		TextBoxFocusReleased = { Connect = function() end },
-	},
-	Players = { LocalPlayer = { WaitForChild = function() return wrap(playerGui) end } },
-	ReplicatedStorage = {
-		WaitForChild = function(_, name)
-			if name == "HubShared" then
-				return {
-					WaitForChild = function(_, child)
-						if child == "games" then
-							return { WaitForChild = function(_, m) return "shared:" .. m end }
-						end
-						return "shared:" .. child
-					end,
-				}
-			end
-			return {
-				WaitForChild = function(_, remote)
-					if remote == "Request" then
-						return {
-							InvokeServer = function(_, kind, arg)
-								table.insert(sent, { kind, arg })
-								if kind == "hello" then
-									return { games = { { id = "cfo", name = "CFO", blurb = "An accounting board game.", players = "2–6", minPlayers = 2, maxPlayers = 6 } }, link = { linked = false } }
-								elseif kind == "link" then
-									return { link = { linked = true, admin = true, games = { { game = "bottles", code = "OTHR", updated = 2 }, { game = "cfo", code = "WXYZ", updated = 1 } } } }
-								end
-								return {}
-							end,
-						}
-					end
-					return { OnClientEvent = { Connect = function(_, fn) onState = fn end } }
-				end,
-			}
-		end,
-	},
-}
--- The client folder: the hub's Ui module and one game's screens.
-local clientFolder = {
-	WaitForChild = function(_, name)
-		if name == "games" then
-			return { GetChildren = function() return { { Name = "Cfo", IsA = function(_, c) return c == "ModuleScript" end, path = "src/client/games/Cfo.luau" } } end }
+local h = Harness.start({
+	games = { "Cfo" },
+	invoke = function(kind)
+		if kind == "hello" then
+			return { games = { { id = "cfo", name = "CFO", blurb = "An accounting board game.", players = "2–6", minPlayers = 2, maxPlayers = 6 } }, link = { linked = false } }
+		elseif kind == "link" then
+			return { link = { linked = true, admin = true, games = { { game = "bottles", code = "OTHR", updated = 2 }, { game = "cfo", code = "WXYZ", updated = 1 } } } }
 		end
-		return { path = "src/client/" .. name .. ".luau" }
+		return {}
 	end,
-}
-local env = setmetatable({
-	game = { GetService = function(_, name) return services[name] end },
-	script = { Parent = clientFolder },
-	require = nil :: any,
-	Instance = { new = function(className) return wrap(roblox.Instance.new(className)) end },
-	UDim2 = roblox.UDim2, UDim = roblox.UDim, Color3 = roblox.Color3, Vector2 = roblox.Vector2, Enum = roblox.Enum,
-	-- Spawned work runs straight away, so the screens can be checked right after.
-	task = { spawn = function(fn, ...) fn(...) end, delay = function() end, wait = function() end },
-}, { __index = _G })
-local loaded = {}
-env.require = function(what)
-	if what == "shared:Hub" then
-		return Hub
-	elseif what == "shared:Cfo" then
-		return Bridge
-	end
-	assert(type(what) == "table" and what.path, "unexpected require")
-	if not loaded[what.path] then
-		loaded[what.path] = luau.load(fs.readFile(what.path), { debugName = what.path, environment = env })()
-	end
-	return loaded[what.path]
+})
+local sent, has, press, pressNamed = h.sent, h.has, h.press, h.pressNamed
+local function onState(msg: any)
+	h.onState(msg)
 end
-
-local function texts(): { string }
-	local out = {}
-	for _, d in playerGui:GetDescendants() do
-		if d:IsA("TextLabel") or d:IsA("TextButton") then
-			table.insert(out, d.Text)
-		end
-	end
-	return out
-end
-local function has(fragment: string): boolean
-	for _, t in texts() do
-		if t:find(fragment, 1, true) then
-			return true
-		end
-	end
-	return false
-end
-local function press(fragment: string, exact: boolean?)
-	for _, d in playerGui:GetDescendants() do
-		if d:IsA("TextButton") and (if exact then d.Text == fragment else d.Text:find(fragment, 1, true)) then
-			clicks[d]()
-			return
-		end
-	end
-	error("no button with " .. fragment)
-end
-local function pressNamed(name: string)
-	for _, d in playerGui:GetDescendants() do
-		if d.Name == name then
-			clicks[d]()
-			return
-		end
-	end
-	error("nothing named " .. name)
-end
-
-luau.load(fs.readFile("src/client/Main.client.luau"), { debugName = "Main.client", environment = env })()
 assert(sent[1] and sent[1][1] == "hello", "the hub asks for the games and the account link")
 assert(has("Play CFO"), "the picker lists the games")
 assert(has("Have a link code?"), "an unlinked player can enter a link code")
@@ -175,7 +43,7 @@ press("New room")
 assert(sent[#sent][1] == "new" and sent[#sent][2] == "cfo", "New room asks the server for that game")
 press("Quick match")
 assert(sent[#sent][1] == "quick" and sent[#sent][2] == "cfo", "Quick match asks the server for that game")
-assert(onState, "the client listens for state")
+assert(h.onState, "the client listens for state")
 onState({ queue = { waiting = 2, max = 6, startsIn = 12 } })
 assert(has("Finding players: 2 of 6"), "the queue shows")
 press("Cancel")
@@ -208,7 +76,7 @@ if plain then
 	assert(last[1] == "send" and last[2].t == "act" and last[2].a == plain.action.a, "a move button sends its action")
 end
 local squares = 0
-for _, d in playerGui:GetDescendants() do
+for _, d in h.descendants() do
 	if d:IsA("Frame") and d.Size.X.Scale > 0 and d.Size.X.Scale < 0.1 then
 		squares += 1
 	end
@@ -270,10 +138,10 @@ assert(#sent == before, "an entry with no amounts is not sent")
 assert(has("Every line needs a debit or a credit."), "and says why")
 
 -- Typing waits for redraws: nothing is redrawn while a box has the cursor.
-focused = {}
+h.focused = {}
 onState({ view = fixture.watching })
 assert(has("Post entry"), "no redraw while typing")
-focused = nil
+h.focused = nil
 
 press("Turn")
 onState({ view = fixture.watching })

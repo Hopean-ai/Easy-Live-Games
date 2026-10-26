@@ -206,7 +206,7 @@ local function renderPicker()
 		local f = make("Frame", { BackgroundColor3 = Ui.PANEL2, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = col, LayoutOrder = 10 + i }, { corner(8), stroke(), pad(10) })
 		local c = column({ Parent = f }, 4)
 		heading(g.name, { Parent = c, LayoutOrder = 1 })
-		small(g.blurb .. " " .. g.players .. " players.", { Parent = c, LayoutOrder = 2 })
+		small(g.blurb .. " " .. g.players .. " players." .. (if g.world then " One shared ocean with players on the website." else ""), { Parent = c, LayoutOrder = 2 })
 		button("Play " .. g.name, function()
 			pickGame(g.id)
 		end, { Parent = c, LayoutOrder = 3 })
@@ -290,6 +290,9 @@ function render()
 		else
 			s.render(view)
 		end
+	elseif info and s and info.world then
+		-- One shared world (Driftmail): no lobby or rooms, its screens open straight away.
+		s.render(nil)
 	elseif info and s then
 		renderLobby(info)
 	else

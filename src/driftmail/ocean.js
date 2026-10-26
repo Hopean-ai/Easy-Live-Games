@@ -55,10 +55,12 @@ export class Ocean extends DurableObject {
   // A player looks at their island: it's made on the first visit, then the tides that passed
   // since the last one leave a little flotsam (at most two tides' worth, so time away never
   // piles up a fortune).
-  async visit(account) {
+  // `name` is what signed letters say, when it isn't the account name (a Roblox player's own
+  // island is keyed by user id but signed with their Roblox name).
+  async visit(account, name = account) {
     const now = this.now();
     await this.settle(now);
-    const island = this.island(account) ?? this.newIsland(account, now);
+    const island = this.island(account) ?? this.newIsland(account, now, name);
     const tideNow = Math.floor(now / TIDE_MS);
     const found = [];
     for (let n = Math.max(island.tides + 1, tideNow - 1); n <= tideNow; n++) {
@@ -330,7 +332,7 @@ export class Ocean extends DurableObject {
     return row ? { ...row, supplies: JSON.parse(row.supplies), curios: JSON.parse(row.curios), kit: kitOf(row.kit) } : null;
   }
 
-  newIsland(name, now) {
+  newIsland(key, now, name = key) {
     this.ensureCastaways(now);
     const n = this.sql.exec('SELECT COUNT(*) AS n FROM islands').toArray()[0].n;
     const { x, y } = placeIsland(n);
@@ -338,7 +340,7 @@ export class Ocean extends DurableObject {
     // thing nobody else has.
     const curios = [{ name: curio(this.rand) }, { name: curio(this.rand) }, { name: uniqueCurio(this.rand), unique: true }];
     const island = {
-      key: name.toLowerCase(), name, x, y, created: now, seen: now, hand: this.randomInt(), emblem: this.randomInt(),
+      key: String(key).toLowerCase(), name: String(name), x, y, created: now, seen: now, hand: this.randomInt(), emblem: this.randomInt(),
       supplies: { ...STARTER_SUPPLIES }, curios, tides: Math.floor(now / TIDE_MS), castaway: 0, kit: kitOf(),
     };
     this.saveIsland(island);
@@ -383,7 +385,7 @@ export class Ocean extends DurableObject {
       island.key, SHELF_LIMIT,
     ).toArray();
     const sent = this.sql.exec(
-      'SELECT text, thrown, page, to_x, to_y, finder IS NOT NULL AS ashore FROM bottles WHERE sender = ? ORDER BY thrown DESC LIMIT 20',
+      'SELECT id, text, thrown, page, to_x, to_y, finder IS NOT NULL AS ashore FROM bottles WHERE sender = ? ORDER BY thrown DESC LIMIT 20',
       island.key,
     ).toArray();
     const kit = island.kit;
@@ -418,7 +420,7 @@ export class Ocean extends DurableObject {
         return letter;
       }),
       sent: sent.map((s) => ({
-        text: excerpt(s.text), thrown: s.thrown, ashore: Boolean(s.ashore), page: s.page ? page(s.page)?.title ?? null : null,
+        id: s.id, text: excerpt(s.text), thrown: s.thrown, ashore: Boolean(s.ashore), page: s.page ? page(s.page)?.title ?? null : null,
         ...(knows('currents') ? { rest: restWords(island, { x: s.to_x, y: s.to_y }) } : {}),
       })),
       kit: {
