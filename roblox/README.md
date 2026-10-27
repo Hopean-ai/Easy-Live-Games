@@ -1,6 +1,6 @@
 # The Roblox hub
 
-One Roblox place where people play the website's games in the same rooms as players in a browser. It opens on a game picker, with the player's account link and a Rejoin button for each of their games in progress; picking a game opens its lobby (quick match, a new room, or a room code), its waiting room, and then that game's own screens. Every website game except Pong is on Roblox: CFO, and Driftmail, which is one shared ocean rather than rooms, so picking it opens its screens straight away.
+One Roblox place where people play the website's games in the same rooms as players in a browser. It opens on a game picker, with the player's account link and a Rejoin button for each of their games in progress; picking a game opens its lobby (quick match, a new room, or a room code), its waiting room, and then that game's own screens. Every website game except Pong is on Roblox: CFO; Driftmail, which is one shared ocean rather than rooms; and Legio, which is played alone. Picking Driftmail or Legio opens its screens straight away.
 
 The website stays in charge of every game: the Roblox game server only relays. It joins its players to a room, forwards their moves, and asks the website for changes every two seconds.
 
@@ -19,7 +19,7 @@ The hub's routes on the website (`src/router.js`), all `POST` with the key:
 | `/api/roblox/<game>/<room>` | A room: ops `join`, `leave`, `act`, `poll`, answered by the room's `roblox(body)` method. |
 | `/api/roblox/match/<game>` | Quick match, in the same queue as web players. |
 | `/api/roblox/link` | The account link, shared by every game. |
-| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, and the island actions (`cast`, `reel`, `gather`, `build`, `make`, `plant`, `water`, `harvest`, `seal`, `spear`, `net`, `trap`, `traps`, `snag`, `mark`, `burn`, `pass`), answered with the player's view (`src/driftmail/roblox.js`). |
+| `/api/roblox/world/<game>` | A game that is one shared world (Driftmail): ops `state`, `open`, `fish`, `craft`, `throw`, and the island actions (`cast`, `reel`, `gather`, `build`, `make`, `plant`, `water`, `harvest`, `seal`, `spear`, `net`, `trap`, `traps`, `snag`, `mark`, `burn`, `pass`), answered with the player's view (`src/driftmail/roblox.js`). Legio goes the same way to `/api/roblox/world/legio`: ops `state`, `enlist`, `choose` (`src/legio/roblox.js`). |
 
 ## The code
 
@@ -54,6 +54,14 @@ Driftmail is all player-written text, and Roblox requires every bit of it a game
 - The Roblox screens have Beach, Write, Island (materials, gathering, the garden), Build (blueprints, making things, your seal), Fishing, Journal (abilities, forecast, clues, your chart) and Letters tabs. Sound is website-only.
 
 Tests: `lune run tests/driftmail` draws the screens from the fixture and checks what each button sends. `tests/harness.luau` is the fake Roblox that both screen tests run the hub in.
+
+## Legio: a career of your own, one leaderboard
+
+Legio is played alone, so like Driftmail it has no rooms: its entry in `src/games.js` has `solo` set, the picker shows it as single player (`solo = true`), and its screens open at once. The screens send `world` requests (`Bridge.cleanWorld` in `src/shared/games/Legio.luau`), which the server forwards to `POST /api/roblox/world/legio`. A linked player plays their account's career, the same one as on the website, and can carry on from either side; anyone else gets a career of their own, keyed by Roblox user id, and shows on the website's leaderboard as "Roblox player".
+
+Every word of a career is the game's own (soldiers' names come from the game's lists), so nothing needs the filter. The leaderboard is sent to Roblox without account names: each row is the soldier, his rank, how it ended and the score, and whether it is the player's own.
+
+The Roblox screens show the card in front with its choices, the latest of the log, a Standing tab (stats, the ladder, decorations) and the Leaderboard. The cards, choices and wording all come from the website, so new encounters or rule changes need no Roblox change. Tests: `lune run tests/legio`.
 
 ## CFO: why web changes don't need Roblox changes
 
@@ -116,6 +124,7 @@ lune run tests/run           # the shared helpers
 node ../scripts/roblox-fixture.mjs > tests/fixture.json
 lune run tests/screens       # draws the CFO screens from what the website sends today
 lune run tests/driftmail     # and the Driftmail ones
+lune run tests/legio         # and Legio's
 rojo build -o hub.rbxl       # the place file the workflow publishes
 ```
 

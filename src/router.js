@@ -5,6 +5,7 @@ import { isAdmin } from './admin.js';
 import { callClaudePlayers } from './claude.js';
 import { sanitizeName } from './names.js';
 import { robloxWorld } from './driftmail/roblox.js';
+import { robloxLegio } from './legio/roblox.js';
 
 export { newRoomCode };
 
@@ -174,15 +175,19 @@ export async function handleRequest(request, env) {
     const games = account ? (await accounts.games(account)).map(({ game, code, updated }) => ({ game, code, updated })) : [];
     return Response.json({ linked: Boolean(account), admin: isAdmin(env, account), games });
   }
-  // A game that is one shared world rather than rooms (Driftmail), played as the Roblox player:
-  // as their linked account, or as an island of their own.
+  // A game that is one shared world rather than rooms (Driftmail), or played alone (Legio), played
+  // as the Roblox player: as their linked account, or as an island or career of their own.
   if (robloxWorldPath) {
     const game = robloxGame(robloxWorldPath[1]);
-    if (!game?.world) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
+    if (!game?.world && !game?.solo) return Response.json({ error: 'That game is not on Roblox.' }, { status: 404 });
     const body = await readJson(request, MAX_LETTER_BODY);
     const userId = String(body?.userId ?? '');
     if (!body || !/^\d{1,20}$/.test(userId)) return Response.json({ error: 'Bad request.' }, { status: 400 });
     const account = await accountsStub(env).robloxAccount(userId);
+    if (game.solo) {
+      const result = await robloxLegio(env[game.solo].get(env[game.solo].idFromName(game.id)), { ...body, userId, account });
+      return Response.json(result, { status: result.error ? 400 : 200 });
+    }
     const ocean = env[game.world].get(env[game.world].idFromName('ocean'));
     const result = await robloxWorld(ocean, { ...body, userId, name: sanitizeName(body.name, `Castaway ${userId.slice(-4)}`), account });
     return Response.json(result, { status: result.error && !('bridge' in result) ? 400 : 200 });

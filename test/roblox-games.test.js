@@ -5,9 +5,10 @@ import { GAMES, robloxGames, publicGames } from '../src/games.js';
 import { handleRequest } from '../src/router.js';
 import { BRIDGE_VERSION as CFO_BRIDGE } from '../src/cfo/roblox.js';
 import { BRIDGE_VERSION as DRIFTMAIL_BRIDGE } from '../src/driftmail/roblox.js';
+import { BRIDGE_VERSION as LEGIO_BRIDGE } from '../src/legio/roblox.js';
 
 // Each Roblox game's website bridge version, by game id. A new game on Roblox adds its own here.
-const BRIDGES = { cfo: CFO_BRIDGE, driftmail: DRIFTMAIL_BRIDGE };
+const BRIDGES = { cfo: CFO_BRIDGE, driftmail: DRIFTMAIL_BRIDGE, legio: LEGIO_BRIDGE };
 const luau = (dir, name) => new URL(`../roblox/src/${dir}/games/${name}.luau`, import.meta.url);
 
 // A game on Roblox has a module in shared/games (its id and bridge version) and one in
@@ -39,6 +40,34 @@ test('Pong is not on Roblox; the hub lists the rest with their table sizes', () 
   assert.equal(publicGames().find((g) => g.id === 'pong').roblox, false);
   // Driftmail is one shared world: no table size, and the hub opens it without a lobby.
   assert.deepEqual(list.find((g) => g.id === 'driftmail'), { id: 'driftmail', name: 'Driftmail', blurb: GAMES.find((g) => g.id === 'driftmail').blurb, players: 'Any number of', world: true });
+  // Legio is played alone, so the hub opens it the same way.
+  assert.deepEqual(list.find((g) => g.id === 'legio'), { id: 'legio', name: 'Legio', blurb: GAMES.find((g) => g.id === 'legio').blurb, players: '1', world: true, solo: true });
+});
+
+test('a Roblox player plays Legio as their linked account, or as a career of their own', async () => {
+  const calls = [];
+  const runs = { miles: 'run-m', 'roblox:9': 'run-9' };
+  const board = [{ account: 'Miles', name: 'Gaius Iulius Dizo', score: 500, rank: 'Optio', fate: 'Fell in battle', ended: 1 }, { account: 'roblox:9', name: 'Marcus Aurelius Tarsa', score: 300, rank: 'Miles gregarius', fate: 'Died of fever', ended: 2 }];
+  const answer = (who) => ({ run: runs[who.toLowerCase()], leaderboard: board, best: null, careers: 0 });
+  const env = {
+    ROBLOX_KEY: 'sekrit',
+    ACCOUNTS: { idFromName: (n) => n, get: () => ({ robloxAccount: async (id) => (id === '7' ? 'Miles' : null) }) },
+    CAMP: { idFromName: (n) => n, get: (id) => ({
+      state: async (who) => (calls.push([id, 'state', who]), answer(who)),
+      enlist: async (who) => (calls.push([id, 'enlist', who]), answer(who)),
+      choose: async (who, body) => (calls.push([id, 'choose', who, body]), answer(who)),
+    }) },
+  };
+  const linked = await (await handleRequest(post('/api/roblox/world/legio', { op: 'state', userId: '7' }), env)).json();
+  assert.equal(linked.run, 'run-m');
+  assert.deepEqual(linked.leaderboard.map((r) => r.you), [true, false]);
+  assert.ok(!JSON.stringify(linked).includes('roblox:9') && !JSON.stringify(linked).includes('"Miles"'), 'account names never reach Roblox');
+  const own = await (await handleRequest(post('/api/roblox/world/legio', { op: 'choose', userId: '9', i: 2, turn: 4 }), env)).json();
+  assert.equal(own.run, 'run-9');
+  assert.deepEqual(own.leaderboard.map((r) => r.you), [false, true]);
+  assert.deepEqual(calls, [['legio', 'state', 'Miles'], ['legio', 'choose', 'roblox:9', { i: 2, turn: 4 }]]);
+  assert.equal((await handleRequest(post('/api/roblox/world/legio', { op: 'promote', userId: '9' }), env)).status, 400);
+  assert.equal((await handleRequest(post('/api/roblox/legio/ABCD', { op: 'poll' }), env)).status, 404, 'no rooms');
 });
 
 const key = { 'X-Roblox-Key': 'sekrit' };
