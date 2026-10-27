@@ -80,6 +80,21 @@ export async function handleRequest(request, env) {
     return Response.json({ available: Boolean(env.ROBLOX_KEY), link: await accounts.robloxLink(name) });
   }
 
+  // CFO Career (src/career/office.js): one CFO's career from startup to public company, played
+  // as your account.
+  const career = path.match(/^\/api\/career\/(state|begin|act)$/);
+  if (career) {
+    const name = await accountName(request, env);
+    if (!name) return Response.json({ error: 'Sign in to play CFO Career.' }, { status: 401 });
+    const office = officeStub(env);
+    if (career[1] === 'state') return Response.json(await office.state(name));
+    if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
+    const body = await readJson(request, MAX_LETTER_BODY);
+    if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
+    const result = career[1] === 'begin' ? await office.begin(name) : await office.act(name, body);
+    return Response.json(result, { status: result.error ? 400 : 200 });
+  }
+
   // Legio (src/legio/camp.js): a solo career on a shared leaderboard, played as your account.
   const legio = path.match(/^\/api\/legio\/(state|enlist|choose)$/);
   if (legio) {
@@ -220,6 +235,7 @@ export async function handleRequest(request, env) {
     // Signed-in players are queued by account, guests by their per-tab token, so the same
     // person can't be matched against themselves.
     const account = await accountName(request, env);
+    if (game.id === 'cfo' && (await classicLocked(env, account))) return new Response(CLASSIC_LOCKED, { status: 403 });
     const token = url.searchParams.get('token');
     const who = account ? `account:${account.toLowerCase()}` : TOKEN.test(token ?? '') ? `guest:${token}` : '';
     const stub = env.MATCHMAKER.get(env.MATCHMAKER.idFromName(game.id));
@@ -239,6 +255,7 @@ export async function handleRequest(request, env) {
     }
     // A signed-in player always plays under their account name; anyone else is marked a guest.
     const account = await accountName(request, env);
+    if (game.id === 'cfo' && (await classicLocked(env, account))) return new Response(CLASSIC_LOCKED, { status: 403 });
     if (account) url.searchParams.set('name', account);
     const rooms = env[game.rooms];
     const stub = rooms.get(rooms.idFromName(code.toUpperCase()));
@@ -249,6 +266,19 @@ export async function handleRequest(request, env) {
 
   if (env.ASSETS) return env.ASSETS.fetch(request);
   return new Response('Not found', { status: 404 });
+}
+
+function officeStub(env) {
+  return env.OFFICE.get(env.OFFICE.idFromName('career'));
+}
+
+// Miles: Classic CFO (the board game) is unlocked for an account once it has played CFO Career
+// through and won. Off until the CLASSIC_LOCK var in wrangler.jsonc is "on"; admins always play.
+const CLASSIC_LOCKED = 'Classic CFO unlocks once you have won CFO Career.';
+async function classicLocked(env, account) {
+  if (env.CLASSIC_LOCK !== 'on' || isAdmin(env, account)) return false;
+  if (!account) return true;
+  return !(await officeStub(env).classicUnlocked(account));
 }
 
 function accountsStub(env) {

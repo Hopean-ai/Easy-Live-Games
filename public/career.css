@@ -1,0 +1,97 @@
+body.career {
+  --accent: #7fc8a9;
+  --panel: #141a20;
+  --line: #26313b;
+  --ink-soft: #b9c4ce;
+  --debit: #9fd3ff;
+  --credit: #ffc98a;
+  background: #0d1216;
+  place-items: start center;
+}
+.career main { width: min(100%, 1120px); }
+.career h1 { color: var(--accent); letter-spacing: 0.01em; }
+.career h3 { margin: 0 0 8px; font-size: 1rem; }
+.career button { background: var(--accent); color: #0b1d16; }
+.career button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--line); }
+.num, .cc-statement td, .cc-lines td { font-variant-numeric: tabular-nums; }
+.cc-intro { max-width: 680px; }
+.cc-record { margin: 0; padding-left: 18px; color: var(--muted); }
+
+.cc-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.cc-stat { display: grid; gap: 2px; min-width: 130px; }
+.cc-stat .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.cc-stat .value { font-size: 1.35rem; font-weight: 700; }
+.cc-stat .meter { height: 6px; background: #22303a; border-radius: 3px; overflow: hidden; }
+.cc-stat .meter span { display: block; height: 100%; background: var(--accent); }
+.cc-stat .meter span.low { background: #e0a050; }
+.cc-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+.cc-card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid #e0a050; border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; }
+.cc-card h2 { margin: 0 0 6px; }
+.cc-card p { line-height: 1.5; margin: 0 0 6px; }
+.cc-choices { display: grid; gap: 8px; margin-top: 12px; }
+button.cc-choice { display: grid; gap: 2px; text-align: left; padding: 10px 14px; background: #1b232b; color: var(--fg); border: 1px solid var(--line); }
+button.cc-choice:hover:not(:disabled), button.cc-choice:focus-visible { border-color: var(--accent); }
+button.cc-choice .hint { font-size: 0.8rem; color: var(--muted); font-weight: 400; }
+.cc-ended { border-top-color: var(--accent); }
+
+.cc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .cc-grid { grid-template-columns: 1fr; } .cc-actions { margin-left: 0; } }
+.cc-main, .cc-side { display: grid; gap: 16px; min-width: 0; }
+.cc-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+
+.cc-docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cc-doc { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; display: grid; gap: 6px; background: #10161b; }
+.cc-doc header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.cc-doc .title { font-weight: 600; }
+.cc-doc .when, .cc-doc .by { font-size: 0.78rem; color: var(--muted); }
+.cc-doc p { margin: 0; color: var(--ink-soft); line-height: 1.45; }
+.cc-doc .row > button { flex: 0 0 auto; padding: 6px 12px; }
+.cc-doc.wrong { border-color: #8a4b4b; }
+.cc-doc.missing { border-color: #7a6a3a; }
+
+.cc-lines { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.cc-lines td { padding: 2px 4px; }
+.cc-lines td.amt { text-align: right; width: 7em; }
+.cc-lines td.cr-acct { padding-left: 20px; }
+.cc-lines caption { text-align: left; font-size: 0.75rem; color: var(--muted); padding: 2px 4px; }
+
+.cc-entry { display: grid; gap: 6px; }
+.cc-entry .line { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em 6.5em auto; gap: 6px; }
+.cc-entry select, .cc-entry input { min-width: 0; padding: 6px 8px; background: #0b1014; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 0.85rem; }
+.cc-entry input { text-align: right; font-variant-numeric: tabular-nums; }
+.cc-entry .heads { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em 6.5em 2.2em; gap: 6px; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
+.cc-entry .heads span:nth-child(2), .cc-entry .heads span:nth-child(3) { text-align: right; }
+.cc-entry button.x { padding: 4px 8px; background: none; color: var(--muted); border: 1px solid var(--line); }
+.cc-entry .totals { font-size: 0.8rem; color: var(--muted); }
+.cc-entry .totals.off { color: var(--error); }
+
+.cc-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 0.875rem; }
+.cc-facts dt { color: var(--muted); }
+.cc-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+.cc-projects { display: grid; gap: 8px; }
+.cc-project { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; }
+.cc-project strong { font-size: 0.9rem; }
+.cc-project .why { color: var(--muted); }
+.cc-project.done { opacity: 0.6; }
+.cc-project button { justify-self: start; padding: 5px 12px; font-size: 0.85rem; }
+
+.cc-statement { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 8px; }
+.cc-statement th { text-align: left; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 2px; }
+.cc-statement th.amt, .cc-statement td.amt { text-align: right; }
+.cc-statement td { padding: 2px; border-top: 1px solid #1c252d; }
+.cc-statement tr.total td { font-weight: 700; border-top: 1px solid var(--line); }
+.cc-statement tr.sub td:first-child { padding-left: 12px; color: var(--ink-soft); }
+
+.cc-filings { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.cc-filings li { font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); }
+.cc-filings li.clean { border-color: var(--accent); color: var(--accent); }
+.cc-filings li.bad { border-color: #8a4b4b; color: #e59a9a; }
+
+.cc-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.cc-log li:last-child { color: var(--fg); }
+.cc-log .when { color: var(--accent); font-size: 0.72rem; margin-right: 6px; }
+.career #error { margin: 6px 0; min-height: 0; }
+.career #error:empty { display: none; }
+.cc-bar { margin-bottom: 16px; }
