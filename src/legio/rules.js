@@ -4,6 +4,8 @@
 // Cards are the only way the game moves: each half-year starts with an orders card, and what the
 // player orders (and the year's history) queues battles, vacancies and events behind it.
 
+import { encounters } from './events.js';
+
 export const START_YEAR = 235;
 const HALVES = ['Campaign season', 'Winter quarters'];
 const LOG_LIMIT = 60;
@@ -221,7 +223,7 @@ export function newRun(seed) {
     year: START_YEAR, half: 0, age: 18, served: 0, rank: 0, best: 0, inRank: 0,
     stats: { virtus: 5, gratia: 5, litterae: 5, milites: 0 }, health: 100, denarii: 0, debt: 0,
     decorations: [], log: [], story: [], seen: [], queue: [], war: true, plot: 0, reign: 0,
-    married: false, pietas: 0, works: 0, over: false, fate: null, ending: null,
+    married: false, pietas: 0, works: 0, threads: {}, over: false, fate: null, ending: null,
   };
   push(s, 'origin');
   return s;
@@ -295,7 +297,14 @@ CARDS.orders = {
     if (s.rank === R.imperator) return emperorOrders(s);
     const list = [];
     const campaign = s.half === 0 && s.war;
-    list.push({ label: 'Drill hard', hint: 'virtus +', act(s2) { gain(s2, 'virtus', 4); return log(s2, 'You drill until your arms ache.'); } });
+    const drill = s.rank >= R.castrorum
+      ? ['Exercise the army in the field', 'Mock battles, forced marches, and you ride at the head of every column.']
+      : officer(s)
+        ? ['Drill your century hard, and drill with them', 'You march them twenty miles in full kit and fence with the best of them.']
+        : s.rank >= R.optio
+          ? ['Drill hard, and keep the century at it', 'You drill until your arms ache, and keep the slackers at it.']
+          : ['Drill hard', 'You drill until your arms ache.'];
+    list.push({ label: drill[0], hint: 'virtus +', act(s2) { gain(s2, 'virtus', 4); return log(s2, drill[1]); } });
     if (campaign && s.rank >= R.miles && s.rank < R.castrorum) {
       list.push({
         label: officer(s) ? 'Lead raids across the frontier' : 'Volunteer for scouting and raids',
@@ -373,7 +382,7 @@ CARDS.orders = {
       });
     }
     if (s.inRank >= 2 && s.rank >= R.miles) {
-      list.push({ label: 'Seek a transfer to another legion', hint: 'new posting, gratia −', act(s2) { next(s2, 'transfer'); return log(s2, 'You ask about postings elsewhere.'); } });
+      list.push({ label: s.rank >= R.castrorum ? 'Ask the emperor for another command' : 'Seek a transfer to another legion', hint: 'new posting, gratia −', act(s2) { next(s2, 'transfer'); return log(s2, 'You ask about postings elsewhere.'); } });
     }
     if (s.rank >= R.legionis && s.half === 1 && s.stats.milites >= 40) {
       list.push({
@@ -416,7 +425,8 @@ CARDS.orders = {
       const p = 0.03 + s.plot * 0.06 + transition + (s.stats.milites - 55) / 400 + (s.year > 284 ? -0.02 : 0);
       if (r() < p) push(s, 'acclaim');
     }
-    if (r() < 0.5) push(s, 'event');
+    // Recruits in training have no encounters of their own.
+    if (r() < 0.5 && eventsFor(s).length) push(s, 'event');
     // `served` counts the halves before this one, so the winter that completes 25 years has 49.
     if (s.served >= 49 && (s.served - 49) % 10 === 0 && s.half === 1) push(s, 'discharge');
   },
@@ -482,7 +492,9 @@ CARDS.sworn = {
 
 CARDS.transfer = {
   title: () => 'A transfer',
-  text: () => 'A friend in the governor\'s office can move you. Where to?',
+  text: (s) => (s.rank >= R.castrorum
+    ? 'The emperor\'s secretary for petitions says a command could be found for you elsewhere. Where?'
+    : 'A friend in the governor\'s office can move you. Where to?'),
   choices: (s) => [
     ...LEGIONS.filter((l) => l.id !== s.legion && l.id !== 'praetoriani' && !(l.id === 'iii-augusta' && s.year >= 238 && s.year < 253)).map((l) => ({
       label: `${l.name}, ${l.base}`,
@@ -636,9 +648,9 @@ function battle(s, r, a, stance) {
 CARDS.plague = {
   title: () => 'Plague',
   text: () => 'The plague that came out of Egypt is in the camp. Men sicken and die within days, and the bodies are burned outside the walls.',
-  choices: () => [
+  choices: (s) => [
     {
-      label: 'Nurse your comrades',
+      label: s.rank >= R.castrorum ? 'Walk the hospital wards yourself' : officer(s) ? 'Nurse your men yourself' : 'Nurse your comrades',
       hint: 'milites +, danger',
       act(s, r) {
         if (r() < 0.08) return die(s, 'Died of plague');
@@ -648,7 +660,7 @@ CARDS.plague = {
       },
     },
     {
-      label: 'Keep apart and pray',
+      label: s.rank >= R.castrorum ? 'Command from your own quarters, apart' : officer(s) ? 'Leave them to the medici and keep apart' : 'Keep apart and pray',
       hint: 'safer',
       act(s, r) {
         if (r() < 0.03) return die(s, 'Died of plague');
@@ -702,7 +714,7 @@ CARDS.accession = {
   choices(s, a) {
     if (!a.loser) {
       const list = [{
-        label: 'Swear the oath and take the donative',
+        label: s.rank >= R.castrorum ? 'Lead the army in the oath and share out the donative' : officer(s) ? 'Swear your men in and take the donative' : 'Swear the oath and take the donative',
         act(s2) {
           const got = Math.round(40 * Math.max(1, RANKS[s2.rank].pay / 2));
           cash(s2, got);
@@ -815,306 +827,25 @@ CARDS.discharge = {
 };
 
 // --- random events ---------------------------------------------------------------------------
+// The encounters themselves are in events.js; each names the ranks it fits.
 
-const EVENTS = [
-  {
-    id: 'dice', when: () => true,
-    title: 'Dice in the barracks',
-    text: 'The tent group has a game of tali going, and the stakes are getting high.',
-    choices: [
-      { label: 'Throw for 30 denarii', act(s, r) { if (s.denarii < 30) return log(s, 'You have nothing to stake and just watch.'); const w = r() < 0.47; cash(s, w ? 30 : -30); return log(s, w ? 'Venus throw! You win 30 denarii.' : 'The dogs. You lose 30 denarii.'); } },
-      { label: 'Just watch', act(s) { return log(s, 'You keep your purse shut.'); } },
-    ],
-  },
-  {
-    id: 'vitis', when: (s) => s.rank <= R.signifer,
-    title: 'The vine stick',
-    text: 'Your centurion carries a vine stick and uses it freely. The men call him "Bring me another", after the sticks he breaks on their backs.',
-    choices: [
-      { label: 'Pay him 25 denarii for easier duties', hint: 'health +', act(s) { if (s.denarii < 25) return log(s, 'You cannot afford his favour.'); cash(s, -25); heal(s, 10); return log(s, 'Coins change hands, and your name drops off the latrine roster.'); } },
-      { label: 'Take the beatings', hint: 'virtus +, health −', act(s) { gain(s, 'virtus', 3); hurt(s, 10, 'Beaten to death by a centurion'); return s.over ? s.fate : log(s, 'You take it without a sound.'); } },
-      { label: 'Complain to the tribune', hint: 'risky', act(s, r) { if (r() < 0.5) { gain(s, 'gratia', 5); return log(s, 'The tribune reins him in, and notes your name.'); } gain(s, 'gratia', -6); hurt(s, 15, 'Beaten to death by a centurion'); return s.over ? s.fate : log(s, 'The tribune does nothing, and the centurion finds out.'); } },
-    ],
-  },
-  {
-    id: 'home', when: () => true,
-    title: 'A letter from home',
-    text: 'A letter on papyrus, written for your mother by the village scribe. The harvest failed and the tax collector came anyway.',
-    choices: [
-      { label: 'Send her 40 denarii', act(s) { if (s.denarii < 40) return log(s, 'You send what little you have, and a promise.'); cash(s, -40); s.pietas++; return log(s, 'You send money home. Pietas: duty to family.'); } },
-      { label: 'Write back with news, but no money', act(s) { return log(s, 'You write about camp life and say nothing about money.'); } },
-    ],
-  },
-  {
-    id: 'clerk', when: (s) => s.stats.litterae < 45,
-    title: 'The clerk\'s offer',
-    text: 'A librarius from headquarters offers to teach you letters and accounts, for a price.',
-    choices: [
-      { label: 'Pay 30 denarii for lessons', hint: 'litterae ++', act(s) { if (s.denarii < 30) return log(s, 'You cannot pay him.'); cash(s, -30); gain(s, 'litterae', 8); return log(s, 'Evenings with the clerk and his tablets. Clerks get promoted.'); } },
-      { label: 'Decline', act(s) { return log(s, 'You have better things to do in the evenings.'); } },
-    ],
-  },
-  {
-    id: 'chest', when: (s) => s.rank === R.signifer,
-    title: 'The savings bank is short',
-    text: 'As signifer you keep the century\'s savings. The count is 80 denarii short, and you know which soldier took it.',
-    choices: [
-      { label: 'Cover it from your own savings', hint: 'gratia +', act(s) { if (s.denarii < 80) return log(s, 'You cannot cover it and have to report it.'); cash(s, -80); gain(s, 'gratia', 5); gain(s, 'milites', 3); return log(s, 'You make it good quietly.'); } },
-      { label: 'Report the thief', hint: 'gratia +', act(s) { gain(s, 'gratia', 4); return log(s, 'The thief is flogged and the centurion approves.'); } },
-      { label: 'Take a cut and keep quiet', hint: 'denarii +, risky', act(s, r) { if (r() < 0.25) { s.rank = R.tesserarius; s.inRank = 0; gain(s, 'gratia', -15); story(s, 'Demoted for theft'); return log(s, 'You are found out and broken back to tesserarius.'); } cash(s, 60); return log(s, 'Nobody notices.'); } },
-    ],
-  },
-  {
-    id: 'mithras', when: () => true,
-    title: 'The mysteries of Mithras',
-    text: 'An optio invites you to a cave temple outside the walls, where officers and men eat together before the god who slays the bull.',
-    choices: [
-      { label: 'Be initiated (20 denarii)', hint: 'gratia +', act(s) { if (s.denarii < 20) return log(s, 'You cannot pay the initiation.'); cash(s, -20); gain(s, 'gratia', 6); return log(s, 'You are initiated as a Raven. Some of the brothers outrank you.'); } },
-      { label: 'Keep to the gods of your fathers', act(s) { return log(s, 'You politely decline.'); } },
-    ],
-  },
-  {
-    id: 'wife', when: (s) => !s.married && s.age >= 21,
-    title: 'In the camp town',
-    text: 'Soldiers may marry now, since Severus allowed it. There is a woman in the canabae outside the walls whose father sells wine to the legion.',
-    choices: [
-      { label: 'Marry her', hint: 'health +', act(s) { s.married = true; heal(s, 15); cash(s, 40); story(s, 'Married'); return log(s, 'You marry. Her dowry is a small vineyard and her cooking is better than the army\'s.'); } },
-      { label: 'Not yet', act(s) { return log(s, 'You are married to the eagles for now.'); } },
-    ],
-  },
-  {
-    id: 'escort', when: () => true,
-    title: 'The pay chest',
-    text: 'The legion\'s pay is coming up the road from the provincial treasury, and the escort needs men.',
-    choices: [
-      { label: 'Go with the escort', hint: 'gratia +, some danger', act(s, r) { gain(s, 'gratia', 3); if (r() < 0.2) { gain(s, 'virtus', 5); hurt(s, 10 + Math.floor(r() * 15), 'Killed by bandits on the road'); return s.over ? s.fate : log(s, 'Bandits hit the convoy. You beat them off, with a cut to show for it.'); } return log(s, 'An uneventful march, and the paymaster knows your face.'); } },
-      { label: 'Find an excuse', act(s) { return log(s, 'Someone else can go.'); } },
-    ],
-  },
-  {
-    id: 'fever', when: () => true,
-    title: 'Fever',
-    text: 'You wake shaking with fever.',
-    choices: [
-      { label: 'Pay the medicus (15 denarii)', act(s) { cash(s, -15); hurt(s, 5, 'Died of fever'); return s.over ? s.fate : log(s, 'Bitter herbs and bed rest. You recover.'); } },
-      { label: 'Sweat it out', act(s) { hurt(s, 22, 'Died of fever'); return s.over ? s.fate : log(s, 'It takes weeks to get your strength back.'); } },
-    ],
-  },
-  {
-    id: 'inspect', when: () => true,
-    title: 'Inspection',
-    text: 'A tribune is inspecting kit tomorrow.',
-    choices: [
-      { label: 'Polish everything twice', hint: 'gratia +', act(s) { gain(s, 'gratia', 3); return log(s, 'Your mail shines. The tribune stops at you.'); } },
-      { label: 'Buy new kit from the armourer (30 denarii)', hint: 'gratia +', act(s) { if (s.denarii < 30) { gain(s, 'gratia', 2); return log(s, 'You polish what you have.'); } cash(s, -30); gain(s, 'gratia', 5); return log(s, 'A new helmet with a brass crest. The tribune asks your name.'); } },
-    ],
-  },
-  {
-    id: 'deserters', when: () => true,
-    title: 'Deserters',
-    text: 'Three deserters have been dragged back to camp. The legate wants an example made.',
-    choices: [
-      { label: 'Volunteer for the punishment detail', hint: 'gratia +', act(s) { gain(s, 'gratia', 3); if (officer(s)) gain(s, 'milites', -3); return log(s, 'You do what you are told.'); } },
-      { label: 'Speak up for mercy', hint: 'milites +, gratia −', act(s) { gain(s, 'gratia', -4); gain(s, 'milites', 5); return log(s, 'The men hear that you spoke for them.'); } },
-    ],
-  },
-  {
-    id: 'mutiny', when: (s) => s.rank <= R.primuspilus && s.rank >= R.miles,
-    title: 'Mutiny talk',
-    text: 'Pay is three months late and the coins are getting thinner. In the barracks men are talking about choosing an emperor who pays.',
-    choices: [
-      { label: 'Join the grumbling', hint: 'milites +, risky', act(s, r) { if (officer(s)) gain(s, 'milites', 5); if (r() < 0.15) { hurt(s, 20, 'Executed for sedition'); gain(s, 'gratia', -8); return s.over ? s.fate : log(s, 'You are named as a ringleader and flogged.'); } return log(s, 'The pay arrives before anything happens.'); } },
-      { label: 'Report the ringleaders', hint: 'gratia ++, milites −', act(s) { gain(s, 'gratia', 8); gain(s, 'milites', -8); return log(s, 'The ringleaders are executed. The legate remembers who told him.'); } },
-      { label: 'Stay out of it', act(s) { return log(s, 'You keep your head down.'); } },
-    ],
-  },
-  {
-    id: 'hoard', when: () => true,
-    title: 'A buried hoard',
-    text: 'Digging a ditch, your spade hits a pot full of silver coins. In these years people bury their savings and die before they can dig them up.',
-    choices: [
-      { label: 'Keep it quietly', hint: 'denarii ++, risky', act(s, r) { if (r() < 0.15) { gain(s, 'gratia', -10); return log(s, 'Someone saw. The hoard is confiscated and you are disgraced.'); } cash(s, 150); return log(s, 'You quietly keep 150 denarii.'); } },
-      { label: 'Hand it in', hint: 'gratia +', act(s) { gain(s, 'gratia', 6); cash(s, 25); return log(s, 'The legate gives you a reward and a word of praise.'); } },
-    ],
-  },
-  {
-    id: 'games', when: () => true,
-    title: 'Games in the amphitheatre',
-    text: 'The governor is putting on gladiators and wild beasts in the legion\'s amphitheatre.',
-    choices: [
-      { label: 'Bet 50 denarii on the murmillo', act(s, r) { if (s.denarii < 50) return log(s, 'You have nothing to bet and just cheer.'); const w = r() < 0.48; cash(s, w ? 60 : -50); return log(s, w ? 'He wins. You collect 110 denarii.' : 'He goes down. So does your money.'); } },
-      { label: 'Just watch', act(s) { return log(s, 'A good day out.'); } },
-    ],
-  },
-  {
-    id: 'lender', when: (s) => s.debt === 0,
-    title: 'A moneylender',
-    text: 'A retired veteran lends money to soldiers at interest, repaid out of their pay.',
-    choices: [
-      { label: 'Borrow 150 denarii', hint: 'repay 200', act(s) { cash(s, 150); s.debt = 200; return log(s, 'You borrow 150 denarii. He will take 200 from your pay.'); } },
-      { label: 'No thanks', act(s) { return log(s, 'You stay out of debt.'); } },
-    ],
-  },
-  {
-    id: 'champion', when: (s) => s.half === 0 && s.war && s.rank < R.castrorum,
-    title: 'A challenge',
-    text: 'A huge warrior walks out in front of the enemy line and shouts for a Roman to fight him.',
-    choices: [
-      { label: 'Answer the challenge', hint: 'glory, or death', act(s, r) { const x = r(); if (x < 0.14) return die(s, 'Killed in single combat'); if (x < 0.42) { hurt(s, 25, 'Died of wounds from single combat'); if (s.over) return s.fate; gain(s, 'virtus', 6); return log(s, 'You kill him, but he cuts you badly first.'); } gain(s, 'virtus', 12); return log(s, `You kill him in front of both armies and are awarded the ${decorate(s, officer(s) ? 'aurea' : 'torques')}.`); } },
-      { label: 'Let someone else go', act(s) { return log(s, 'Someone else answers. You do not see how it ends.'); } },
-    ],
-  },
-  {
-    id: 'review', when: (s) => s.rank < R.legionis,
-    title: 'The emperor reviews the army',
-    text: (s) => `${emperorIn(s.year).name} rides along the lines on parade.`,
-    choices: [
-      { label: 'Cheer loudest', act(s) { gain(s, 'gratia', 2); return log(s, 'Your voice is hoarse for days.'); } },
-      { label: 'Show off your drill', act(s) { if (s.stats.virtus >= 40) { gain(s, 'gratia', 8); return log(s, 'The emperor stops and speaks to you by name.'); } gain(s, 'gratia', 1); return log(s, 'You stumble in front of the emperor.'); } },
-    ],
-  },
-  {
-    id: 'stars', when: (s) => !s.omen,
-    title: 'An astrologer',
-    text: 'A Chaldaean astrologer in the camp town offers to cast your horoscope.',
-    choices: [
-      { label: 'Pay 10 denarii for a reading', act(s, r) { cash(s, -10); s.omen = true; if (r() < 0.3) { gain(s, 'milites', 6); return log(s, 'He goes pale and whispers that he sees purple in your stars. Somehow the men hear of it.'); } return log(s, 'He promises a long life and many sons.'); } },
-      { label: 'Laugh him off', act(s) { s.omen = true; return log(s, 'You laugh. He curses you, mildly.'); } },
-    ],
-  },
-  {
-    id: 'bridge', when: (s) => s.stats.litterae >= 25 && s.rank <= R.optio,
-    title: 'Engineers needed',
-    text: 'The legion is bridging the river and the architectus needs men who can measure and count.',
-    choices: [
-      { label: 'Volunteer', hint: 'litterae +, gratia +', act(s) { gain(s, 'litterae', 5); gain(s, 'gratia', 3); return log(s, 'Six weeks of surveying and piling. The bridge stands.'); } },
-      { label: 'Not your trade', act(s) { return log(s, 'You leave it to the specialists.'); } },
-    ],
-  },
-  {
-    id: 'staff', when: (s) => s.stats.litterae >= 35 && s.rank >= R.immunis && s.rank <= R.optio,
-    title: 'The governor\'s staff',
-    text: 'The provincial governor needs a beneficiarius: a soldier who reads, writes and carries his authority on the roads.',
-    choices: [
-      { label: 'Join his staff', hint: 'gratia ++, virtus −', act(s) { gain(s, 'gratia', 12); gain(s, 'virtus', -4); return log(s, 'You spend months at the governor\'s side. Important people learn your name.'); } },
-      { label: 'Stay with the century', act(s) { return log(s, 'You stay where the fighting is.'); } },
-    ],
-  },
-  {
-    id: 'rival', when: () => true,
-    title: 'A rival',
-    text: (s) => `${RIVALS[(s.turn * 7) % RIVALS.length]} is telling the officers you are a coward and a thief.`,
-    choices: [
-      { label: 'Confront him', hint: 'virtus +', act(s, r) { gain(s, 'virtus', 3); if (r() < 0.3) { hurt(s, 10, 'Killed in a brawl'); return s.over ? s.fate : log(s, 'It comes to fists. You both end up in the guardhouse.'); } return log(s, 'He backs down in front of everyone.'); } },
-      { label: 'Outshine him with the officers (30 denarii)', act(s) { if (s.denarii < 30) { gain(s, 'gratia', -3); return log(s, 'You have nothing to outshine him with.'); } cash(s, -30); gain(s, 'gratia', 3); return log(s, 'A few dinners and the story is forgotten.'); } },
-      { label: 'Ignore it', act(s) { gain(s, 'gratia', -4); return log(s, 'The story spreads.'); } },
-    ],
-  },
-  {
-    id: 'rations', when: (s) => officer(s) && s.rank < R.imperator,
-    title: 'Grumbling about rations',
-    text: 'Your men say the grain is rotten and the wine is vinegar.',
-    choices: [
-      { label: 'Buy better from your own purse (40 denarii)', hint: 'milites +', act(s) { if (s.denarii < 40) return log(s, 'You cannot afford it.'); cash(s, -40); gain(s, 'milites', 7); return log(s, 'Fresh bread and decent wine. They notice.'); } },
-      { label: 'Flog the loudest', hint: 'milites −, gratia +', act(s) { gain(s, 'milites', -6); gain(s, 'gratia', 2); return log(s, 'Discipline is restored, on the surface.'); } },
-      { label: 'Ignore it', act(s) { gain(s, 'milites', -3); return log(s, 'The grumbling goes on.'); } },
-    ],
-  },
-  {
-    id: 'smuggler', when: (s) => s.rank >= R.miles,
-    title: 'A trader\'s offer',
-    text: 'A trader crossing the frontier offers you silver to look away from what is in his carts.',
-    choices: [
-      { label: 'Take the silver', hint: 'denarii ++, risky', act(s, r) { if (r() < 0.2) { gain(s, 'gratia', -12); return log(s, 'He is caught at the next post and names you.'); } cash(s, 90); return log(s, 'You take 90 denarii and see nothing.'); } },
-      { label: 'Search his carts', hint: 'gratia +', act(s) { gain(s, 'gratia', 5); return log(s, 'Weapons for the barbarians. The legate is pleased.'); } },
-    ],
-  },
-  {
-    id: 'snow', when: (s) => s.half === 1,
-    title: 'A hard winter',
-    text: 'Snow buries the fort and firewood runs short.',
-    choices: [
-      { label: 'Share your firewood', hint: 'milites +, health −', act(s) { gain(s, 'milites', 4); hurt(s, 6, 'Died of cold'); return s.over ? s.fate : log(s, 'Your tent group gets through it together.'); } },
-      { label: 'Keep warm', act(s) { heal(s, 5); return log(s, 'You keep your fire going.'); } },
-    ],
-  },
-  {
-    id: 'coins', when: (s) => s.year >= 258 && !s.debased,
-    title: 'The new coins',
-    text: 'The new silver coins are barely silver at all: bronze with a wash that rubs off. Prices in the camp town double.',
-    choices: [
-      { label: 'Buy gold now, at a loss', hint: 'lose 10%', act(s) { s.debased = true; cash(s, -s.denarii * 0.1); return log(s, 'You turn your savings into a few gold aurei.'); } },
-      { label: 'Hope it passes', hint: 'lose 30%', act(s) { s.debased = true; cash(s, -s.denarii * 0.3); return log(s, 'It does not pass. Your savings are worth far less.'); } },
-    ],
-  },
-  {
-    id: 'patron', when: (s) => s.stats.gratia >= 25,
-    title: 'Your patron dies',
-    text: 'The officer who has been speaking for you is dead of a fever.',
-    choices: [
-      { label: 'Find a new patron fast (50 denarii)', act(s) { if (s.denarii < 50) { gain(s, 'gratia', -12); return log(s, 'You have nothing to offer a new patron.'); } cash(s, -50); gain(s, 'gratia', -4); return log(s, 'Gifts to a new patron, who agrees to remember you.'); } },
-      { label: 'Mourn him and start again', act(s) { gain(s, 'gratia', -12); return log(s, 'You walk in his funeral procession.'); } },
-    ],
-  },
-  {
-    id: 'hunt', when: (s) => s.rank >= R.optio,
-    title: 'A boar hunt',
-    text: 'The officers are hunting boar in the forest and you are invited.',
-    choices: [
-      { label: 'Join the hunt', hint: 'gratia +, small danger', act(s, r) { gain(s, 'gratia', 5); if (r() < 0.1) { hurt(s, 20, 'Killed by a boar'); return s.over ? s.fate : log(s, 'The boar gets you in the thigh.'); } return log(s, 'You make the kill and the tribune toasts you.'); } },
-      { label: 'Stay in camp', act(s) { return log(s, 'You stay in camp.'); } },
-    ],
-  },
-  {
-    id: 'recruits', when: (s) => s.rank >= R.optio && s.rank < R.imperator,
-    title: 'Raw recruits',
-    text: 'Forty recruits from the villages arrive, half of them sons of soldiers who had no choice.',
-    choices: [
-      { label: 'Train them yourself', hint: 'milites +, virtus +', act(s) { gain(s, 'milites', 4); gain(s, 'virtus', 2); return log(s, 'You make soldiers of them.'); } },
-      { label: 'Leave it to the drill instructors', act(s) { return log(s, 'The campidoctor takes them.'); } },
-    ],
-  },
-  {
-    id: 'raid', when: (s) => s.half === 1 && ['rhine', 'danube'].includes(front(s)) && s.rank < R.imperator,
-    title: 'The river freezes',
-    text: 'The river has frozen solid, and raiders are crossing on the ice to burn farms on the Roman side.',
-    choices: [
-      { label: 'Lead a pursuit', hint: 'virtus +, danger', act(s, r) { gain(s, 'virtus', 7); const x = r(); if (x < 0.03) return die(s, 'Killed chasing raiders across the ice'); if (x < 0.2) { hurt(s, 15, 'Died of wounds from a winter raid'); return s.over ? s.fate : log(s, 'You catch them and pay for it.'); } return log(s, 'You catch them before they reach the far bank.'); } },
-      { label: 'Hold the fort', act(s) { gain(s, 'virtus', 1); return log(s, 'You hold the walls and let the farms burn.'); } },
-    ],
-  },
-  {
-    id: 'guard', when: (s) => s.legion !== 'praetoriani' && s.rank >= R.miles && s.rank <= R.optio && s.stats.virtus >= 30,
-    title: 'The Praetorian Guard',
-    text: 'Since Severus, the Guard recruits its men from the best of the legions. A tribune of the Guard offers you a place in Rome: triple pay, close to the emperor, and in the middle of every coup.',
-    choices: [
-      { label: 'Go to Rome', hint: 'pay ++, gratia +, coups are deadly', act(s) { s.legion = 'praetoriani'; s.war = false; gain(s, 'gratia', 6); story(s, 'Joined the Praetorian Guard'); return log(s, 'You march into the Castra Praetoria in Rome.'); } },
-      { label: 'Stay with the legion', act(s) { return log(s, 'You stay with your legion.'); } },
-    ],
-  },
-  {
-    id: 'plot', when: (s) => s.rank === R.imperator,
-    title: 'A plot',
-    text: 'Your freedman hands you a list of names: officers of your own guard who are planning to kill you.',
-    choices: [
-      { label: 'Execute them all', hint: 'gratia −, safer', act(s) { gain(s, 'gratia', -6); gain(s, 'milites', -3); return log(s, 'The list is shorter now, and so is your list of friends.'); } },
-      { label: 'Pay them off', hint: '800 denarii', act(s) { cash(s, -800); gain(s, 'milites', 5); return log(s, 'Gold buys loyalty, for a while.'); } },
-      { label: 'Ignore it', act(s, r) { if (r() < 0.35) return die(s, `Murdered by his own guard after ${reignWords(s)} as emperor`); return log(s, 'Nothing happens. Perhaps the list was false.'); } },
-    ],
-  },
-];
+export const EVENTS = encounters({ R, RANKS, RIVALS, gain, cash, heal, hurt, die, log, story, decorate, officer, front, legion, emperorIn, reignWords });
 const EVENT = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
+const fits = (s, e) => s.rank >= e.ranks[0] && s.rank <= e.ranks[1] && (e.when?.(s) ?? true);
+export const eventsFor = (s) => EVENTS.filter((e) => fits(s, e));
 
 CARDS.event = {
   title: (s, a) => EVENT[a.id].title,
   text: (s, a) => (typeof EVENT[a.id].text === 'function' ? EVENT[a.id].text(s) : EVENT[a.id].text),
-  choices: (s, a) => EVENT[a.id].choices,
+  choices: (s, a) => EVENT[a.id].choices.map((c) => (typeof c.label === 'function' ? { ...c, label: c.label(s) } : c)),
   prepare(s, r, a) {
-    const open = EVENTS.filter((e) => e.when(s) && !s.seen.includes(e.id));
-    const pool = open.length ? open : EVENTS.filter((e) => e.when(s));
-    a.id = pick(r, pool).id;
+    const pool = eventsFor(s);
+    const fresh = pool.filter((e) => !s.seen.includes(e.id));
+    // A story's next chapter comes as soon as it is due.
+    const due = pool.filter((e) => e.follow);
+    a.id = pick(r, due.length ? due : fresh.length ? fresh : pool).id;
     s.seen.push(a.id);
-    if (s.seen.length > 12) s.seen.shift();
+    if (s.seen.length > 16) s.seen.shift();
   },
 };
 

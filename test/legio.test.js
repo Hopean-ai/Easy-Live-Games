@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { fakeCtx } from './helpers/workers-stub.js';
-import { RANK, RANKS, choose, emperorIn, promotionChance, score, start, view } from '../src/legio/rules.js';
+import { EVENTS, RANK, RANKS, choose, emperorIn, promotionChance, score, start, view } from '../src/legio/rules.js';
 import { handleRequest } from '../src/router.js';
 
 const { Camp } = await import('../src/legio/camp.js');
@@ -85,6 +85,65 @@ test('history: the emperors of the crisis in order', () => {
   assert.equal(emperorIn(270).name, 'Aurelian');
   assert.equal(emperorIn(300).name, 'Diocletian');
   assert.equal(RANKS.at(-1).name, 'Imperator');
+});
+
+test('encounters only come to the ranks they were written for', () => {
+  const ids = new Set();
+  for (const e of EVENTS) {
+    assert.ok(!ids.has(e.id), `${e.id} is unique`);
+    ids.add(e.id);
+    assert.ok(e.ranks[0] >= RANK.miles && e.ranks[0] <= e.ranks[1] && e.ranks[1] <= RANK.imperator, `${e.id} has a rank band`);
+  }
+  const seen = new Set();
+  for (let seed = 1; seed <= 400; seed++) {
+    const s = start(seed);
+    playOut(s, (card) => {
+      const c = s.queue[0];
+      if (c.id === 'event') {
+        const e = EVENTS.find((x) => x.id === c.args.id);
+        assert.ok(s.rank >= e.ranks[0] && s.rank <= e.ranks[1], `${e.id} shown to a ${RANKS[s.rank].name}`);
+        seen.add(e.id);
+      }
+      const open = card.choices.map((x, i) => (x.off ? -1 : i)).filter((i) => i >= 0);
+      return open[(seed * 13 + s.turn * 7) % open.length];
+    });
+  }
+  assert.ok(seen.size >= 40, `a good spread of encounters turns up (${seen.size})`);
+});
+
+test('every encounter answer works at every rank it fits', () => {
+  for (const e of EVENTS) {
+    for (let rank = e.ranks[0]; rank <= e.ranks[1]; rank++) {
+      for (let i = 0; i < e.choices.length; i++) {
+        const s = start(rank * 100 + i);
+        choose(s, 0); choose(s, 0); choose(s, 0);
+        Object.assign(s, { rank, best: rank, age: 40, married: true, denarii: rank % 2 ? 0 : 2000 });
+        s.queue = [{ id: 'event', args: { id: e.id }, ready: true }, { id: 'orders', args: {}, ready: false }];
+        const card = view(s).card;
+        assert.equal(typeof card.choices[i].label, 'string');
+        const result = choose(s, i);
+        assert.ok(result.ok && typeof result.line === 'string', `${e.id} choice ${i} at ${RANKS[rank].name}`);
+      }
+    }
+  }
+});
+
+test('a kindness to a tentmate comes back later', () => {
+  const s = start(11);
+  choose(s, 0); choose(s, 0); choose(s, 0);
+  Object.assign(s, { rank: RANK.miles, served: 4 });
+  s.stats.litterae = 30;
+  s.queue = [{ id: 'event', args: { id: 'dizo' }, ready: true }, { id: 'orders', args: {}, ready: false }];
+  choose(s, 0);
+  assert.equal(s.threads.dizo, 7);
+  s.served = 7;
+  // Answer a plain card; the encounter behind it is drawn as it comes to the front.
+  s.queue = [{ id: 'history', args: { key: 'plague' }, ready: true }, { id: 'event', args: {} }, { id: 'orders', args: {} }];
+  choose(s, 0);
+  assert.equal(s.queue[0].args.id, 'dizo_return');
+  choose(s, 0);
+  assert.equal(s.threads.dizo, undefined);
+  assert.ok(s.story.some((line) => line.includes('Aurelius Dizo')));
 });
 
 test('a disabled choice is refused', () => {
