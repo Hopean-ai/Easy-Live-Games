@@ -105,7 +105,7 @@ export const BUILDINGS = {
   kiln: { name: 'Bottle kiln', cost: { clay: 4, stones: 4, sand: 2 }, words: 'Fire your own bottles from clay and sand.' },
   rack: { name: 'Drying rack', cost: { reeds: 2, rope: 2 }, words: 'Dry reeds into paper.' },
   press: { name: 'Ink press', cost: { stones: 3, driftwood: 2 }, words: 'Press berries into ink, and fish scales into shimmering ink.' },
-  bench: { name: 'Seal bench', cost: { driftwood: 3, stones: 2 }, words: 'Design your own wax seal.' },
+  bench: { name: 'Seal bench', cost: { driftwood: 3, stones: 2 }, needs: 'shack', words: 'Design your own wax seal.' },
   lookout: { name: 'Lookout', cost: { driftwood: 6, rope: 2 }, words: 'From up here you can see roughly which way your bottles went.' },
   lighthouse: {
     name: 'Lighthouse', cost: { stones: 20, driftwood: 10, oil: 5 }, words: 'Draws bottles drifting near your island to your beach.',
@@ -172,6 +172,7 @@ export const RECIPES = {
   oil: { needs: 'workshop', name: 'Render fish oil', cost: { fish: 2 }, gives: { oil: 1 } },
   spear: { needs: 'workshop', name: 'Make a spear', cost: { driftwood: 1, bones: 2 }, once: 'spear' },
   trap: { needs: 'workshop', name: 'Weave a trap', cost: { driftwood: 2, rope: 1 }, gives: { traps: 1 } },
+  net: { needs: 'workshop', name: 'Weave a net', cost: { rope: 4 }, once: 'net' },
   stamp: { name: 'Carve a stamp', needs: 'bench', ability: 'carving', cost: { driftwood: 1, bones: 1 }, once: 'stamp' },
 };
 

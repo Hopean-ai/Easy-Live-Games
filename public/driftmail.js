@@ -752,6 +752,9 @@ function render() {
   $('spear').hidden = !kit.spear;
   $('spear').disabled = !kit.canSpear;
   $('spear').textContent = kit.canSpear ? 'Wade out with the spear' : kit.lowTide ? 'Speared this tide' : 'Spear (wait for low tide)';
+  $('net').hidden = !kit.net;
+  $('net').disabled = !kit.canNet;
+  $('net').textContent = kit.canNet ? 'Haul the net' : 'Net hauled this tide';
   $('set-trap').hidden = !(state.materials.traps > 0) || kit.traps.length >= kit.maxTraps;
   $('pull-traps').hidden = kit.traps.length === 0;
   $('pull-traps').textContent = `Pull up the traps (${kit.traps.length} set)`;
@@ -935,6 +938,10 @@ function renderIsland() {
 
 $('water').addEventListener('click', () => doing('water', {}, 'seeds', 'You carry water up from the stream.').then((r) => r && sound.fx('water')));
 $('design-seal').addEventListener('click', () => doing('seal', { glyph: Number($('seal-glyph').value), wax: Number($('seal-wax').value) }, 'seal-now', 'You cut your crest into a ring.'));
+$('net').addEventListener('click', () => doing('net', {}, 'fish-note', (r) => {
+  const more = r.found.length ? ` and ${list(r.found)}` : '';
+  return `You haul in ${r.caught}${more}.${r.snagged ? ' A bottle is tangled in the mesh, still on its way to someone.' : ''}`;
+}));
 $('spear').addEventListener('click', () => doing('spear', {}, 'fish-note', (r) => (r.caught === 'nothing' ? 'You wade back with nothing.' : `You spear ${r.caught}.`)));
 $('set-trap').addEventListener('click', () => doing('trap', {}, 'fish-note', 'You bait a trap with a berry and wedge it between the rocks.'));
 $('pull-traps').addEventListener('click', () => doing('traps', {}, 'fish-note', (r) => (r.caught === 'nothing' ? 'The traps come up empty.' : `In the traps: ${r.caught}.`)));

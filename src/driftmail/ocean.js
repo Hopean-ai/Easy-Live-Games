@@ -29,6 +29,9 @@ const FLOTSAM_ROLLS = 3;
 // Away this long, and the sea has saved a few extra things for you.
 const WELCOME_BACK_MS = 12 * 60 * 60 * 1000;
 const WELCOME_ROLLS = 4;
+// A hauled net drags in two things drifting by, and one time in five a bottle still at sea.
+const NET_ROLLS = 2;
+const NET_SNAG = 0.2;
 // What a castaway can gather inland once a tide, two at a time.
 const GATHER = ['leaves', 'clay', 'sand', 'stones', 'reeds', 'berries'];
 const GATHER_AMOUNT = 2;
@@ -433,11 +436,7 @@ export class Ocean extends DurableObject {
         caught = 'an old bottle, snagged on your hook. It is on the beach';
       } else if (bite.what === 'snag') {
         // A bottle still out on the water, on its way to someone. Keep it, or let it go on.
-        const drifting = this.sql.exec(
-          `SELECT id FROM bottles WHERE finder IS NULL AND sender != ? AND fog = 0 AND hidden = 0 ORDER BY id`, island.key,
-        ).toArray();
-        if (drifting.length) {
-          kit.snag = drifting[Math.floor(this.rand() * drifting.length)].id;
+        if (this.snagDrifting(island)) {
           snagged = true;
           caught = 'a bottle, tangled in your line, still on its way to someone';
         } else {
@@ -455,6 +454,16 @@ export class Ocean extends DurableObject {
       }
     }
     return { caught: caught ?? 'nothing', snagged };
+  }
+
+  // Catch hold of a bottle still drifting on its way to someone, if there is one out there.
+  snagDrifting(island) {
+    const drifting = this.sql.exec(
+      `SELECT id FROM bottles WHERE finder IS NULL AND sender != ? AND fog = 0 AND hidden = 0 ORDER BY id`, island.key,
+    ).toArray();
+    if (!drifting.length) return false;
+    island.kit.snag = drifting[Math.floor(this.rand() * drifting.length)].id;
+    return true;
   }
 
   catchFish(kit, n) {
@@ -800,6 +809,7 @@ export class Ocean extends DurableObject {
         fish: kit.fish, bones: kit.bones, glue: kit.glue, hook: kit.hook, spear: kit.spear,
         casts: castsPerTide(kit.abilities) - (kit.fishedTide === tideNow ? kit.casts : 0),
         canSpear: kit.spear && canSpear(now) && kit.spearTide !== tideNow,
+        net: kit.net, canNet: kit.net && kit.netTide !== tideNow,
         lowTide: canSpear(now),
         traps: kit.traps.map((t) => ({ set: t.set, tides: Math.min(3, tideNow - tideOf(t.set)) })), maxTraps: MAX_TRAPS,
         snag: snag ? { id: snag.id, kind: snag.kind } : null,
@@ -1014,6 +1024,22 @@ const ACTIONS = {
     return { caught: got === 'flatfish' ? 'a flatfish' : got === 'crab' ? 'a crab' : 'nothing' };
   },
 
+  // Haul a rope net through the shallows, once a tide: a few fish, whatever was drifting by, and
+  // now and then a bottle still on its way to someone, tangled in the mesh.
+  net(island, _body, now) {
+    const kit = island.kit;
+    if (!kit.net) return { error: 'You need a net. Weave one from rope at the workshop.' };
+    const tide = tideOf(now);
+    if (kit.netTide === tide) return { error: 'You have already hauled the net this tide.' };
+    kit.netTide = tide;
+    const fish = 1 + Math.floor(this.rand() * 3);
+    this.catchFish(kit, fish);
+    const found = [];
+    for (let r = 0; r < NET_ROLLS; r++) this.washUp(island, flotsam(this.rand, eventOn(tide)), now, found);
+    const snagged = !kit.snag && this.rand() < NET_SNAG && this.snagDrifting(island);
+    return { caught: `${fish} fish`, found, snagged };
+  },
+
   // Set a trap baited with a berry; it fills over the tides you're away.
   trap(island, _body, now) {
     const kit = island.kit;
@@ -1140,7 +1166,7 @@ function kitOf(json = '{}') {
     materials: k.materials ?? {}, seeds: { ...Object.fromEntries(CROP_KINDS.map((c) => [c, 0])), ...(k.seeds ?? STARTER_SEEDS) },
     plots: Array.from({ length: PLOTS }, (_, i) => plots[i] ?? { crop: null }),
     builds: k.builds ?? {}, ring: Boolean(k.ring), designed: Boolean(k.designed), stamp: k.stamp ?? null,
-    spear: Boolean(k.spear), spearTide: k.spearTide ?? null, traps: k.traps ?? [], snag: k.snag ?? null,
+    spear: Boolean(k.spear), spearTide: k.spearTide ?? null, net: Boolean(k.net), netTide: k.netTide ?? null, traps: k.traps ?? [], snag: k.snag ?? null,
     clues: k.clues ?? [], gatheredTide: k.gatheredTide ?? null, line: k.line ?? null,
   };
 }
