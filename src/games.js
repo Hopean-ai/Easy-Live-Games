@@ -41,8 +41,10 @@ export const GAMES = [
     players: 1,
     page: '/legio',
     // Played alone against the dice, so no rooms or quick match: the Camp object (src/legio/camp.js)
-    // keeps each account's career and the leaderboard.
+    // keeps each account's career and the leaderboard. On Roblox the hub opens it like a world
+    // (src/legio/roblox.js): an unlinked player gets a career of their own.
     solo: 'CAMP',
+    roblox: 'Legio',
   },
 ];
 
@@ -64,8 +66,8 @@ export function publicGames() {
 // What the Roblox hub lists in its game picker: the games it can relay, in the site's order.
 export function robloxGames() {
   return GAMES.filter((g) => g.roblox).map((g) => {
-    // A world has no rooms or tables: the hub opens its screens straight away.
-    if (g.world) return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), world: true };
+    // A world, or a game played alone, has no rooms or tables: the hub opens its screens straight away.
+    if (g.world || g.solo) return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), world: true, ...(g.solo ? { solo: true } : {}) };
     const { min, max } = tableSize(g);
     return { id: g.id, name: g.name, blurb: g.blurb, players: String(g.players), minPlayers: min, maxPlayers: max };
   });

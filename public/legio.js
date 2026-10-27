@@ -147,7 +147,8 @@ function renderBoard() {
     name.textContent = r.name;
     const account = document.createElement('span');
     account.className = 'small';
-    account.textContent = r.account;
+    // A Roblox player who never linked an account plays under their Roblox id.
+    account.textContent = r.account.startsWith('roblox:') ? 'Roblox player' : r.account;
     who.append(name, account);
     const fate = cell(r.fate);
     fate.className = 'fate';

@@ -7,8 +7,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { fakeCtx } from '../test/helpers/workers-stub.js';
 import { seeded, MAX_DRIFT_MS, REDRIFT_MS, DAY_MS } from '../src/driftmail/world.js';
 import { robloxWorld } from '../src/driftmail/roblox.js';
+import { robloxLegio } from '../src/legio/roblox.js';
 
 const { Ocean } = await import('../src/driftmail/ocean.js');
+const { Camp } = await import('../src/legio/camp.js');
 
 const seats = [{ name: 'Miles' }, { name: 'RobA', roblox: '1' }, { name: 'RobB', roblox: '2' }];
 const room = { status: 'playing', seats, game: createGame(seats.map((s) => s.name), 42) };
@@ -56,7 +58,22 @@ ocean.oldBottle(ocean.island('roblox:1'), now);
 await robloxWorld(ocean, { ...rb, op: 'throw', text: 'Hello from Roblox.', dir: 2, strength: 0.6 });
 world = await robloxWorld(ocean, { ...rb, op: 'state' });
 
+// Legio: a Roblox player's career a few cards in, with a finished career of theirs and a web
+// player's on the leaderboard.
+const legioDb = new DatabaseSync(':memory:');
+const legioSql = { exec: (query, ...params) => (params.length || query.split(';').filter((q) => q.trim()).length < 2 ? (() => { const rows = legioDb.prepare(query).all(...params); return { toArray: () => rows }; })() : (legioDb.exec(query), { toArray: () => [] })) };
+const camp = new Camp({ ...fakeCtx(), storage: { ...fakeCtx().storage, sql: legioSql } }, {});
+let legioSeed = 0;
+camp.seed = () => ++legioSeed;
+for (const who of ['miles', 'roblox:1']) {
+  let st = await camp.enlist(who);
+  while (!st.run.over) st = await camp.choose(who, { i: st.run.card.choices.findIndex((c) => !c.off), turn: st.run.turn });
+}
+let legio = await robloxLegio(camp, { ...rb, op: 'enlist' });
+for (let i = 0; i < 6; i++) legio = await robloxLegio(camp, { ...rb, op: 'choose', i: 0, turn: legio.run.turn });
+
 console.log(JSON.stringify({
+  legio,
   driftmail: world,
   board: robloxBoard(),
   waiting: robloxState(waiting, 1, 0),
