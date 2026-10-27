@@ -11,9 +11,15 @@ const SUPPLY_NAMES = { bottles: 'Bottles', corks: 'Corks', paper: 'Paper', ink: 
 const MATERIAL_NAMES = {
   driftwood: 'Driftwood', rope: 'Rope', clay: 'Clay', sand: 'Sand', stones: 'Stones', leaves: 'Palm leaves', reeds: 'Reeds',
   berries: 'Berries', bark: 'Bark', wax: 'Wax', oil: 'Fish oil', scales: 'Fish scales', jars: 'Jars', shimmer: 'Shimmering ink', traps: 'Traps',
+  flax: 'Flax', indigo: 'Indigo leaves', blue: 'Blue ink', gourds: 'Gourds', coconuts: 'Coconuts', kale: 'Sea kale',
 };
 const GATHER = [['leaves', 'Palm leaves'], ['clay', 'Clay'], ['sand', 'Sand'], ['stones', 'Stones'], ['reeds', 'Wild reeds'], ['berries', 'Wild berries']];
 const WAX_NAMES = ['red', 'blue', 'green', 'violet', 'amber', 'black', 'rose'];
+// The longest letter, and the most that fits scratched into a coconut shell.
+const MAX_LETTER = 600;
+const SCRATCH_LETTER = 140;
+// Indigo from the garden, pressed into ink.
+const BLUE_INK = '#25449a';
 const STRANGE_NOTES = {
   knowing: 'A bottle with no seal washed up, very cold to the touch. Nobody signed it. It seems to know you.',
   future: 'A bottle with no seal washed up. The letter inside is dated days from now.',
@@ -759,7 +765,7 @@ function render() {
   $('pull-traps').hidden = kit.traps.length === 0;
   $('pull-traps').textContent = `Pull up the traps (${kit.traps.length} set)`;
   $('pull-traps').disabled = !kit.traps.some((t) => t.tides >= 1);
-  $('bait').disabled = !(state.materials.berries > 0);
+  $('bait').disabled = !(state.materials.berries > 0 || state.materials.kale > 0);
   $('snag').hidden = !kit.snag;
   renderIsland();
 
@@ -875,7 +881,7 @@ function renderIsland() {
   const seeds = Object.entries(state.seeds).filter(([, n]) => n > 0).map(([k, n]) => `${n} × ${state.crops[k].seed}`);
   if (!$('seeds').dataset.note) $('seeds').textContent = seeds.length ? `Seeds: ${seeds.join(', ')}.` : 'No seeds. Strangers sometimes send them.';
 
-  $('blueprints').replaceChildren(...state.blueprints.map((b) => {
+  $('blueprints').replaceChildren(...state.blueprints.filter((b) => !b.hidden).map((b) => {
     const li = el('li');
     const row = el('div', 'row');
     const done = b.built >= b.stages;
@@ -1059,6 +1065,7 @@ function read(letter, learned = null) {
   paper.classList.toggle('stained', Boolean(letter.stained));
   paper.classList.toggle('strange', Boolean(letter.strange));
   handwriting(paper, letter.hand);
+  if (letter.blue) paper.style.color = BLUE_INK;
   if (letter.replyTo) paper.append(el('span', 'reply-of', `In answer to your letter: “${letter.replyTo}”`));
   if (letter.title) paper.append(el('span', 'reply-of', letter.title));
   paper.append(document.createTextNode(letter.text));
@@ -1247,6 +1254,8 @@ function compose(answering = null) {
   $('stamp').checked = Boolean(state.stamp);
   $('shimmer-row').hidden = !(m.shimmer > 0);
   $('shimmer').checked = false;
+  $('blue-row').hidden = !(m.blue > 0);
+  $('blue').checked = false;
   const forgeable = new Map();
   for (const l of state.shelf) if (l.canForge && !forgeable.has(l.hand)) forgeable.set(l.hand, l);
   $('forge-row').hidden = forgeable.size === 0;
@@ -1276,7 +1285,7 @@ function compose(answering = null) {
   $('pad').hidden = true;
   pad.fill(0);
   paintPad();
-  $('bundle-what').replaceChildren(...Object.entries(m).filter(([k, n]) => n > 0 && k !== 'jars' && k !== 'traps' && k !== 'shimmer').map(([k]) => {
+  $('bundle-what').replaceChildren(...Object.entries(m).filter(([k, n]) => n > 0 && k !== 'jars' && k !== 'traps' && k !== 'shimmer' && k !== 'blue').map(([k]) => {
     const o = el('option', '', MATERIAL_NAMES[k] ?? k);
     o.value = k;
     return o;
@@ -1300,6 +1309,11 @@ function containerNote() {
   $('container-note').textContent = k?.words ?? '';
   $('bundle-row').hidden = !(k && k.items >= 8);
   $('glue-row').hidden = !(state.kit.glue > 0) || $('container').value !== 'bottle';
+  // A coconut is scratched with a knife: a few lines, and no ink to choose.
+  const scratched = $('container').value === 'coconut';
+  $('letter').maxLength = scratched ? SCRATCH_LETTER : MAX_LETTER;
+  $('max-count').textContent = String($('letter').maxLength);
+  $('ink-rows').hidden = scratched || !(state.materials.shimmer > 0 || state.materials.blue > 0);
 }
 $('container').addEventListener('change', containerNote);
 $('item-drawing').addEventListener('change', () => { $('pad').hidden = !$('item-drawing').checked; });
@@ -1389,7 +1403,8 @@ $('compose-form').addEventListener('submit', async (e) => {
     items,
     wax: $('wax').checked,
     stamp: $('stamp').checked,
-    shimmer: $('shimmer').checked,
+    shimmer: $('shimmer').checked && $('container').value !== 'coconut',
+    blue: $('blue').checked && $('container').value !== 'coconut',
     forge: $('forge').value ? Number($('forge').value) : null,
   });
   if (!s) return;

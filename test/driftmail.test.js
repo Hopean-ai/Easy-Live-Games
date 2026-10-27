@@ -942,3 +942,62 @@ test('fishing as a minigame: read the water, strike on the real bite, and answer
   assert.match(early.r.lost, /nibble/);
   assert.ok((await early.o.act('a', { op: 'cast', spot: 'moon' })).error);
 });
+
+test('new seeds: flax twists into rope, indigo into blue ink, sea kale needs no water and is the best bait', async () => {
+  const o = ocean({ seed: 6 });
+  await o.visit('a');
+  give(o, 'a', (_, k) => { k.seeds.kale = 1; k.seeds.flax = 1; });
+  await o.act('a', { op: 'plant', plot: 0, crop: 'kale' });
+  await o.act('a', { op: 'plant', plot: 1, crop: 'flax' });
+  // Three tides with no watering: the kale grows in the shallows, the flax dries out after two.
+  later(o, 3 * TIDE_MS);
+  const s = await o.visit('a');
+  assert.equal(s.garden[0].ripe, true, 'sea kale needs no water');
+  assert.equal(s.garden[0].dry, false);
+  assert.equal(s.garden[1].ripe, false, 'flax still needs watering');
+  const kale = await o.act('a', { op: 'harvest', plot: 0 });
+  assert.equal(kale.materials.kale, 3);
+  // Kale goes on the hook before berries.
+  give(o, 'a', (_, k) => { k.materials.berries = 2; });
+  const cast = await o.act('a', { op: 'cast', spot: 'reef', bait: true });
+  assert.equal(cast.error, undefined);
+  assert.equal(cast.materials.kale, 2);
+  assert.equal(cast.materials.berries, 2);
+  give(o, 'a', (_, k) => { k.materials = { flax: 2, indigo: 2 }; k.builds = { workshop: 1, press: 1 }; });
+  assert.equal((await o.act('a', { op: 'make', what: 'rope' })).materials.rope, 1);
+  assert.equal((await o.act('a', { op: 'make', what: 'blue' })).materials.blue, 1);
+});
+
+test('a letter in blue ink, a gourd that floats far, and a short note scratched into a coconut', async () => {
+  const o = ocean();
+  await o.visit('alice');
+  await o.visit('bob');
+  give(o, 'alice', (_, k) => { k.materials = { blue: 1, gourds: 1, coconuts: 2 }; });
+  const ink = o.island('alice').supplies.ink;
+  const blue = await o.throwBottle('alice', { text: 'In blue.', dir: 0, strength: 0.5, blue: true });
+  assert.equal(blue.error, undefined);
+  assert.equal(blue.materials.blue, undefined, 'the blue ink is used instead of ink');
+  assert.equal(blue.island.supplies.ink, ink);
+  assert.ok((await o.throwBottle('alice', { text: 'x', dir: 0, strength: 0.5, blue: true, shimmer: true })).error, 'one ink at a time');
+  const gourd = await o.throwBottle('alice', { text: 'In a gourd.', dir: 0, strength: 0.5, kind: 'gourd' });
+  assert.equal(gourd.error, undefined);
+  const before = { ...gourd.island.supplies };
+  assert.match((await o.throwBottle('alice', { text: 'a'.repeat(141), dir: 0, strength: 0.5, kind: 'coconut' })).error, /140/);
+  assert.match((await o.throwBottle('alice', { text: 'Hi', dir: 0, strength: 0.5, kind: 'coconut', items: [{ kind: 'curio', name: 'x' }] })).error ?? '', /./);
+  const nut = await o.throwBottle('alice', { text: 'Scratched in the shell.', dir: 0, strength: 0.5, kind: 'coconut' });
+  assert.equal(nut.error, undefined);
+  assert.deepEqual(nut.island.supplies, before, 'no paper or ink for a coconut');
+  assert.equal(nut.materials.coconuts, 1);
+  const kinds = o.sql.exec("SELECT kind, blue FROM bottles WHERE sender = 'alice' ORDER BY id").toArray().map((r) => [r.kind, r.blue]);
+  assert.deepEqual(kinds, [['bottle', 1], ['gourd', 0], ['coconut', 0]]);
+});
+
+test('the build list leaves out what needs something not built yet', async () => {
+  const o = ocean();
+  const s = await o.visit('a');
+  const shown = s.blueprints.filter((b) => !b.hidden).map((b) => b.id);
+  assert.ok(shown.includes('shack') && shown.includes('workshop'));
+  for (const id of ['desk', 'shelves', 'bench', 'chest']) assert.ok(!shown.includes(id), `${id} waits for the shack`);
+  give(o, 'a', (_, k) => { k.builds = { shack: 3 }; });
+  assert.ok((await o.visit('a')).blueprints.every((b) => !b.hidden));
+});

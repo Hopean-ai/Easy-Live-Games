@@ -7,7 +7,7 @@ import {
 import {
   BUILDINGS, BUILD_KINDS, CONTAINERS, CROPS, CROP_KINDS, MARKS, MATERIALS, MATERIAL_FOUND, PEN_PAL_LETTERS, PLOTS,
   RECIPES, RING_LOSS_IN_STORM, gardenOf, SEAL_GLYPHS, SEAL_WAX, STAMP_PATTERNS, blur, blurAmount, costWords, grow, nextBuild,
-  plant, plotView, ripe, shelfRoom, sinkChance, tideOf,
+  plant, plotView, ripe, SCRATCH_LETTER, shelfRoom, sinkChance, tideOf,
 } from './island.js';
 import { clue, clueText, echo, futureLetter, islandDay, knowingLetter, matchesClue } from './mysteries.js';
 import { CASTAWAYS, writeReply } from './castaways.js';
@@ -84,6 +84,7 @@ export class Ocean extends DurableObject {
       ['bottles', 'stamp', 'INTEGER'],
       ['bottles', 'forged', 'INTEGER NOT NULL DEFAULT 0'],
       ['bottles', 'shimmer', 'INTEGER NOT NULL DEFAULT 0'],
+      ['bottles', 'blue', 'INTEGER NOT NULL DEFAULT 0'],
       ['bottles', 'mark', 'TEXT'],
       ['bottles', 'added', 'TEXT'],
       ['bottles', 'added_hand', 'INTEGER'],
@@ -215,7 +216,7 @@ export class Ocean extends DurableObject {
     const now = this.now();
     const island = this.island(account);
     if (!island) return { error: 'Visit your island first.' };
-    const { text, signed, dir, strength, replyTo, glue, page: pageId, kind = 'bottle', items = [], wax, stamp, forge, shimmer } = body;
+    const { text, signed, dir, strength, replyTo, glue, page: pageId, kind = 'bottle', items = [], wax, stamp, forge, shimmer, blue } = body;
     const letter = typeof text === 'string' ? text.trim() : '';
     if (!letter) return { error: 'Write something first.' };
     if (letter.length > MAX_LETTER) return { error: `Letters can be at most ${MAX_LETTER} characters.` };
@@ -228,6 +229,8 @@ export class Ocean extends DurableObject {
     if (container.ability && !kit.abilities.includes(container.ability)) return { error: `You don't know how to make a ${container.name.toLowerCase()}.` };
     if (container.needs && !kit.builds[container.needs]) return { error: `A ${container.name.toLowerCase()} is launched from a ${BUILDINGS[container.needs].name.toLowerCase()}.` };
 
+    if (container.scratched && letter.length > SCRATCH_LETTER) return { error: `Only ${SCRATCH_LETTER} characters fit scratched into a coconut.` };
+    if (shimmer && blue) return { error: 'Write in one ink: shimmering or blue.' };
     const cost = { ...container.cost };
     const useGlue = Boolean(glue) && kind === 'bottle';
     if (useGlue) {
@@ -237,8 +240,12 @@ export class Ocean extends DurableObject {
     const add = (k, n = 1) => {
       cost[k] = (cost[k] ?? 0) + n;
     };
-    add('paper');
-    add(shimmer ? 'shimmer' : 'ink');
+    // A coconut is scratched with a knife: no paper, no ink.
+    const ink = container.scratched ? null : shimmer ? 'shimmer' : blue ? 'blue' : 'ink';
+    if (ink) {
+      add('paper');
+      add(ink);
+    }
     let enclosed = null;
     if (pageId != null && pageId !== '') {
       if (!kit.pages.includes(pageId) || !page(pageId)) return { error: 'That page is not in your journal.' };
@@ -251,6 +258,7 @@ export class Ocean extends DurableObject {
     const parsed = this.items(island, items, cost, container);
     if (parsed.error) return parsed;
     if ((enclosed ? 1 : 0) + parsed.items.length > container.items) {
+      if (!container.items) return { error: `Nothing fits inside a ${container.name.toLowerCase()}.` };
       return { error: `A ${container.name.toLowerCase()} holds a letter and ${container.items === 1 ? 'one thing' : `up to ${container.items} things`}.` };
     }
     if (wax) {
@@ -300,8 +308,8 @@ export class Ocean extends DurableObject {
     const event = eventAt(now)?.kind;
     this.launch(island, {
       text: letter, signed: Boolean(signed) && forge == null, dir, strength: Math.min(1, Math.max(0.1, s)), toward, answers, page: enclosed, now,
-      kind, items: parsed.items, hand, forged: forge != null, sealed: Boolean(wax), stamp: stamp ? kit.stamp : null, shimmer: Boolean(shimmer),
-      steady, stained: event === 'redtide', fog: event === 'fog' && this.rand() < 0.5, hidden,
+      kind, items: parsed.items, hand, forged: forge != null, sealed: Boolean(wax), stamp: stamp ? kit.stamp : null, shimmer: ink === 'shimmer',
+      blue: ink === 'blue', steady, stained: event === 'redtide', fog: event === 'fog' && this.rand() < 0.5, hidden,
     });
     await this.schedule();
     return { ...this.state(island, now), lostRing };
@@ -390,7 +398,7 @@ export class Ocean extends DurableObject {
     return { ...this.state(island, now), opened: row.id, learned, got };
   }
 
-  // Cast a line off the rocks, with a berry for bait if you like. Returns what bit, if anything.
+  // Cast a line off the rocks, with bait if you like (sea kale first, else a berry). Returns what bit, if anything.
   async fish(account, { bait = false } = {}) {
     const now = this.now();
     const island = this.island(account);
@@ -402,10 +410,11 @@ export class Ocean extends DurableObject {
       kit.casts = 0;
     }
     if (kit.casts >= castsPerTide(kit.abilities)) return { error: 'The fish have gone quiet. Try again next tide.' };
-    if (bait && !(kit.materials.berries > 0)) return { error: 'You have no berries for bait.' };
+    const lure = bait ? baitOf(kit) : null;
+    if (bait && !lure) return { error: 'You have no bait: sea kale or a berry.' };
     kit.casts++;
-    if (bait) kit.materials.berries--;
-    const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: Boolean(bait) });
+    if (lure) kit.materials[lure === 'kale' ? 'kale' : 'berries']--;
+    const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: lure });
     const { caught, snagged } = this.land(island, bite, now);
     this.saveIsland(island);
     return { ...this.state(island, now), caught: caught ?? 'nothing', snagged };
@@ -592,7 +601,7 @@ export class Ocean extends DurableObject {
 
   launch(island, {
     text, signed, dir, strength, toward, answers, page: enclosed = null, now, kind = 'bottle', items = [], hand = island.hand,
-    forged = false, sealed = false, stamp = null, shimmer = false, steady = false, stained = false, fog = false, hidden = false,
+    forged = false, sealed = false, stamp = null, shimmer = false, blue = false, steady = false, stained = false, fog = false, hidden = false,
     name = null, emblem = island.emblem, added = null, addedHand = null, marked = island.castaway ? 1 : 0,
   }) {
     const to = drift({ from: island, dir, strength, t: now, rand: this.rand, toward, kind, steady });
@@ -600,11 +609,11 @@ export class Ocean extends DurableObject {
     const arrives = fog ? to.arrives + Math.round((1 + this.rand() * 2) * TIDE_MS * 2) : hidden ? now + TIDE_MS : to.arrives;
     this.sql.exec(
       `INSERT INTO bottles (sender, sender_name, text, hand, emblem, marked, reply_to, from_x, from_y, to_x, to_y, thrown, rest, arrives, page,
-         kind, items, forged, sealed, stamp, shimmer, stained, fog, hidden, added, added_hand)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         kind, items, forged, sealed, stamp, shimmer, blue, stained, fog, hidden, added, added_hand)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       island.key, name ?? (signed ? island.name : null), text, hand, emblem, marked, answers,
       island.x, island.y, to.x, to.y, now, arrives, arrives, enclosed,
-      kind, JSON.stringify(items), forged ? 1 : 0, sealed ? 1 : 0, stamp, shimmer ? 1 : 0, stained ? 1 : 0, fog ? 1 : 0, hidden ? 1 : 0,
+      kind, JSON.stringify(items), forged ? 1 : 0, sealed ? 1 : 0, stamp, shimmer ? 1 : 0, blue ? 1 : 0, stained ? 1 : 0, fog ? 1 : 0, hidden ? 1 : 0,
       added, addedHand,
     );
   }
@@ -788,7 +797,7 @@ export class Ocean extends DurableObject {
           page: r.page && !r.old ? pageView(r.page) : null,
           title: r.old ? page(r.page)?.title ?? null : null,
           kind: r.kind, items: JSON.parse(r.items), sealed: Boolean(r.sealed), stamp: r.stamp == null ? null : STAMP_PATTERNS[r.stamp] ?? null,
-          shimmer: Boolean(r.shimmer), stained: Boolean(r.stained), broken: Boolean(r.broken),
+          shimmer: Boolean(r.shimmer), blue: Boolean(r.blue), stained: Boolean(r.stained), broken: Boolean(r.broken),
           blurred: r.blur > 0 ? (knows('restore') ? 'restored' : 'blurred') : null,
           strange: r.strange ?? null, mark: r.mark ?? null,
           added: r.added ? { text: r.added, hand: r.added_hand } : null,
@@ -831,6 +840,8 @@ export class Ocean extends DurableObject {
         return {
           id: k, name: b.name, words: b.words, stages: b.stages?.length ?? 1, built: kit.builds[k] ?? 0,
           next: next.error ? null : { name: next.name, cost: next.cost, ok: stockHas(island, next.cost) }, blocked: next.error ?? null,
+          // Out of the Build list until whatever it goes in is finished.
+          hidden: Boolean(b.needs) && !(kit.builds[b.needs] >= (BUILDINGS[b.needs].stages?.length ?? 1)),
         };
       }),
       recipes: Object.entries(RECIPES).map(([id, r]) => ({
@@ -980,10 +991,11 @@ const ACTIONS = {
       kit.casts = 0;
     }
     if (kit.casts >= castsPerTide(kit.abilities)) return { error: 'The fish have gone quiet. Try again next tide.' };
-    if (bait && !(kit.materials.berries > 0)) return { error: 'You have no berries for bait.' };
+    const lure = bait ? baitOf(kit) : null;
+    if (bait && !lure) return { error: 'You have no bait: sea kale or a berry.' };
     kit.casts++;
-    if (bait) kit.materials.berries--;
-    const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: Boolean(bait), spot });
+    if (lure) kit.materials[lure === 'kale' ? 'kale' : 'berries']--;
+    const bite = cast({ t: now, rand: this.rand, hook: kit.hook, abilities: kit.abilities, bait: lure, spot });
     if (!bite) {
       kit.line = null;
       return { line: { spot, bite: false } };
@@ -1121,13 +1133,18 @@ const ACTIONS = {
     const s = Number(strength);
     this.launch(island, {
       text: r.text, name: r.sender_name, dir, strength: Number.isFinite(s) ? Math.min(1, Math.max(0.1, s)) : 0.6, now, hand: r.hand,
-      emblem: r.emblem, forged: Boolean(r.forged), sealed: Boolean(r.sealed), stamp: r.stamp, shimmer: Boolean(r.shimmer), marked: r.marked,
+      emblem: r.emblem, forged: Boolean(r.forged), sealed: Boolean(r.sealed), stamp: r.stamp, shimmer: Boolean(r.shimmer), blue: Boolean(r.blue), marked: r.marked,
       added: add || null, addedHand: add ? island.hand : null, toward: null, answers: null,
     });
     await this.schedule();
     return { passed: true };
   },
 };
+
+// Bait for the hook: sea kale if there is any (the better bait), else a berry.
+function baitOf(kit) {
+  return kit.materials.kale > 0 ? 'kale' : kit.materials.berries > 0 ? 'berry' : null;
+}
 
 // Supplies live on the island, the catch and tools in the kit, seeds by crop, and the rest are
 // materials. Costs mix all of them.

@@ -5,10 +5,14 @@
 
 import { TIDE_MS } from './world.js';
 
-export const MATERIALS = ['driftwood', 'rope', 'clay', 'sand', 'stones', 'leaves', 'reeds', 'berries', 'bark', 'wax', 'oil', 'scales'];
+export const MATERIALS = [
+  'driftwood', 'rope', 'clay', 'sand', 'stones', 'leaves', 'reeds', 'berries', 'bark', 'wax', 'oil', 'scales',
+  'flax', 'indigo', 'blue', 'gourds', 'coconuts', 'kale',
+];
 export const MATERIAL_NAMES = {
   driftwood: 'Driftwood', rope: 'Rope', clay: 'Clay', sand: 'Sand', stones: 'Stones', leaves: 'Palm leaves', reeds: 'Reeds',
   berries: 'Berries', bark: 'Bark', wax: 'Wax', oil: 'Fish oil', scales: 'Fish scales',
+  flax: 'Flax', indigo: 'Indigo leaves', blue: 'Blue ink', gourds: 'Gourds', coconuts: 'Coconuts', kale: 'Sea kale',
 };
 // How each one reads when the tide leaves it.
 export const MATERIAL_FOUND = {
@@ -19,8 +23,9 @@ export const MATERIAL_FOUND = {
 // --- The garden -----------------------------------------------------------------------------
 // Two wild plots by the stream from the start; garden beds make it four, keep the soil damp a
 // tide longer and add one to every harvest. A crop grows one step for every tide it has been watered within the last two
-// tides, so it pauses (never withers) while you're away. Harvesting gives its yield and one seed
-// back. The first seeds come in your starter crate; the rest come from strangers' bottles.
+// tides, so it pauses (never withers) while you're away. Sea kale grows in the shallows and needs
+// no water. Harvesting gives its yield and one seed back. The first seeds come in your starter
+// crate; the rest wash up or come in strangers' bottles.
 
 export const PLOTS = 4;
 export const WILD_PLOTS = 2;
@@ -29,6 +34,11 @@ export const CROPS = {
   reeds: { name: 'Reeds', seed: 'reed shoots', tides: 2, yields: { reeds: 3 }, words: 'Reeds dry into paper on a drying rack.' },
   oak: { name: 'Cork oak', seed: 'an acorn', tides: 6, yields: { bark: 3 }, words: 'Bark cuts into corks.' },
   flowers: { name: 'Bee flowers', seed: 'flower seeds', tides: 4, yields: { wax: 2 }, words: 'The bees that visit leave wax for seals.' },
+  flax: { name: 'Flax', seed: 'flax seeds', tides: 3, yields: { flax: 3 }, words: 'Twist the stems into rope at the workshop.' },
+  indigo: { name: 'Indigo', seed: 'indigo seeds', tides: 4, yields: { indigo: 2 }, words: 'Press the leaves into blue ink.' },
+  gourd: { name: 'Gourd vine', seed: 'gourd seeds', tides: 5, yields: { gourds: 2 }, words: 'A dried gourd, corked, floats further than a bottle and holds two things.' },
+  palm: { name: 'Coconut palm', seed: 'a sprouting coconut', tides: 8, yields: { leaves: 4, coconuts: 1 }, words: 'Palm leaves for roofs, and a coconut to scratch a short note on and set adrift.' },
+  kale: { name: 'Sea kale', seed: 'sea kale seeds', tides: 2, yields: { kale: 3 }, wild: true, words: 'Grows in the shallows without watering. The best bait there is.' },
 };
 export const CROP_KINDS = Object.keys(CROPS);
 const DRY_AFTER = 2; // tides without water before a crop stops growing
@@ -48,7 +58,8 @@ export function grow(plot, now, dryAfter = DRY_AFTER) {
   if (!plot?.crop) return plot;
   const tide = tideOf(now);
   for (let n = plot.lastTide + 1; n <= tide; n++) {
-    if (n - plot.watered <= dryAfter && plot.growth < CROPS[plot.crop].tides) plot.growth++;
+    const damp = CROPS[plot.crop].wild || n - plot.watered <= dryAfter;
+    if (damp && plot.growth < CROPS[plot.crop].tides) plot.growth++;
   }
   plot.lastTide = Math.max(plot.lastTide, tide);
   return plot;
@@ -69,7 +80,7 @@ export function plotView(plot, now, dryAfter = DRY_AFTER) {
   const c = CROPS[plot.crop];
   return {
     crop: plot.crop, name: c.name, growth: plot.growth, needs: c.tides, ripe: ripe(plot),
-    dry: tideOf(now) - plot.watered > dryAfter, watered: plot.watered === tideOf(now),
+    dry: !c.wild && tideOf(now) - plot.watered > dryAfter, watered: c.wild || plot.watered === tideOf(now),
   };
 }
 
@@ -104,7 +115,7 @@ export const BUILDINGS = {
   cave: { name: 'Dry cave', cost: { stones: 10, rope: 3 }, needs: 'shack', room: 800, words: 'Room for 800 more letters, behind the waterfall.' },
   kiln: { name: 'Bottle kiln', cost: { clay: 4, stones: 4, sand: 2 }, words: 'Fire your own bottles from clay and sand.' },
   rack: { name: 'Drying rack', cost: { reeds: 2, rope: 2 }, words: 'Dry reeds into paper.' },
-  press: { name: 'Ink press', cost: { stones: 3, driftwood: 2 }, words: 'Press berries into ink, and fish scales into shimmering ink.' },
+  press: { name: 'Ink press', cost: { stones: 3, driftwood: 2 }, words: 'Press berries into ink, indigo into blue ink, and fish scales into shimmering ink.' },
   bench: { name: 'Seal bench', cost: { driftwood: 3, stones: 2 }, needs: 'shack', words: 'Design your own wax seal.' },
   lookout: { name: 'Lookout', cost: { driftwood: 6, rope: 2 }, words: 'From up here you can see roughly which way your bottles went.' },
   lighthouse: {
@@ -173,6 +184,8 @@ export const RECIPES = {
   spear: { needs: 'workshop', name: 'Make a spear', cost: { driftwood: 1, bones: 2 }, once: 'spear' },
   trap: { needs: 'workshop', name: 'Weave a trap', cost: { driftwood: 2, rope: 1 }, gives: { traps: 1 } },
   net: { needs: 'workshop', name: 'Weave a net', cost: { rope: 4 }, once: 'net' },
+  rope: { needs: 'workshop', name: 'Twist rope', cost: { flax: 2 }, gives: { rope: 1 } },
+  blue: { needs: 'press', name: 'Press blue ink', cost: { indigo: 2 }, gives: { blue: 1 } },
   stamp: { name: 'Carve a stamp', needs: 'bench', ability: 'carving', cost: { driftwood: 1, bones: 1 }, once: 'stamp' },
 };
 
@@ -185,10 +198,14 @@ export const CONTAINERS = {
   double: { name: 'Double-corked bottle', items: 1, needs: 'workshop', cost: { bottles: 1, corks: 2, wax: 1 }, words: 'Keeps the water out on a long drift, and rides the outer currents.' },
   weighted: { name: 'Weighted bottle', items: 1, ability: 'deep', needs: 'workshop', cost: { bottles: 1, corks: 1, stones: 2 }, words: 'Sinks into the deep current and surfaces far away, much later.' },
   sailed: { name: 'Sailed float', items: 1, ability: 'deep', needs: 'workshop', cost: { bottles: 1, corks: 1, driftwood: 1, rope: 1 }, words: 'Follows the wind instead of the current.' },
+  gourd: { name: 'Gourd', items: 2, cost: { gourds: 1, corks: 1 }, words: 'A dried gourd from the garden: light, so it floats further than a bottle, and holds two things.' },
+  coconut: { name: 'Coconut', items: 0, scratched: true, cost: { coconuts: 1 }, words: 'A short note scratched into the shell: no paper or ink, and no room inside.' },
   jar: { name: 'Jar', items: 3, cost: { jars: 1, wax: 1 }, words: 'A few things at once; shorter and slower than a bottle.' },
   box: { name: 'Box', items: 8, needs: 'dock', cost: { driftwood: 4, rope: 2, glue: 1 }, words: 'Pushed off the dock on the tide: slow, close to the surface, and it can break in a storm.' },
   barrel: { name: 'Barrel', items: 20, needs: 'dock', cost: { driftwood: 8, rope: 2, glue: 1 }, words: 'Launched from the dock onto the outer currents. Travels far; storms can break it open.' },
 };
+// How much fits scratched into a coconut shell.
+export const SCRATCH_LETTER = 140;
 // Glue can stand in for the cork of an ordinary bottle.
 export const GLUE_FOR_CORK = true;
 

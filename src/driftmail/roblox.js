@@ -36,7 +36,7 @@ export async function robloxWorld(ocean, { op, userId, name, account, ...body })
     result = await ocean.throwBottle(key, {
       text: body.text, signed: body.signed, dir: body.dir, strength: body.strength,
       replyTo: body.replyTo ?? null, glue: body.glue, page: body.page ?? null, kind: body.kind ?? 'bottle',
-      items: Array.isArray(body.items) ? body.items : [], wax: body.wax, stamp: body.stamp, shimmer: body.shimmer, forge: body.forge ?? null,
+      items: Array.isArray(body.items) ? body.items : [], wax: body.wax, stamp: body.stamp, shimmer: body.shimmer, blue: body.blue, forge: body.forge ?? null,
     });
   }
   if (result.error) return { bridge: BRIDGE_VERSION, error: result.error };
@@ -65,7 +65,7 @@ export function robloxView(s) {
     replyTo: say(`r${l.id}`, l.replyTo),
     title: l.title, page: l.page, own: l.own, old: l.old, marked: l.marked, hand: l.hand, emblem: l.emblem,
     shore: l.shore, part: l.part, tide: l.tide, landed: l.landed, handOf: l.handOf ?? null,
-    kind: l.kind, items: items(l.items ?? []), sealed: l.sealed, stamp: l.stamp, shimmer: l.shimmer, stained: l.stained, broken: l.broken,
+    kind: l.kind, items: items(l.items ?? []), sealed: l.sealed, stamp: l.stamp, shimmer: l.shimmer, blue: l.blue, stained: l.stained, broken: l.broken,
     blurred: l.blurred, strange: l.strange, mark: l.mark, player: l.player, forged: l.forged ?? false, canForge: l.canForge ?? false,
     added: l.added ? { text: say(`a${l.id}`, l.added.text), hand: l.added.hand } : null,
   }));

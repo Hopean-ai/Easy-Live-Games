@@ -45,6 +45,7 @@ return function(hub: any)
 		ui.wax = false
 		ui.stamp = true
 		ui.shimmer = false
+		ui.blue = false
 		ui.forge = 0 -- index into the hands the player can copy, 0 for their own
 		ui.bait = false
 		ui.fishing = nil
@@ -160,6 +161,9 @@ return function(hub: any)
 		end
 		small(note, { TextSize = 13, Parent = col, LayoutOrder = 1 })
 		local font, ink = Bridge.hand(l.hand)
+		if l.blue then
+			ink = Bridge.BLUE_INK
+		end
 		local paper = make("Frame", { BackgroundColor3 = if l.old or l.journalPage then OLD_PAPER else PAPER, AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), Parent = col, LayoutOrder = 2 }, { corner(4), pad(16) })
 		local inner = column({ Parent = paper }, 8)
 		local reply = text(v, l.replyTo)
@@ -377,6 +381,9 @@ return function(hub: any)
 			}, { corner(4), pad(10) })
 			local inner = column({ Parent = theirs }, 4)
 			local lfont, link = Bridge.hand(l.hand)
+			if l.blue then
+				link = Bridge.BLUE_INK
+			end
 			label(text(v, l.text) or l.body or "", { Font = (Enum.Font :: any)[lfont], TextSize = 17, TextColor3 = Color3.fromHex(link), Parent = inner, LayoutOrder = 1 })
 			local name = text(v, l.name)
 			if name then
@@ -397,7 +404,8 @@ return function(hub: any)
 		box:GetPropertyChangedSignal("Text"):Connect(function()
 			ui.letter = box.Text
 		end)
-		small("Up to " .. Bridge.MAX_LETTER .. " characters.", { Parent = col, LayoutOrder = 3 })
+		local scratched = (usable(v.containers)[ui.kind] or {}).id == "coconut"
+		small("Up to " .. (if scratched then Bridge.SCRATCH_LETTER .. " characters, scratched into the shell." else Bridge.MAX_LETTER .. " characters."), { Parent = col, LayoutOrder = 3 })
 		local opts = row({ Parent = col, LayoutOrder = 4 })
 		chip((if ui.signed then "✓ " else "") .. "Sign it with my name", function()
 			ui.signed = not ui.signed
@@ -436,9 +444,17 @@ return function(hub: any)
 				render()
 			end, { Parent = opts, LayoutOrder = 6 })
 		end
-		if (v.materials.shimmer or 0) > 0 then
+		if (v.materials.shimmer or 0) > 0 and not scratched then
 			chip((if ui.shimmer then "✓ " else "") .. "Shimmering ink", function()
 				ui.shimmer = not ui.shimmer
+				ui.blue = false
+				render()
+			end, { Parent = opts, LayoutOrder = 7 })
+		end
+		if (v.materials.blue or 0) > 0 and not scratched then
+			chip((if ui.blue then "✓ " else "") .. "Blue ink", function()
+				ui.blue = not ui.blue
+				ui.shimmer = false
 				render()
 			end, { Parent = opts, LayoutOrder = 7 })
 		end
@@ -510,11 +526,11 @@ return function(hub: any)
 			local res = ask("throw", {
 				text = ui.letter, dir = dir, strength = Bridge.STRENGTHS[ui.strength].value, signed = ui.signed,
 				glue = ui.glue and kind.id == "bottle", page = p and p.id, replyTo = ui.replyTo and ui.replyTo.id,
-				kind = kind.id, items = items, wax = ui.wax, stamp = ui.stamp and v.stamp ~= nil, shimmer = ui.shimmer, forge = h and h.id,
+				kind = kind.id, items = items, wax = ui.wax, stamp = ui.stamp and v.stamp ~= nil, shimmer = ui.shimmer and not scratched, blue = ui.blue and not scratched, forge = h and h.id,
 			})
 			if res then
 				ui.letter, ui.dir, ui.replyTo, ui.glue, ui.page = "", nil, nil, false, 0
-				ui.curio, ui.seeds, ui.map, ui.wax, ui.shimmer, ui.forge, ui.kind = 0, 0, false, false, false, 0, 1
+				ui.curio, ui.seeds, ui.map, ui.wax, ui.shimmer, ui.blue, ui.forge, ui.kind = 0, 0, false, false, false, false, 0, 1
 				ui.note = "Your " .. (if kind.id == "bottle" then "bottle" else string.lower(kind.name)) .. " bobs away to the " .. Bridge.DIR_WORDS[dir + 1] .. "."
 					.. (if res.lostRing then " As it goes, you feel your seal ring slip off your wet finger and into the waves." else "")
 				ui.tab = "beach"
@@ -589,6 +605,9 @@ return function(hub: any)
 	local function renderBuild(col: Frame, v: any)
 		heading("Build", { TextSize = 14, Parent = col, LayoutOrder = 1 })
 		for i, b in v.blueprints do
+			if b.hidden then
+				continue -- not until whatever it goes in is finished
+			end
 			local done = b.built >= b.stages
 			local name = b.name .. (if b.stages > 1 then " (" .. b.built .. "/" .. b.stages .. ")" else "") .. (if done then " ✓" else "")
 			if b.next then
@@ -824,8 +843,8 @@ return function(hub: any)
 				end, { Parent = col, LayoutOrder = 2, Name = "Spot" .. i, TextXAlignment = Enum.TextXAlignment.Left }, if kit.casts < 1 then "secondary" else "primary")
 			end
 		end
-		if (v.materials.berries or 0) > 0 then
-			chip((if ui.bait then "✓ " else "") .. "Bait the hook with a berry", function()
+		if (v.materials.berries or 0) > 0 or (v.materials.kale or 0) > 0 then
+			chip((if ui.bait then "✓ " else "") .. "Bait the hook (" .. (if (v.materials.kale or 0) > 0 then "sea kale" else "a berry") .. ")", function()
 				ui.bait = not ui.bait
 				render()
 			end, { Parent = col, LayoutOrder = 2 })

@@ -21,6 +21,8 @@ Bridge.WORLD = true
 Bridge.POLL_SECONDS = 30
 
 Bridge.MAX_LETTER = 600
+Bridge.SCRATCH_LETTER = 140 -- the most that fits scratched into a coconut shell
+Bridge.BLUE_INK = "#25449a"
 Bridge.MAX_LINE = 140
 
 -- What can be gathered inland once a tide, and how a letter can be marked.
@@ -39,6 +41,7 @@ Bridge.WAX_NAMES = { "red", "blue", "green", "violet", "amber", "black", "rose" 
 Bridge.MATERIAL_NAMES = {
 	driftwood = "Driftwood", rope = "Rope", clay = "Clay", sand = "Sand", stones = "Stones", leaves = "Palm leaves", reeds = "Reeds",
 	berries = "Berries", bark = "Bark", wax = "Wax", oil = "Fish oil", scales = "Fish scales", jars = "Jars", shimmer = "Shimmering ink",
+	flax = "Flax", indigo = "Indigo leaves", blue = "Blue ink", gourds = "Gourds", coconuts = "Coconuts", kale = "Sea kale",
 	traps = "Traps", bottles = "Bottles", corks = "Corks", paper = "Paper", ink = "Ink", fish = "Fish", bones = "Bones", glue = "Fish glue",
 }
 
@@ -205,7 +208,7 @@ function Bridge.cleanWorld(arg: any): { [string]: any }?
 		return {
 			op = op, text = text, dir = dir, strength = strength, signed = arg.signed == true,
 			glue = arg.glue == true, page = page, replyTo = replyTo, kind = kind, items = items,
-			wax = arg.wax == true, stamp = arg.stamp == true, shimmer = arg.shimmer == true, forge = forge,
+			wax = arg.wax == true, stamp = arg.stamp == true, shimmer = arg.shimmer == true, blue = arg.blue == true, forge = forge,
 		}
 	end
 	return nil

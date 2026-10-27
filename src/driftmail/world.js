@@ -56,6 +56,8 @@ export function current(t) {
 export const TRAVEL = {
   bottle: { reach: 1, current: 1, time: 1 },
   jar: { reach: 0.7, current: 0.8, time: 1.4 },
+  gourd: { reach: 1.3, current: 1.3, time: 1.1 },
+  coconut: { reach: 1.1, current: 1.2, time: 1.2 },
   box: { reach: 0.4, current: 0.9, time: 2 },
   barrel: { reach: 1.2, current: 1.6, time: 1.6 },
   double: { reach: 1, current: 1.5, time: 1.3 },
@@ -424,7 +426,7 @@ export function cast({ t, rand, hook = false, abilities = [], bait = false, spot
   if (c.part === 'dawn' || c.part === 'dusk') chance += 0.2;
   if (!c.ebbing) chance += 0.1;
   if (hook) chance += 0.15;
-  if (bait) chance += 0.15;
+  if (bait) chance += bait === 'kale' ? 0.25 : 0.15;
   if (abilities.includes('knots')) chance += 0.1;
   if (event === 'shoal') chance += 0.35;
   if (event === 'storm') chance -= 0.25;
