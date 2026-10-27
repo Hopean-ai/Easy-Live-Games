@@ -30,8 +30,8 @@ Bridge.GATHER_NAMES = { "Palm leaves", "Clay", "Sand", "Stones", "Wild reeds", "
 -- The fishing minigame: how a fish pulls, how to answer each pull, and the words for it.
 Bridge.ANSWERS = { left = "right", right = "left", away = "give" }
 Bridge.PULL_WORDS = { left = "It runs hard to the left!", right = "It runs hard to the right!", away = "It dives for the deep water!" }
-Bridge.NIBBLE_SECONDS = 0.5
-Bridge.BITE_SECONDS = 1.4
+Bridge.NIBBLE_SECONDS = 0.65
+Bridge.BITE_SECONDS = 2.1
 Bridge.PULL_SECONDS = 2.8
 Bridge.MARKS = { "kind", "useful", "rude" }
 Bridge.WAX_NAMES = { "red", "blue", "green", "violet", "amber", "black", "rose" }

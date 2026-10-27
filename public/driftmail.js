@@ -887,7 +887,7 @@ function renderIsland() {
     return li;
   }));
 
-  $('recipes').replaceChildren(...state.recipes.filter((r) => r.blocked !== 'Made.').map((r) => {
+  $('recipes').replaceChildren(...state.recipes.filter((r) => r.blocked !== 'Made.' && !r.hidden).map((r) => {
     const li = el('li');
     const row = el('div', 'row');
     row.append(el('span', '', r.name));
@@ -1207,6 +1207,23 @@ function compose(answering = null) {
   if (answering) {
     $('reply-note').textContent = `Answering the letter from your ${answering.shore} beach. Throw back the way it came and it may find its way home.`;
   }
+  // Their letter stays in view above yours while you write back, in their own hand.
+  const theirs = $('reply-letter');
+  theirs.hidden = !answering;
+  theirs.replaceChildren();
+  if (answering) {
+    handwriting(theirs, answering.hand);
+    theirs.style.transform = '';
+    theirs.append(document.createTextNode(answering.text));
+    if (answering.name) theirs.append(el('span', 'sig', `— ${answering.name}`));
+    if (answering.added) {
+      const add = el('span', 'added', answering.added.text);
+      handwriting(add, answering.added.hand);
+      add.style.transform = '';
+      theirs.append(add);
+    }
+    theirs.scrollTop = 0;
+  }
   $('glue-row').hidden = !(state.kit.glue > 0);
   $('glue').checked = false;
   const m = state.materials;
@@ -1386,8 +1403,8 @@ $('compose-form').addEventListener('submit', async (e) => {
 // The minigame: cast at a spot, watch the float, strike on the real bite, then answer the pulls.
 // The server has already decided what's down there and how it fights; this plays it out and
 // sends back when you struck and how you answered.
-const NIBBLE_MS = 450;
-const BITE_MS = 1300;
+const NIBBLE_MS = 600;
+const BITE_MS = 2000;
 const PULL_MS = 2600;
 const PULL_WORDS = { left: 'It runs hard to the left!', right: 'It runs hard to the right!', away: 'It dives for the deep water!' };
 

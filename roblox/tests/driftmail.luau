@@ -53,6 +53,7 @@ assert(has(body) and has("— " .. view.texts[letter.name]), "the letter and its
 -- Writing back: a reply, with a direction and strength.
 press("Write back")
 assert(has("Answering the letter"), "a reply says what it answers")
+assert(has(body), "and shows their letter while you write")
 h.type("Write to whoever finds this", "Hello across the water.")
 press("Throw it to sea")
 assert(h.has("Pick which way to throw it."), "no throw without a direction")
