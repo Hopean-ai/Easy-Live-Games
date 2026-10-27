@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CFO Career · Live Multiplayer Games</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/career.css">
+</head>
+<body class="career">
+  <main>
+    <header class="cc-head">
+      <p class="small"><a href="/">All games</a></p>
+      <h1>CFO Career</h1>
+      <p class="sub" id="sub">From startup to public company, as its CFO.</p>
+    </header>
+
+    <section id="signin" class="stack narrow" hidden>
+      <p>CFO Career keeps your career on your account, so you can stop and pick it up later.</p>
+      <p><a id="signin-link" href="/">Sign in or create an account</a> to start.</p>
+    </section>
+
+    <section id="intro" class="stack cc-intro" hidden>
+      <p>Sam has a widget shop, one machine, and big plans. You are its first CFO. Sam runs the shop; the money and the books are yours.</p>
+      <p>Each turn is a week. The shop's receipts and bills land on your desk, and you post them as journal entries. At each month end you file the books, and an accountant reviews them. You have 30 hours a week, and the paperwork grows with the business, so sooner or later you'll hand the routine work to a point-of-sale system or a bookkeeper.</p>
+      <p>When Sam wants to grow, you decide how to pay for it. When Sam wants to cut corners with the tax office, you decide that too. At the end of the year the company needs strong revenue and clean books to be ready for the next stage.</p>
+      <ul id="record" class="cc-record"></ul>
+      <div class="row"><button id="begin">Start as CFO</button></div>
+    </section>
+
+    <section id="game" hidden>
+      <div class="cc-bar">
+        <div class="cc-stat">
+          <span class="label">Hours left this week</span>
+          <span class="value" id="hours"></span>
+          <div class="meter"><span id="hours-meter"></span></div>
+        </div>
+        <div class="cc-stat"><span class="label">Bank balance</span><span class="value num" id="bank"></span></div>
+        <div class="cc-stat"><span class="label">Company score</span><span class="value num" id="score"></span></div>
+        <div class="cc-actions">
+          <button id="file" class="secondary"></button>
+          <button id="end-week">End the week</button>
+        </div>
+      </div>
+      <p id="error" class="error" role="alert"></p>
+
+      <article id="card" class="cc-card" hidden aria-live="polite">
+        <h2 id="card-title"></h2>
+        <p id="card-text"></p>
+        <div id="choices" class="cc-choices"></div>
+      </article>
+
+      <section id="ended" class="cc-card cc-ended" hidden>
+        <h2 id="ended-title"></h2>
+        <p id="ended-text"></p>
+        <p>Score: <strong id="ended-score"></strong></p>
+        <ul id="ended-missing"></ul>
+        <div class="row"><button id="again">Start a new career</button></div>
+      </section>
+
+      <div class="cc-grid">
+        <div class="cc-main">
+          <section class="cc-panel">
+            <h3>Your desk <span class="small" id="desk-count"></span></h3>
+            <p class="small" id="desk-empty" hidden>Nothing waiting. End the week when you're ready.</p>
+            <ol id="inbox" class="cc-docs"></ol>
+          </section>
+
+          <section class="cc-panel" id="review-panel" hidden>
+            <h3>Accountant's review: <span id="review-month"></span></h3>
+            <p class="small" id="review-summary"></p>
+            <ol id="review" class="cc-docs"></ol>
+          </section>
+
+          <section class="cc-panel">
+            <h3>Journal</h3>
+            <p class="small" id="journal-empty">Nothing posted yet.</p>
+            <ol id="journal" class="cc-docs"></ol>
+          </section>
+        </div>
+
+        <aside class="cc-side">
+          <section class="cc-panel">
+            <h3>The shop</h3>
+            <dl class="cc-facts" id="shop"></dl>
+          </section>
+          <section class="cc-panel">
+            <h3>Delegation and projects</h3>
+            <div id="projects" class="cc-projects"></div>
+          </section>
+          <section class="cc-panel">
+            <h3>Your books</h3>
+            <p class="small">Built from what you've posted.</p>
+            <table class="cc-statement" id="income"></table>
+            <table class="cc-statement" id="balance"></table>
+          </section>
+          <section class="cc-panel">
+            <h3>The goal</h3>
+            <p class="small" id="goal"></p>
+            <ol id="filings" class="cc-filings"></ol>
+          </section>
+          <section class="cc-panel">
+            <h3>Recent weeks</h3>
+            <ol id="log" class="cc-log"></ol>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/career.js"></script>
+</body>
+</html>

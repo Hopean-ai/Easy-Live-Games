@@ -14,7 +14,8 @@
       { "name": "MATCHMAKER", "class_name": "Matchmaker" },
       { "name": "CFO_ROOMS", "class_name": "CfoRoom" },
       { "name": "OCEAN", "class_name": "Ocean" },
-      { "name": "CAMP", "class_name": "Camp" }
+      { "name": "CAMP", "class_name": "Camp" },
+      { "name": "OFFICE", "class_name": "Office" }
     ]
   },
   "migrations": [
@@ -22,7 +23,8 @@
     { "tag": "v2", "new_sqlite_classes": ["Accounts", "Matchmaker"] },
     { "tag": "v3", "new_sqlite_classes": ["CfoRoom"] },
     { "tag": "v4", "new_sqlite_classes": ["Ocean"] },
-    { "tag": "v5", "new_sqlite_classes": ["Camp"] }
+    { "tag": "v5", "new_sqlite_classes": ["Camp"] },
+    { "tag": "v6", "new_sqlite_classes": ["Office"] }
   ],
   // Pull request builds run `wrangler preview`. Binding the class with no script_name gives each
   // Preview its own Durable Object namespace, so preview rooms and accounts never touch production ones.
@@ -34,11 +36,13 @@
         { "name": "MATCHMAKER", "class_name": "Matchmaker" },
         { "name": "CFO_ROOMS", "class_name": "CfoRoom" },
         { "name": "OCEAN", "class_name": "Ocean" },
-      { "name": "CAMP", "class_name": "Camp" }
+      { "name": "CAMP", "class_name": "Camp" },
+        { "name": "OFFICE", "class_name": "Office" }
       ]
     }
   },
   // Accounts that can use admin-only features in any game (comma-separated). See src/admin.js.
-  "vars": { "ADMIN_USERS": "Miles_Pitts" },
+  // CLASSIC_LOCK "on" keeps the CFO board game for accounts that have won CFO Career (src/router.js).
+  "vars": { "ADMIN_USERS": "Miles_Pitts", "CLASSIC_LOCK": "off" },
   "observability": { "enabled": true }
 }

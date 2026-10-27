@@ -24,6 +24,16 @@ export const GAMES = [
     roblox: 'Cfo',
   },
   {
+    id: 'career',
+    name: 'CFO Career',
+    blurb: 'Be the CFO of a startup: post its books, delegate as it grows, and decide how to fund it. Long, solo, and saved on your account.',
+    players: 1,
+    page: '/career',
+    // Played alone, so no rooms or quick match: the Office object (src/career/office.js) keeps
+    // each account's career. Not on Roblox yet.
+    solo: 'OFFICE',
+  },
+  {
     id: 'driftmail',
     name: 'Driftmail',
     blurb: 'Alone on an island, you write letters, throw them to sea, and read what strangers send back.',
