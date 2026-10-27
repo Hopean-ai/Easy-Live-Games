@@ -839,6 +839,16 @@ return function(hub: any)
 				end
 			end, { Parent = col, LayoutOrder = 3 }, if kit.canSpear then "primary" else "secondary")
 		end
+		if kit.net then
+			button(if kit.canNet then "Haul the net" else "Net hauled this tide", function()
+				if kit.canNet then
+					doing("net", nil, function(res)
+						local more = if res.found and #res.found > 0 then " and " .. Bridge.list(res.found) else ""
+						return "You haul in " .. tostring(res.caught) .. more .. "." .. (if res.snagged then " A bottle is tangled in the mesh, still on its way to someone." else "")
+					end)
+				end
+			end, { Parent = col, LayoutOrder = 3 }, if kit.canNet then "primary" else "secondary")
+		end
 		if (v.materials.traps or 0) > 0 and #kit.traps < kit.maxTraps then
 			button("Set a baited trap", function()
 				doing("trap", nil, "You bait a trap with a berry and wedge it between the rocks.")
@@ -859,7 +869,7 @@ return function(hub: any)
 				doing("snag", { keep = false }, "You untangle it and let it drift on its way.")
 			end, { Parent = r, LayoutOrder = 2 }, "secondary")
 		end
-		small("One spot is lively each tide, and the water shows which. Little dips are only nibbles: strike when the float goes right under. Then lean against each run, and give it line when it dives. Dawn, dusk, a rising tide and bait all help; make a hook, spear and traps at a workshop (Build tab).", { Parent = col, LayoutOrder = 5 })
+		small("One spot is lively each tide, and the water shows which. Little dips are only nibbles: strike when the float goes right under. Then lean against each run, and give it line when it dives. Dawn, dusk, a rising tide and bait all help; make a hook, spear, traps and a rope net at a workshop (Build tab).", { Parent = col, LayoutOrder = 5 })
 	end
 
 	local function renderJournal(col: Frame, v: any)

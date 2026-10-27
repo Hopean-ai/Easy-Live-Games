@@ -89,7 +89,7 @@ function Bridge.cleanWorld(arg: any): { [string]: any }?
 		return nil
 	end
 	local op = arg.op
-	if op == "state" or op == "water" or op == "spear" or op == "trap" or op == "traps" then
+	if op == "state" or op == "water" or op == "spear" or op == "net" or op == "trap" or op == "traps" then
 		return { op = op }
 	elseif op == "fish" then
 		return { op = op, bait = arg.bait == true }

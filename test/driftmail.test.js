@@ -588,6 +588,8 @@ test('a seal ring from the bench seals letters in wax, and a stamp marks them', 
   await o.visit('bob');
   assert.ok((await o.act('alice', { op: 'seal', glyph: 2, wax: 3 })).error, 'needs a bench');
   give(o, 'alice', (_, k) => { k.materials = { driftwood: 5, stones: 2, wax: 1 }; k.bones = 1; k.abilities = ['carving']; });
+  assert.match((await o.act('alice', { op: 'build', what: 'bench' })).error, /shack/, 'the bench goes in the shack');
+  give(o, 'alice', (_, k) => { k.builds = { shack: 3 }; });
   await o.act('alice', { op: 'build', what: 'bench' });
   const sealed = await o.act('alice', { op: 'seal', glyph: 2, wax: 3 });
   assert.deepEqual([sealed.seal.glyph, sealed.seal.wax, sealed.seal.ring], [2, 3, true]);
@@ -747,6 +749,39 @@ test('fishing extras: bait, a spear at low tide, traps, and snagging a bottle on
   const kept = await o.act('alice', { op: 'snag', keep: true });
   assert.equal(kept.kit.snag, null);
   assert.equal(kept.beach.length >= 1, true);
+});
+
+test('a rope net, hauled once a tide, brings fish and drifting things, and now and then a bottle at sea', async () => {
+  const o = ocean({ seed: 4 });
+  await o.visit('alice');
+  await o.visit('bob');
+  assert.match((await o.act('alice', { op: 'net' })).error, /net/);
+  give(o, 'alice', (_, k) => { k.materials = { rope: 4 }; k.builds = { workshop: 1 }; });
+  const woven = await o.act('alice', { op: 'make', what: 'net' });
+  assert.equal(woven.error, undefined);
+  assert.equal(woven.kit.net, true);
+  assert.equal(woven.materials.rope, undefined);
+  await o.throwBottle('bob', { text: 'Out here?', dir: 0, strength: 0.5 });
+  let fish = woven.kit.fish;
+  let found = 0;
+  let snags = 0;
+  for (let i = 0; i < 30; i++) {
+    const r = await o.act('alice', { op: 'net' });
+    assert.equal(r.error, undefined);
+    assert.ok(r.kit.fish > fish && r.kit.fish <= fish + 3, 'one to three fish');
+    fish = r.kit.fish;
+    found += r.found.length;
+    if (r.snagged) {
+      snags++;
+      assert.ok(r.kit.snag);
+      await o.act('alice', { op: 'snag', keep: false });
+    }
+    assert.equal(r.kit.canNet, false);
+    assert.ok((await o.act('alice', { op: 'net' })).error, 'once a tide');
+    later(o, TIDE_MS);
+  }
+  assert.ok(found > 30, 'drifting things come in with it');
+  assert.ok(snags > 0, 'and now and then a bottle still at sea');
 });
 
 test('the fog brings a bottle home changed, and a clue followed finds the hidden page', async () => {
