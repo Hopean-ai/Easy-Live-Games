@@ -829,6 +829,8 @@ export class Ocean extends DurableObject {
           : r.ability && !knows(r.ability) ? `Needs ${ABILITIES[r.ability].name}.`
             : r.once && kit[r.once] != null && kit[r.once] !== false ? 'Made.' : null,
         ok: stockHas(island, r.cost),
+        // Workshop work stays out of the Make list until there is a workshop to do it in.
+        hidden: r.needs === 'workshop' && !kit.builds.workshop,
       })),
       containers: Object.entries(CONTAINERS).map(([id, k]) => ({
         id, name: k.name, items: k.items, cost: k.cost, words: k.words ?? null,

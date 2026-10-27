@@ -296,6 +296,8 @@ test('a storm throws bottles much further than a calm sea', () => {
   };
   assert.ok(far(storm) > far(calm) * 1.3);
   // Wreckage leaves old bottles far more often.
+  const woods = Array.from({ length: 400 }, (_, i) => flotsam(seeded(i))).filter((w) => w === 'driftwood').length;
+  assert.ok(woods > 80, 'driftwood is the commonest thing on a calm tide');
   const olds = (event) => Array.from({ length: 400 }, (_, i) => flotsam(seeded(i), event)).filter((w) => w === 'old bottle').length;
   assert.ok(olds('wreck') > olds(null) * 3);
 });
@@ -491,7 +493,10 @@ test('recipes need their building and ability, and turn materials into supplies'
   await o.visit('a');
   give(o, 'a', (_, k) => { k.materials = { reeds: 4, rope: 2, clay: 6, sand: 4, stones: 4, driftwood: 4, bark: 1 }; });
   assert.match((await o.act('a', { op: 'make', what: 'cork' })).error, /workshop/);
+  const hidden = (await o.visit('a')).recipes.filter((r) => r.hidden).map((r) => r.id);
+  assert.ok(hidden.includes('cork') && hidden.includes('hook') && !hidden.includes('paper'), 'workshop work is hidden until there is one');
   give(o, 'a', (_, k) => { k.builds = { workshop: 1 }; });
+  assert.ok((await o.visit('a')).recipes.every((r) => !r.hidden), 'and shows once it is built');
   assert.ok((await o.act('a', { op: 'make', what: 'paper' })).error, 'needs a drying rack');
   await o.act('a', { op: 'build', what: 'rack' });
   const paper = await o.act('a', { op: 'make', what: 'paper' });

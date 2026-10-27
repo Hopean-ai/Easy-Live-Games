@@ -367,7 +367,26 @@ return function(hub: any)
 
 	local function renderWrite(col: Frame, v: any)
 		if ui.replyTo then
-			small("Answering the letter from your " .. ui.replyTo.shore .. " beach. Throw back the way it came and it may find its way home.", { Parent = col, LayoutOrder = 1 })
+			-- Their letter stays in view above yours while you write back, in their own hand.
+			local l = ui.replyTo
+			local top = column({ Parent = col, LayoutOrder = 1 }, 6)
+			small("Answering the letter from your " .. l.shore .. " beach. Throw back the way it came and it may find its way home.", { Parent = top, LayoutOrder = 1 })
+			local theirs = make("ScrollingFrame", {
+				Name = "ReplyLetter", BackgroundColor3 = PAPER, BackgroundTransparency = 0.08, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 130),
+				CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 6, Parent = top, LayoutOrder = 2,
+			}, { corner(4), pad(10) })
+			local inner = column({ Parent = theirs }, 4)
+			local lfont, link = Bridge.hand(l.hand)
+			label(text(v, l.text) or l.body or "", { Font = (Enum.Font :: any)[lfont], TextSize = 17, TextColor3 = Color3.fromHex(link), Parent = inner, LayoutOrder = 1 })
+			local name = text(v, l.name)
+			if name then
+				label("— " .. name, { Font = (Enum.Font :: any)[lfont], TextSize = 16, TextColor3 = Color3.fromHex(link), TextXAlignment = Enum.TextXAlignment.Right, Parent = inner, LayoutOrder = 2 })
+			end
+			local added = l.added and text(v, l.added.text)
+			if added then
+				local afont, aink = Bridge.hand(l.added.hand)
+				label(added, { Font = (Enum.Font :: any)[afont], TextSize = 16, TextColor3 = Color3.fromHex(aink), Parent = inner, LayoutOrder = 3 })
+			end
 		end
 		local font, ink = Bridge.hand(v.hand)
 		local box = textBox({
@@ -586,7 +605,7 @@ return function(hub: any)
 		heading("Make", { TextSize = 14, Parent = col, LayoutOrder = 100 })
 		local order = 100
 		for _, r in v.recipes do
-			if r.blocked == "Made." then
+			if r.blocked == "Made." or r.hidden then
 				continue
 			end
 			order += 2

@@ -144,12 +144,13 @@ export function placeIsland(n) {
   return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
 }
 
-// What the tide leaves on the sand: mostly building materials, sometimes writing supplies, now and
-// then something strange. Weights out of 100; null is nothing. Wreckage and storms bring far more,
-// a comet brings old bottles, and a great ebb uncovers what the sea floor was hiding.
+// What the tide leaves on the sand: mostly building materials (driftwood most of all, since nearly
+// everything is built from it), sometimes writing supplies, now and then something strange. Weights
+// out of 100; null is nothing. Wreckage and storms bring far more, a comet brings old bottles, and a
+// great ebb uncovers what the sea floor was hiding.
 const FLOTSAM = {
   calm: [
-    [18, null], [13, 'driftwood'], [7, 'rope'], [5, 'clay'], [6, 'sand'], [7, 'stones'], [8, 'leaves'], [3, 'reeds'],
+    [5, null], [26, 'driftwood'], [7, 'rope'], [5, 'clay'], [6, 'sand'], [7, 'stones'], [8, 'leaves'], [3, 'reeds'],
     [8, 'bottles'], [6, 'corks'], [5, 'paper'], [3, 'ink'], [5, 'curio'], [3, 'seeds'], [2, 'old bottle'], [1, 'strange'],
   ],
   wreck: [
