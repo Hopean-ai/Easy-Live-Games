@@ -81,7 +81,7 @@
         <section class="dm-panel">
           <h2>Fishing</h2>
           <ul id="catch" class="dm-supplies"></ul>
-          <label class="dm-check small"><input type="checkbox" id="bait"> Bait the hook with a berry</label>
+          <label class="dm-check small"><input type="checkbox" id="bait"> Bait the hook (sea kale if you have it, else a berry)</label>
           <p id="casts-left" class="small"></p>
           <ul id="spots" class="dm-list dm-spots"></ul>
           <div id="line" class="dm-line" hidden>
@@ -167,7 +167,7 @@
       <p id="reply-note" class="small" hidden></p>
       <div id="reply-letter" class="dm-paper dm-letter dm-reply-letter" hidden></div>
       <textarea id="letter" class="dm-paper" maxlength="600" rows="9" placeholder="Write to whoever finds this…" required></textarea>
-      <p class="small"><span id="count">0</span> / 600</p>
+      <p class="small"><span id="count">0</span> / <span id="max-count">600</span></p>
       <label class="dm-check"><input type="checkbox" id="signed"> Sign it with my name</label>
       <label>Send it in
         <select id="container"></select>
@@ -176,7 +176,10 @@
       <label class="dm-check" id="glue-row" hidden><input type="checkbox" id="glue"> Seal it with fish glue instead of a cork</label>
       <label class="dm-check" id="wax-row" hidden><input type="checkbox" id="wax"> Seal it in wax with your ring</label>
       <label class="dm-check" id="stamp-use-row" hidden><input type="checkbox" id="stamp"> Press your stamp on it</label>
-      <label class="dm-check" id="shimmer-row" hidden><input type="checkbox" id="shimmer"> Write in shimmering ink</label>
+      <div id="ink-rows" class="dm-ink-rows">
+        <label class="dm-check" id="shimmer-row" hidden><input type="checkbox" id="shimmer"> Write in shimmering ink</label>
+        <label class="dm-check" id="blue-row" hidden><input type="checkbox" id="blue"> Write in blue ink</label>
+      </div>
       <label id="forge-row" hidden>Write in someone else's hand
         <select id="forge"></select>
       </label>
