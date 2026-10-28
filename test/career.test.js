@@ -257,8 +257,9 @@ test('the router asks guests to sign in and passes players to the office', async
   };
   const guest = await handleRequest(new Request('http://x/api/career/state'), env);
   assert.equal(guest.status, 401);
+  assert.equal((await guest.json()).classicOpen, true, 'with the lock off, the Classic mode is open to guests');
   const headers = { Cookie: 'sid=good', 'Content-Type': 'application/json' };
-  await handleRequest(new Request('http://x/api/career/state', { headers }), env);
+  assert.equal((await (await handleRequest(new Request('http://x/api/career/state', { headers }), env)).json()).classicOpen, true);
   await handleRequest(new Request('http://x/api/career/act', { method: 'POST', headers, body: JSON.stringify({ type: 'endWeek', turn: 5 }) }), env);
   assert.deepEqual(calls, [['career', 'state', 'Miles'], ['career', 'act', 'Miles', { type: 'endWeek', turn: 5 }]]);
 });

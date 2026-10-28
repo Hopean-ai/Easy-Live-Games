@@ -135,6 +135,9 @@ test('game rooms route to that game\'s Durable Objects', async () => {
 
 test('the games list names Pong and where to play it', async () => {
   const { games } = await (await worker.fetch(new Request('http://x/api/games'), env())).json();
-  assert.deepEqual(games.map((g) => [g.id, g.page]), [['pong', '/pong'], ['cfo', '/cfo'], ['career', '/career'], ['driftmail', '/driftmail'], ['legio', '/legio']]);
+  assert.deepEqual(games.map((g) => [g.id, g.page]), [['pong', '/pong'], ['career', '/career'], ['cfo', '/cfo'], ['driftmail', '/driftmail'], ['legio', '/legio']]);
   assert.equal(games[0].rooms, undefined);
+  // Classic CFO is a mode of CFO Career: listed under it, not on its own.
+  assert.equal(games.find((g) => g.id === 'cfo').within, 'career');
+  assert.deepEqual(games.find((g) => g.id === 'career').modes, [{ id: 'cfo', name: 'Classic', page: '/cfo', roblox: true }]);
 });

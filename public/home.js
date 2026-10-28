@@ -32,7 +32,7 @@ function render() {
   $('who-guest').hidden = Boolean(account);
   $('who-admin').hidden = !(account && admin);
   $('logout').textContent = account ? 'Log out' : 'Sign in instead';
-  $('games').replaceChildren(...games.map(gameCard));
+  $('games').replaceChildren(...games.filter((g) => !g.within).map(gameCard));
   if (account) loadRobloxLink();
   else $('roblox').hidden = true;
 }
@@ -122,6 +122,13 @@ function gameCard(game) {
     const badge = document.createElement('span');
     badge.className = 'badge';
     badge.textContent = 'Also on Roblox';
+    players.append(badge);
+  }
+  for (const mode of game.modes ?? []) {
+    if (!mode.roblox) continue;
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = `${mode.name} also on Roblox`;
     players.append(badge);
   }
   a.append(title, blurb, players);

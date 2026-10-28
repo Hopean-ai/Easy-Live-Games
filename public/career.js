@@ -13,6 +13,10 @@ const patterns = {};
 
 async function init() {
   const res = await fetch('/api/career/state');
+  const body = await res.clone().json().catch(() => ({}));
+  // Classic, the board game, is the other mode; it may be locked until Career is won.
+  $('classic-link').hidden = body.classicOpen === false;
+  $('classic-locked').hidden = body.classicOpen !== false;
   if (res.status === 401) {
     $('signin').hidden = false;
     $('signin-link').href = `/?next=${encodeURIComponent('/career')}`;
