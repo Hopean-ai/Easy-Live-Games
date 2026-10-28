@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CFO Career · Live Multiplayer Games</title>
+  <title>CFO · Live Multiplayer Games</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/career.css">
 </head>
@@ -11,7 +11,12 @@
   <main>
     <header class="cc-head">
       <p class="small"><a href="/">All games</a></p>
-      <h1>CFO Career</h1>
+      <h1>CFO</h1>
+      <nav class="cc-modes" aria-label="Game mode">
+        <span class="cc-mode now" aria-current="page"><strong>Career</strong><span>Solo, from startup to public company</span></span>
+        <a class="cc-mode" id="classic-link" href="/cfo"><strong>Classic</strong><span>The board game, 2 to 6 players</span></a>
+        <span class="cc-mode locked" id="classic-locked" hidden><strong>Classic</strong><span>Unlocks when you win Career</span></span>
+      </nav>
       <p class="sub" id="sub">From startup to public company, as its CFO.</p>
     </header>
 

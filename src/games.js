@@ -13,6 +13,16 @@ export const GAMES = [
     rooms: 'ROOMS',
   },
   {
+    id: 'career',
+    name: 'CFO',
+    blurb: 'Be the CFO of a startup: post its books, delegate as it grows, and decide how to fund it. Career is solo and saved on your account; Classic is the 2–6 player board game.',
+    players: '1–6',
+    page: '/career',
+    // Played alone, so no rooms or quick match: the Office object (src/career/office.js) keeps
+    // each account's career. Not on Roblox yet.
+    solo: 'OFFICE',
+  },
+  {
     id: 'cfo',
     name: 'CFO',
     blurb: 'An accounting board game: buy land, build PP&E, keep real books, and get rich personally.',
@@ -22,16 +32,10 @@ export const GAMES = [
     page: '/cfo',
     rooms: 'CFO_ROOMS',
     roblox: 'Cfo',
-  },
-  {
-    id: 'career',
-    name: 'CFO Career',
-    blurb: 'Be the CFO of a startup: post its books, delegate as it grows, and decide how to fund it. Long, solo, and saved on your account.',
-    players: 1,
-    page: '/career',
-    // Played alone, so no rooms or quick match: the Office object (src/career/office.js) keeps
-    // each account's career. Not on Roblox yet.
-    solo: 'OFFICE',
+    // Miles: Classic is a mode of CFO Career, picked from the Career page, not a game of its own
+    // on the picker. Its rooms, quick match and Roblox play are unchanged.
+    within: 'career',
+    mode: 'Classic',
   },
   {
     id: 'driftmail',
@@ -68,9 +72,14 @@ export function tableSize(game) {
   return { min, max: game.maxPlayers ?? min };
 }
 
-// What the browser needs to draw the selection page.
+// What the browser needs to draw the selection page. A game played as a mode of another (`within`)
+// is listed under that game rather than on its own.
 export function publicGames() {
-  return GAMES.map(({ id, name, blurb, players, page, roblox }) => ({ id, name, blurb, players, page, roblox: Boolean(roblox) }));
+  return GAMES.map(({ id, name, blurb, players, page, roblox, within }) => ({
+    id, name, blurb, players, page, roblox: Boolean(roblox),
+    ...(within ? { within } : {}),
+    modes: GAMES.filter((g) => g.within === id).map((g) => ({ id: g.id, name: g.mode, page: g.page, roblox: Boolean(g.roblox) })),
+  }));
 }
 
 // What the Roblox hub lists in its game picker: the games it can relay, in the site's order.

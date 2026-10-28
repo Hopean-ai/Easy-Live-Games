@@ -95,3 +95,10 @@ button.cc-choice .hint { font-size: 0.8rem; color: var(--muted); font-weight: 40
 .career #error { margin: 6px 0; min-height: 0; }
 .career #error:empty { display: none; }
 .cc-bar { margin-bottom: 16px; }
+.cc-modes { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.cc-mode { display: grid; gap: 2px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); text-decoration: none; min-width: 200px; }
+.cc-mode span { font-size: 0.8rem; color: var(--muted); }
+.cc-mode.now { border-color: var(--accent); }
+.cc-mode.now strong { color: var(--accent); }
+a.cc-mode:hover, a.cc-mode:focus-visible { border-color: var(--accent); }
+.cc-mode.locked { opacity: 0.55; }

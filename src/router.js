@@ -85,9 +85,11 @@ export async function handleRequest(request, env) {
   const career = path.match(/^\/api\/career\/(state|begin|act)$/);
   if (career) {
     const name = await accountName(request, env);
-    if (!name) return Response.json({ error: 'Sign in to play CFO Career.' }, { status: 401 });
+    // Whether Classic, the board game, is open to this player: the Career page offers it as a mode.
+    const classicOpen = !(await classicLocked(env, name));
+    if (!name) return Response.json({ error: 'Sign in to play CFO Career.', classicOpen }, { status: 401 });
     const office = officeStub(env);
-    if (career[1] === 'state') return Response.json(await office.state(name));
+    if (career[1] === 'state') return Response.json({ ...(await office.state(name)), classicOpen });
     if (request.method !== 'POST') return new Response('Use POST', { status: 405 });
     const body = await readJson(request, MAX_LETTER_BODY);
     if (!body) return Response.json({ error: 'Bad request.' }, { status: 400 });
