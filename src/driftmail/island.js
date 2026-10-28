@@ -34,7 +34,7 @@ export const CROPS = {
   reeds: { name: 'Reeds', seed: 'reed shoots', tides: 2, yields: { reeds: 3 }, words: 'Reeds dry into paper on a drying rack.' },
   oak: { name: 'Cork oak', seed: 'an acorn', tides: 6, yields: { bark: 3 }, words: 'Bark cuts into corks.' },
   flowers: { name: 'Bee flowers', seed: 'flower seeds', tides: 4, yields: { wax: 2 }, words: 'The bees that visit leave wax for seals.' },
-  flax: { name: 'Flax', seed: 'flax seeds', tides: 3, yields: { flax: 3 }, words: 'Twist the stems into rope at the workshop.' },
+  flax: { name: 'Flax', seed: 'flax seeds', tides: 3, yields: { flax: 3 }, words: 'Twist the stems into rope by hand.' },
   indigo: { name: 'Indigo', seed: 'indigo seeds', tides: 4, yields: { indigo: 2 }, words: 'Press the leaves into blue ink.' },
   gourd: { name: 'Gourd vine', seed: 'gourd seeds', tides: 5, yields: { gourds: 2 }, words: 'A dried gourd, corked, floats further than a bottle and holds two things.' },
   palm: { name: 'Coconut palm', seed: 'a sprouting coconut', tides: 8, yields: { leaves: 4, coconuts: 1 }, words: 'Palm leaves for roofs, and a coconut to scratch a short note on and set adrift.' },
@@ -184,7 +184,8 @@ export const RECIPES = {
   spear: { needs: 'workshop', name: 'Make a spear', cost: { driftwood: 1, bones: 2 }, once: 'spear' },
   trap: { needs: 'workshop', name: 'Weave a trap', cost: { driftwood: 2, rope: 1 }, gives: { traps: 1 } },
   net: { needs: 'workshop', name: 'Weave a net', cost: { rope: 4 }, once: 'net' },
-  rope: { needs: 'workshop', name: 'Twist rope', cost: { flax: 2 }, gives: { rope: 1 } },
+  // Flax twists into rope by hand, so rope (which everything early needs) never waits on a building.
+  rope: { name: 'Twist flax into rope', cost: { flax: 2 }, gives: { rope: 1 } },
   blue: { needs: 'press', name: 'Press blue ink', cost: { indigo: 2 }, gives: { blue: 1 } },
   stamp: { name: 'Carve a stamp', needs: 'bench', ability: 'carving', cost: { driftwood: 1, bones: 1 }, once: 'stamp' },
 };
