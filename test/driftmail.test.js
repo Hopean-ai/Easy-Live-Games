@@ -963,8 +963,9 @@ test('new seeds: flax twists into rope, indigo into blue ink, sea kale needs no 
   assert.equal(cast.error, undefined);
   assert.equal(cast.materials.kale, 2);
   assert.equal(cast.materials.berries, 2);
-  give(o, 'a', (_, k) => { k.materials = { flax: 2, indigo: 2 }; k.builds = { workshop: 1, press: 1 }; });
-  assert.equal((await o.act('a', { op: 'make', what: 'rope' })).materials.rope, 1);
+  give(o, 'a', (_, k) => { k.materials = { flax: 2, indigo: 2 }; k.builds = { press: 1 }; });
+  assert.ok(!(await o.visit('a')).recipes.find((r) => r.id === 'rope').hidden, 'rope is on the Make list from the start');
+  assert.equal((await o.act('a', { op: 'make', what: 'rope' })).materials.rope, 1, 'twisted by hand, no workshop needed');
   assert.equal((await o.act('a', { op: 'make', what: 'blue' })).materials.blue, 1);
 });
 
